@@ -38,7 +38,7 @@ data GameState
   | FinishedGame PlayerKey
   | IdleGame
   | DoTurn PlayerKey GameState
-  | GamePhase PlayerKey Phase GameState
+  | GamePhase Phase GameState
   | WaitOnPlayer PlayerKey GameState
   deriving stock Show
 
@@ -46,6 +46,7 @@ data Game = Game
   { player1 :: Player
   , player2 :: Player
   , firstPlayer :: PlayerKey
+  , currentPlayer :: PlayerKey
   , modifiers :: Map (Ref Target) [ModifierDetails]
   , state :: GameState
   }
@@ -59,7 +60,12 @@ instance HasField "over" Game Bool where
 data Phase = KingdomPhase | QuestPhase | CapitalPhase | BattlefieldPhase
   deriving stock (Show, Eq)
 
-data PlayerState = IdlePlayer | Eliminated | Draw Drawing PlayerState | PerformPhase Phase PlayerState | ShuffleDeck PlayerState
+data PlayerState
+  = IdlePlayer
+  | Eliminated
+  | Draw Drawing PlayerState
+  | PerformPhase Phase PlayerState
+  | ShuffleDeck PlayerState
   deriving stock Show
 
 data Player = Player
@@ -797,55 +803,67 @@ gameMain = do
 class Tick a where
   tick :: a -> GameT a
 
+overPlayer :: PlayerKey -> (Player -> Player) -> Game -> Game
+overPlayer k f g =
+  case k of
+    Player1 -> g {player1 = f g.player1}
+    Player2 -> g {player2 = f g.player2}
+
+withPlayer :: PlayerKey -> (Player -> a) -> Game -> a
+withPlayer k f g =
+  case k of
+    Player1 -> f g.player1
+    Player2 -> f g.player2
+
+class HasState a where
+  type StateOf a
+  updateState :: (StateOf a -> StateOf a) -> a -> a
+
+instance HasState Player where
+  type StateOf Player = PlayerState
+  updateState f p = p {state = f p.state}
+
 instance Tick Game where
   tick g = case g.state of
     SetupGame nextState -> do
       firstPlayer <- sample2 Player1 Player2
-      pure $ g
-        { firstPlayer
-        , state = WaitOnPlayer Player1 (WaitOnPlayer Player2 (DoTurn firstPlayer nextState))
-        , player1 = g.player1 {state = ShuffleDeck (Draw (Drawing StartingHand) g.player1.state) }
-        , player2 = g.player2 {state = ShuffleDeck (Draw (Drawing StartingHand) g.player2.state) }
-        }
+      let player1 = withPlayer Player1 (updateState (ShuffleDeck . Draw (Drawing StartingHand))) g
+      let player2 = withPlayer Player2 (updateState (ShuffleDeck . Draw (Drawing StartingHand))) g
+      pure
+        $ g
+          { firstPlayer
+          , state = WaitOnPlayer Player1 (WaitOnPlayer Player2 (DoTurn firstPlayer nextState))
+          , player1
+          , player2
+          }
     IdleGame -> do
-      p1 <- tick g.player1
-      p2 <- tick g.player2
-      pure $ g {player1 = p1, player2 = p2}
+      player1 <- tick g.player1
+      player2 <- tick g.player2
+      pure $ g {player1, player2}
     DoTurn currentPlayer nextState -> do
       let nextPlayer = if currentPlayer == Player1 then Player2 else Player1
       pure
         $ g
           { state =
-              GamePhase
-                currentPlayer
-                KingdomPhase
-                ( GamePhase
-                    currentPlayer
-                    QuestPhase
-                    ( GamePhase
-                        currentPlayer
-                        CapitalPhase
-                        (GamePhase currentPlayer BattlefieldPhase (DoTurn nextPlayer nextState))
-                    )
-                )
+              GamePhase KingdomPhase
+                $ GamePhase QuestPhase
+                $ GamePhase CapitalPhase
+                $ GamePhase BattlefieldPhase
+                $ DoTurn nextPlayer nextState
           }
-    GamePhase currentPlayer KingdomPhase nextState -> do
-      liftIO $ putStrLn $ "Begin Kingdom Phase for: " <> show currentPlayer
-      let
-        update g =
-          case currentPlayer of
-            Player1 -> g {player1 = g.player1 {state = PerformPhase KingdomPhase g.player1.state}}
-            Player2 -> g {player2 = g.player2 {state = PerformPhase KingdomPhase g.player2.state}}
-      pure $ update $ g {state = WaitOnPlayer currentPlayer nextState}
-    GamePhase currentPlayer QuestPhase nextState -> do
-      liftIO $ putStrLn $ "Begin Quest Phase for: " <> show currentPlayer
-      pure $ g {state = WaitOnPlayer currentPlayer nextState}
-    GamePhase currentPlayer CapitalPhase nextState -> do
-      liftIO $ putStrLn $ "Begin Capital Phase for: " <> show currentPlayer
-      pure $ g {state = WaitOnPlayer currentPlayer nextState}
-    GamePhase currentPlayer BattlefieldPhase _nextState -> do
-      liftIO $ putStrLn $ "Begin Battlefield Phase for: " <> show currentPlayer
-      pure $ g {state = FinishedGame currentPlayer}
+    GamePhase KingdomPhase nextState -> do
+      liftIO $ putStrLn $ "Begin Kingdom Phase for: " <> show g.currentPlayer
+      let update = overPlayer g.currentPlayer (updateState $ PerformPhase KingdomPhase)
+      pure $ update $ g {state = WaitOnPlayer g.currentPlayer nextState}
+    GamePhase QuestPhase nextState -> do
+      liftIO $ putStrLn $ "Begin Quest Phase for: " <> show g.currentPlayer
+      pure $ g {state = WaitOnPlayer g.currentPlayer nextState}
+    GamePhase CapitalPhase nextState -> do
+      liftIO $ putStrLn $ "Begin Capital Phase for: " <> show g.currentPlayer
+      pure $ g {state = WaitOnPlayer g.currentPlayer nextState}
+    GamePhase BattlefieldPhase _nextState -> do
+      liftIO $ putStrLn $ "Begin Battlefield Phase for: " <> show g.currentPlayer
+      pure $ g {state = FinishedGame g.currentPlayer}
     WaitOnPlayer currentPlayer nextState -> do
       case currentPlayer of
         Player1 | g.player1.idle -> pure $ g {state = nextState}
@@ -898,7 +916,7 @@ newGame :: [CardCode] -> [CardCode] -> Either DeckLoadError Game
 newGame deck1 deck2 = do
   player1 <- newPlayer Player1 deck1
   player2 <- newPlayer Player2 deck2
-  pure $ Game player1 player2 Player1 mempty (SetupGame IdleGame)
+  pure $ Game player1 player2 Player1 Player1 mempty (SetupGame IdleGame)
 
 main :: IO ()
 main = do
