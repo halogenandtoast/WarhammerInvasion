@@ -44,9 +44,12 @@ library
       UndecidableInstances
       AllowAmbiguousTypes
       TypeApplications
+      DerivingVia
+      ImplicitParams
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      base >=4.7 && <5
+      MonadRandom
+    , base >=4.7 && <5
     , containers
     , mtl
     , random-shuffle
@@ -71,9 +74,12 @@ executable WarhammerInvasion-exe
       UndecidableInstances
       AllowAmbiguousTypes
       TypeApplications
+      DerivingVia
+      ImplicitParams
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      WarhammerInvasion
+      MonadRandom
+    , WarhammerInvasion
     , base >=4.7 && <5
     , containers
     , mtl
@@ -100,9 +106,12 @@ test-suite WarhammerInvasion-test
       UndecidableInstances
       AllowAmbiguousTypes
       TypeApplications
+      DerivingVia
+      ImplicitParams
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      WarhammerInvasion
+      MonadRandom
+    , WarhammerInvasion
     , base >=4.7 && <5
     , containers
     , mtl

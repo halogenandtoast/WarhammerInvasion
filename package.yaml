@@ -18,6 +18,8 @@ default-extensions:
 - UndecidableInstances
 - AllowAmbiguousTypes
 - TypeApplications
+- DerivingVia
+- ImplicitParams
 
 extra-source-files:
 - README.md
@@ -37,6 +39,7 @@ dependencies:
 - mtl
 - containers
 - random-shuffle
+- MonadRandom
 
 ghc-options:
 - -Wall

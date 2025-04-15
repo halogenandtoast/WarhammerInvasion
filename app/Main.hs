@@ -4,10 +4,14 @@
 module Main (main) where
 
 import Control.Monad
+import Control.Monad.Random
 import Control.Monad.State.Strict
 import Data.Foldable
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe
 import Data.Proxy
 import Data.String (IsString)
 import Data.Traversable
@@ -15,41 +19,88 @@ import GHC.Records
 import Queue
 import System.Random.Shuffle
 
+sample :: MonadRandom m => NonEmpty a -> m a
+sample xs = do
+  idx <- getRandomR (0, NE.length xs - 1)
+  pure $ xs NE.!! idx
+
+sample2 :: MonadRandom m => a -> a -> m a
+sample2 x y = sample (x :| [y])
+
 newtype CardCode = CardCode String
   deriving newtype (Eq, Ord, Show, IsString)
 
 class Monad m => HasGame m where
   getGame :: m Game
 
+data GameState
+  = SetupGame GameState
+  | FinishedGame PlayerKey
+  | IdleGame
+  | DoTurn PlayerKey GameState
+  | GamePhase PlayerKey Phase GameState
+  | WaitOnPlayer PlayerKey GameState
+  deriving stock Show
+
 data Game = Game
   { player1 :: Player
   , player2 :: Player
+  , firstPlayer :: PlayerKey
+  , modifiers :: Map (Ref Target) [ModifierDetails]
+  , state :: GameState
   }
+  deriving stock Show
+
+instance HasField "over" Game Bool where
+  getField g = case g.state of
+    FinishedGame _ -> True
+    _ -> False
+
+data Phase = KingdomPhase | QuestPhase | CapitalPhase | BattlefieldPhase
+  deriving stock (Show, Eq)
+
+data PlayerState = IdlePlayer | Eliminated | Draw Drawing PlayerState | PerformPhase Phase PlayerState | ShuffleDeck PlayerState
   deriving stock Show
 
 data Player = Player
   { key :: PlayerKey
-  , battlefield :: Battlefield
+  , eliminated :: Bool
+  , state :: PlayerState
+  , capital :: Capital
+  , hand :: [SomeCardDef]
   , deck :: [SomeCardDef]
   }
   deriving stock Show
 
-data Env = Env
-  { queue :: Queue Message
-  , game :: Game
+instance HasField "battlefield" Player Battlefield where
+  getField p = p.capital.battlefield
+
+instance HasField "idle" Player Bool where
+  getField p = case p.state of
+    IdlePlayer -> True
+    _ -> False
+
+newtype Capital = Capital
+  { battlefield :: Battlefield
   }
+  deriving stock Show
 
-instance HasQueue (StateT Env IO) where
-  type QueueMessage (StateT Env IO) = Message
-  getQueue = gets (.queue)
+instance HasField "sections" Capital [Section] where
+  getField (Capital bf) = [BattlefieldSection bf]
 
-newtype GameT a = GameT (StateT Env IO a)
-  deriving newtype (HasQueue, Functor, Applicative, Monad, MonadIO, MonadState Env)
+data Section where
+  BattlefieldSection :: Battlefield -> Section
+
+instance HasField "burning" Section Bool where
+  getField (BattlefieldSection bf) = bf.burning
+
+newtype GameT a = GameT (StateT Game IO a)
+  deriving newtype (Functor, Applicative, Monad, MonadIO, MonadRandom, MonadState Game)
 
 data Number = Fixed Int | Variable
   deriving stock Show
 
-data CardKind = Unit | Support | Quest | Tactic
+data CardKind = Unit | Support | Quest | Tactic | DraftFormat
   deriving stock Show
 
 data Trait
@@ -85,7 +136,7 @@ instance Show SomeCardDef where
 
 data CardDef (k :: CardKind) = CardDef
   { code :: CardCode
-  , name :: String
+  , title :: String
   , kind :: CardKind
   , races :: [Race]
   , cost :: Number
@@ -107,16 +158,17 @@ newtype CardBuilder k a = CardBuilder (State (CardDef k) a)
   deriving newtype (Functor, Applicative, Monad, MonadState (CardDef k))
 
 unit :: CardCode -> String -> CardBuilder Unit () -> CardDef Unit
-unit code name builder = runCardBuilder builder (CardDef code name Unit [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
+unit code title builder = runCardBuilder builder (CardDef code title Unit [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
 
 support :: CardCode -> String -> CardBuilder Support a -> CardDef Support
-support code name builder = runCardBuilder builder (CardDef code name Support [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
+support code title builder =
+  runCardBuilder builder (CardDef code title Support [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
 
 quest :: CardCode -> String -> CardBuilder Quest a -> CardDef Quest
-quest code name builder = runCardBuilder builder (CardDef code name Quest [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
+quest code title builder = runCardBuilder builder (CardDef code title Quest [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
 
 tactic :: CardCode -> String -> CardBuilder Tactic a -> CardDef Tactic
-tactic code name builder = runCardBuilder builder (CardDef code name Tactic [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
+tactic code title builder = runCardBuilder builder (CardDef code title Tactic [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
 
 runCardBuilder :: CardBuilder k a -> CardDef k -> CardDef k
 runCardBuilder (CardBuilder inner) = execState inner
@@ -164,14 +216,42 @@ scout :: CardBuilder Unit ()
 scout = keyword Scout
 
 newtype ModifierDetails = GainPower Int
+  deriving stock Show
 
-data ConstantAbility = Modified (Ref Target) ModifierDetails
+data ModifierScope = UntilEndOfTurn | ConstantScope
+
+data Modifier = Modifier
+  { details :: ModifierDetails
+  , scope :: ModifierScope
+  }
+
+data ConstantAbility = Modified (Ref Target) Modifier
 
 instance HasGame m => HasGame (StateT s m) where
   getGame = lift getGame
 
 newtype ConstantAbilityBuilder m a = ConstantAbilityBuilder (StateT [ConstantAbility] m a)
   deriving newtype (Functor, Applicative, Monad, MonadIO, MonadState [ConstantAbility], HasGame)
+
+data Action = Action
+  { source :: Ref Source
+  , actionCost :: Cost
+  , targets :: Maybe UnitMatcher
+  , withTarget :: forall m. HasGame m => UnitDetails -> ConstantAbilityBuilder m ()
+  }
+
+actionCost :: Cost -> ActionBuilder ()
+actionCost c = modify \action -> action {actionCost = c}
+
+targets :: UnitMatcher -> ActionBuilder ()
+targets t = modify \action -> action {targets = Just t}
+
+withTarget
+  :: (forall m. HasGame m => UnitDetails -> ConstantAbilityBuilder m ()) -> ActionBuilder ()
+withTarget f = modify \action -> action {withTarget = f}
+
+newtype ActionsBuilder a = ActionsBuilder (State [Action] a)
+  deriving newtype (Functor, Applicative, Monad, MonadState [Action])
 
 getPlayer :: HasGame m => PlayerKey -> m Player
 getPlayer pkey = do
@@ -185,20 +265,44 @@ getBattleField pkey = do
   p <- getPlayer pkey
   pure $ p.battlefield
 
-battlefield
-  :: (HasGame m, HasField "controller" a PlayerKey)
-  => a -> (Battlefield -> ConstantAbilityBuilder m ()) -> ConstantAbilityBuilder m ()
+getCapital :: HasGame m => PlayerKey -> m Capital
+getCapital pkey = do
+  p <- getPlayer pkey
+  pure $ p.capital
+
+battlefield :: (HasGame m, HasField "controller" a PlayerKey) => a -> (Battlefield -> m ()) -> m ()
 battlefield a f = getBattleField a.controller >>= f
+
+capital :: HasGame m => PlayerKey -> (Capital -> m ()) -> m ()
+capital pkey f = getCapital pkey >>= f
+
+newtype ActionBuilder a = ActionBuilder (State Action a)
+  deriving newtype (Functor, Applicative, Monad, MonadState Action)
+
+runActionBuilder :: Reference a => a -> ActionBuilder () -> ActionsBuilder Action
+runActionBuilder source (ActionBuilder inner) = pure $ execState inner (Action (toRef source) NoCost Nothing (const (pure ())))
+
+questAction :: Reference a => a -> ActionBuilder () -> ActionsBuilder ()
+questAction a f = do
+  action <- runActionBuilder a f
+  modify (<> [action])
 
 class SomeKindOfCard (KindOfCard a) => Card a where
   type KindOfCard a :: CardKind
   asName :: proxy a -> String
   asCardCode :: proxy a -> CardCode
   asCardDef :: proxy a -> CardDef (KindOfCard a)
-  constantAbilities :: HasGame m => a -> ConstantAbilityBuilder m ()
-  constantAbilities _ = pure ()
+  constant :: HasGame m => a -> ConstantAbilityBuilder m ()
+  constant _ = pure ()
+  actions :: a -> ActionsBuilder ()
+  actions _ = pure ()
 
-newtype Battlefield = Battlefield {developments :: Int}
+data Cost = Resources Number | NoCost
+
+newtype QuestZone = QuestZone {developments :: Int}
+  deriving stock Show
+
+data Battlefield = Battlefield {developments :: Int, burning :: Bool}
   deriving stock Show
 
 unit' :: forall a proxy. Card a => CardBuilder Unit () -> proxy a -> CardDef Unit
@@ -258,30 +362,43 @@ data Zone = BattlefieldZone
   deriving stock Show
 
 newtype UnitKey = UnitKey Int
-  deriving stock (Show, Eq)
+  deriving stock (Show, Eq, Ord)
 
-data RefKind = Target
+data RefKind = Target | Source
 
 newtype Ref (k :: RefKind) = UnitRef UnitKey
+  deriving stock (Show, Eq, Ord)
 
-class Targetable a where
-  toTarget :: a -> Ref Target
+class Reference a where
+  toRef :: a -> Ref k
 
-modified :: (Targetable a, HasGame m) => a -> ModifierDetails -> ConstantAbilityBuilder m ()
-modified a details = modify (<> [Modified (toTarget a) details])
+data UnitMatcher = AnyUnit
 
-gainPower :: (Targetable a, HasGame m) => a -> Int -> ConstantAbilityBuilder m ()
+modified
+  :: (Reference a, HasGame m, ?scope :: ModifierScope)
+  => a -> ModifierDetails -> ConstantAbilityBuilder m ()
+modified a details = modify (<> [Modified (toRef a) (Modifier details ?scope)])
+
+gainPower
+  :: (Reference a, HasGame m, ?scope :: ModifierScope) => a -> Int -> ConstantAbilityBuilder m ()
 gainPower a n = modified a (GainPower n)
+
+untilEndOfTurn :: ((?scope :: ModifierScope) => m ()) -> m ()
+untilEndOfTurn f = let ?scope = UntilEndOfTurn in f
+
+constantly :: ((?scope :: ModifierScope) => m ()) -> m ()
+constantly f = let ?scope = ConstantScope in f
 
 data UnitDetails = UnitDetails
   { key :: UnitKey
   , controller :: PlayerKey
   , zone :: Zone
+  , cardDef :: CardDef Unit
   }
   deriving stock Show
 
-instance Targetable UnitDetails where
-  toTarget details = UnitRef details.key
+instance Reference UnitDetails where
+  toRef details = UnitRef details.key
 
 type family DetailsOfKind (k :: CardKind)
 type family KeyOfKind (k :: CardKind)
@@ -289,17 +406,37 @@ type family KeyOfKind (k :: CardKind)
 type instance DetailsOfKind Unit = UnitDetails
 type instance KeyOfKind Unit = UnitKey
 
+data family Field (k :: CardKind) typ
+
+data instance Field Unit typ where
+  UnitController :: Field Unit PlayerKey
+  UnitZone :: Field Unit Zone
+  UnitPower :: Field Unit Int
+
 class Entity (k :: CardKind) a where
   toDetails :: a -> DetailsOfKind k
   toKey :: a -> KeyOfKind k
+  project :: HasGame m => Field k typ -> a -> m typ
+
+getModifiers :: (HasGame m, Reference a) => a -> m [ModifierDetails]
+getModifiers a = do
+  g <- getGame
+  pure $ fromMaybe [] $ Map.lookup (toRef a) g.modifiers
 
 instance Entity Unit UnitDetails where
   toDetails = id
   toKey = (.key)
-  
+  project = \case
+    UnitController -> pure . (.controller)
+    UnitZone -> pure . (.zone)
+    UnitPower -> \details -> do
+      mods <- getModifiers details
+      let additionalPower = sum [n | GainPower n <- mods]
+      pure $ details.cardDef.power + additionalPower
+
 newtype TrollSlayers = TrollSlayers UnitDetails
   deriving stock Show
-  deriving newtype (Targetable, Entity Unit)
+  deriving newtype (Reference, Entity Unit)
 
 instance HasField "controller" TrollSlayers PlayerKey where
   getField (TrollSlayers details) = details.controller
@@ -317,30 +454,61 @@ instance Card TrollSlayers where
     trait Slayer
     body
       "Battlefield. This unit gains {power}{power} while you have at least two developments in this zone."
-  constantAbilities this = do
-    battlefield this \zone -> when (zone.developments >= 2) (gainPower this 2)
+  constant this = do
+    battlefield this \zone -> when (zone.developments >= 2) (constantly $ gainPower this 2)
 
-runesmith :: CardDef Unit
-runesmith = unit "core-005" "Runesmith" do
-  race Dwarf
-  cost 2
-  loyalty 1
-  power 1
-  hitPoints 1
-  trait Priest
-  body "Quest. Action: Spend 2 resources to have a target unit gain & until the end of the turn."
+resources :: Int -> Cost
+resources n = Resources (Fixed n)
 
-durgnarTheBold :: CardDef Unit
-durgnarTheBold = unit "core-006" "Durgnar the Bold" do
-  unique
-  race Dwarf
-  cost 3
-  loyalty 3
-  power 2
-  hitPoints 2
-  traits [Hero, Warrior]
-  body
-    "Limit one Hero per zone.\nThis unit gains {power}{power} while one section of your capital is burning."
+newtype Runesmith = Runesmith UnitDetails
+  deriving stock Show
+  deriving newtype (Reference, Entity Unit)
+
+instance HasField "controller" Runesmith PlayerKey where
+  getField (Runesmith details) = details.controller
+
+instance Card Runesmith where
+  type KindOfCard Runesmith = Unit
+  asCardCode _ = "core-005"
+  asName _ = "Runesmith"
+  asCardDef = unit' do
+    race Dwarf
+    cost 2
+    loyalty 1
+    power 1
+    hitPoints 1
+    trait Priest
+    body
+      "Quest. Action: Spend 2 resources to have a target unit gain {power} until the end of the turn."
+  actions this = do
+    questAction this do
+      actionCost $ resources 2
+      targets AnyUnit
+      withTarget \target -> untilEndOfTurn (gainPower target 1)
+
+newtype DurgnarTheBold = DurgnarTheBold UnitDetails
+  deriving stock Show
+  deriving newtype (Reference, Entity Unit)
+
+instance HasField "controller" DurgnarTheBold PlayerKey where
+  getField (DurgnarTheBold details) = details.controller
+
+instance Card DurgnarTheBold where
+  type KindOfCard DurgnarTheBold = Unit
+  asCardCode _ = "core-006"
+  asName _ = "Durgnar the Bold"
+  asCardDef = unit' do
+    unique
+    race Dwarf
+    cost 3
+    loyalty 3
+    power 2
+    hitPoints 2
+    traits [Hero, Warrior]
+    body
+      "Limit one Hero per zone.\nThis unit gains {power}{power} while one section of your capital is burning."
+  constant this = do
+    capital this.controller \controllerCapital -> when (any (.burning) controllerCapital.sections) (constantly $ gainPower this 2)
 
 kingKazador :: CardDef Unit
 kingKazador = unit "core-007" "King Kazador" do
@@ -545,8 +713,8 @@ allCards =
     , ("core-002", someCardDef @ZhufbarEngineers)
     , ("core-003", someCardDef @HammererOfKarakAzul)
     , ("core-004", someCardDef @TrollSlayers)
-    , ("core-005", UnitCardDef runesmith)
-    , ("core-006", UnitCardDef durgnarTheBold)
+    , ("core-005", someCardDef @Runesmith)
+    , ("core-006", someCardDef @DurgnarTheBold)
     , ("core-007", UnitCardDef kingKazador)
     , ("core-008", UnitCardDef dwarfCannonCrew)
     , ("core-009", UnitCardDef dwarfMasons)
@@ -604,62 +772,136 @@ loadDeck cs = for cs \c ->
     Nothing -> Left $ "Card not found: " <> show c
     Just cardDef -> Right cardDef
 
-runGame :: GameT a -> Env -> IO a
+runGame :: GameT a -> Game -> IO a
 runGame (GameT inner) = evalStateT inner
 
 data PlayerKey = Player1 | Player2
   deriving stock (Show, Eq)
 
-data Message = Begin | ShuffleDeck PlayerKey
+data DrawingKind = StartingHand | StandardDraw
+  deriving stock Show
+
+newtype Drawing = Drawing
+  { kind :: DrawingKind
+  }
+  deriving stock Show
 
 gameMain :: GameT ()
 gameMain = do
-  mmsg <- pop
-  for_ mmsg \msg -> do
-    g <- gets (.game)
-    g' <- run msg g
-    modify \env -> env {game = g'}
+  g <- get
+  unless g.over do
+    g' <- tick g
+    put g'
     gameMain
 
-class Run a where
-  run :: Message -> a -> GameT a
+class Tick a where
+  tick :: a -> GameT a
 
-instance Run Game where
-  run msg g = do
-    p1 <- run msg g.player1
-    p2 <- run msg g.player2
-    pure $ g {player1 = p1, player2 = p2}
+instance Tick Game where
+  tick g = case g.state of
+    SetupGame nextState -> do
+      firstPlayer <- sample2 Player1 Player2
+      pure $ g
+        { firstPlayer
+        , state = WaitOnPlayer Player1 (WaitOnPlayer Player2 (DoTurn firstPlayer nextState))
+        , player1 = g.player1 {state = ShuffleDeck (Draw (Drawing StartingHand) g.player1.state) }
+        , player2 = g.player2 {state = ShuffleDeck (Draw (Drawing StartingHand) g.player2.state) }
+        }
+    IdleGame -> do
+      p1 <- tick g.player1
+      p2 <- tick g.player2
+      pure $ g {player1 = p1, player2 = p2}
+    DoTurn currentPlayer nextState -> do
+      let nextPlayer = if currentPlayer == Player1 then Player2 else Player1
+      pure
+        $ g
+          { state =
+              GamePhase
+                currentPlayer
+                KingdomPhase
+                ( GamePhase
+                    currentPlayer
+                    QuestPhase
+                    ( GamePhase
+                        currentPlayer
+                        CapitalPhase
+                        (GamePhase currentPlayer BattlefieldPhase (DoTurn nextPlayer nextState))
+                    )
+                )
+          }
+    GamePhase currentPlayer KingdomPhase nextState -> do
+      liftIO $ putStrLn $ "Begin Kingdom Phase for: " <> show currentPlayer
+      let
+        update g =
+          case currentPlayer of
+            Player1 -> g {player1 = g.player1 {state = PerformPhase KingdomPhase g.player1.state}}
+            Player2 -> g {player2 = g.player2 {state = PerformPhase KingdomPhase g.player2.state}}
+      pure $ update $ g {state = WaitOnPlayer currentPlayer nextState}
+    GamePhase currentPlayer QuestPhase nextState -> do
+      liftIO $ putStrLn $ "Begin Quest Phase for: " <> show currentPlayer
+      pure $ g {state = WaitOnPlayer currentPlayer nextState}
+    GamePhase currentPlayer CapitalPhase nextState -> do
+      liftIO $ putStrLn $ "Begin Capital Phase for: " <> show currentPlayer
+      pure $ g {state = WaitOnPlayer currentPlayer nextState}
+    GamePhase currentPlayer BattlefieldPhase _nextState -> do
+      liftIO $ putStrLn $ "Begin Battlefield Phase for: " <> show currentPlayer
+      pure $ g {state = FinishedGame currentPlayer}
+    WaitOnPlayer currentPlayer nextState -> do
+      case currentPlayer of
+        Player1 | g.player1.idle -> pure $ g {state = nextState}
+        Player2 | g.player2.idle -> pure $ g {state = nextState}
+        _ -> do
+          p1 <- tick g.player1
+          p2 <- tick g.player2
+          let
+            nextState' =
+              if p1.eliminated || p2.eliminated
+                then FinishedGame currentPlayer
+                else g.state
+          pure $ g {player1 = p1, player2 = p2, state = nextState'}
+    FinishedGame _ -> pure g
 
-instance Run Player where
-  run msg p = do
-    case msg of
-      Begin -> do
-        push $ ShuffleDeck p.key
-        pure p
-      ShuffleDeck k | k == p.key -> do
-        liftIO $ putStrLn $ "Shuffling deck " <> show k
-        cards' <- liftIO $ shuffleM p.deck
-        pure $ p {deck = cards'}
-      _ -> pure p
-
-newEnv :: Game -> IO Env
-newEnv g = do
-  q <- newQueue
-  pure $ Env q g
+instance Tick Player where
+  tick p = case p.state of
+    IdlePlayer -> pure p
+    ShuffleDeck nextState -> do
+      liftIO $ putStrLn $ "Shuffling deck " <> show p.key
+      cards' <- liftIO $ shuffleM p.deck
+      pure $ p {deck = cards', state = nextState}
+    PerformPhase KingdomPhase nextState -> do
+      liftIO $ putStrLn $ "Performing Kingdom Phase for: " <> show p.key
+      pure $ p {state = nextState}
+    PerformPhase QuestPhase nextState -> do
+      liftIO $ putStrLn $ "Performing Quest Phase for: " <> show p.key
+      pure $ p {state = nextState}
+    PerformPhase CapitalPhase nextState -> do
+      liftIO $ putStrLn $ "Performing Capital Phase for: " <> show p.key
+      pure $ p {state = nextState}
+    PerformPhase BattlefieldPhase nextState -> do
+      liftIO $ putStrLn $ "Performing Battlefield Phase for: " <> show p.key
+      pure $ p {state = nextState}
+    Draw drawing nextState -> do
+      liftIO $ putStrLn $ "Drawing " <> show drawing.kind <> " for " <> show p.key
+      case drawing.kind of
+        StartingHand -> do
+          let (hand, deck') = splitAt 7 p.deck
+          pure $ p {hand, deck = deck', state = nextState}
+        StandardDraw -> do
+          case p.deck of
+            [] -> pure $ p {state = Eliminated}
+            (card : deck') -> pure $ p {hand = card : p.hand, deck = deck', state = nextState}
 
 newPlayer :: PlayerKey -> [CardCode] -> Either DeckLoadError Player
-newPlayer k cs = Player k (Battlefield 0) <$> loadDeck cs
+newPlayer k cs = Player k False IdlePlayer (Capital $ Battlefield 0 False) [] <$> loadDeck cs
 
 newGame :: [CardCode] -> [CardCode] -> Either DeckLoadError Game
 newGame deck1 deck2 = do
   player1 <- newPlayer Player1 deck1
   player2 <- newPlayer Player2 deck2
-  pure $ Game player1 player2
+  pure $ Game player1 player2 Player1 mempty (SetupGame IdleGame)
 
 main :: IO ()
 main = do
   case newGame dwarfStarterDeck dwarfStarterDeck of
     Left err -> error err
-    Right game -> do
-      env <- newEnv game
-      runGame (push Begin >> gameMain) env
+    Right game -> runGame gameMain game
