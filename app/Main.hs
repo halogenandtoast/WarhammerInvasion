@@ -1,17 +1,25 @@
-{-# LANGUAGE NoFieldSelectors, DuplicateRecordFields #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE NoFieldSelectors #-}
+
 module Main (main) where
 
+import Control.Monad
 import Control.Monad.State.Strict
 import Data.Foldable
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Proxy
 import Data.String (IsString)
 import Data.Traversable
+import GHC.Records
 import Queue
 import System.Random.Shuffle
 
 newtype CardCode = CardCode String
   deriving newtype (Eq, Ord, Show, IsString)
+
+class Monad m => HasGame m where
+  getGame :: m Game
 
 data Game = Game
   { player1 :: Player
@@ -21,6 +29,7 @@ data Game = Game
 
 data Player = Player
   { key :: PlayerKey
+  , battlefield :: Battlefield
   , deck :: [SomeCardDef]
   }
   deriving stock Show
@@ -97,7 +106,7 @@ data Keyword = Toughness Number | BattlefieldOnly | Scout
 newtype CardBuilder k a = CardBuilder (State (CardDef k) a)
   deriving newtype (Functor, Applicative, Monad, MonadState (CardDef k))
 
-unit :: CardCode -> String -> CardBuilder Unit a -> CardDef Unit
+unit :: CardCode -> String -> CardBuilder Unit () -> CardDef Unit
 unit code name builder = runCardBuilder builder (CardDef code name Unit [] (Fixed 0) 0 0 0 [] Nothing Nothing [] False)
 
 support :: CardCode -> String -> CardBuilder Support a -> CardDef Support
@@ -154,51 +163,159 @@ toughnessX = keyword (Toughness Variable)
 scout :: CardBuilder Unit ()
 scout = keyword Scout
 
-defenderOfTheHold :: CardDef Unit
-defenderOfTheHold = unit "core-001" "Defender of the Hold" do
-  race Dwarf
-  cost 1
-  loyalty 1
-  power 1
-  hitPoints 1
-  trait Warrior
-  body "Battlefield only."
-  flavor "My blood for the hold, 'tis a fair trade."
-  keyword BattlefieldOnly
+newtype ModifierDetails = GainPower Int
 
-zhufbarEngineers :: CardDef Unit
-zhufbarEngineers = unit "core-002" "Zhufbar Engineers" do
-  race Dwarf
-  cost 3
-  loyalty 1
-  power 1
-  hitPoints 3
-  trait Engineer
-  flavor
-    "The engineers of Zhufbar are the finest in the Old World. They can build anything, and they can destroy anything."
+data ConstantAbility = Modified (Ref Target) ModifierDetails
 
-hammererOfKarakAzul :: CardDef Unit
-hammererOfKarakAzul = unit "core-003" "Hammerer of Karak Azul" do
-  race Dwarf
-  cost 2
-  loyalty 1
-  power 1
-  hitPoints 2
-  traits [Warrior, Elite]
-  toughness 1
-  body "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage)."
-  flavor "\"The hammer blow rings out doom to our foe.\"\n-Ancient Hammerer saying"
+instance HasGame m => HasGame (StateT s m) where
+  getGame = lift getGame
 
-trollSlayers :: CardDef Unit
-trollSlayers = unit "core-004" "Troll Slayers" do
-  race Dwarf
-  cost 3
-  loyalty 1
-  power 1
-  hitPoints 3
-  trait Slayer
-  body
-    "Battlefield. This unit gains {power}{power} while you have at least two developments in this zone."
+newtype ConstantAbilityBuilder m a = ConstantAbilityBuilder (StateT [ConstantAbility] m a)
+  deriving newtype (Functor, Applicative, Monad, MonadIO, MonadState [ConstantAbility], HasGame)
+
+getBattleField :: HasGame m => PlayerKey -> m Battlefield
+getBattleField pkey = do
+  g <- getGame
+  let player = case pkey of
+        Player1 -> g.player1
+        Player2 -> g.player2
+  pure $ Battlefield (length player.deck)
+
+battlefield
+  :: (HasGame m, HasField "controller" a PlayerKey)
+  => a -> (Battlefield -> ConstantAbilityBuilder m ()) -> ConstantAbilityBuilder m ()
+battlefield a f = getBattleField a.controller >>= f
+
+class SomeKindOfCard (KindOfCard a) => Card a where
+  type KindOfCard a :: CardKind
+  asName :: proxy a -> String
+  asCardCode :: proxy a -> CardCode
+  asCardDef :: proxy a -> CardDef (KindOfCard a)
+  constantAbilities :: HasGame m => a -> ConstantAbilityBuilder m ()
+  constantAbilities _ = pure ()
+
+newtype Battlefield = Battlefield {developments :: Int}
+  deriving stock Show
+
+unit' :: forall a proxy. Card a => CardBuilder Unit () -> proxy a -> CardDef Unit
+unit' builder _ = unit (asCardCode (Proxy @a)) (asName (Proxy @a)) builder
+
+support' :: forall a proxy. Card a => CardBuilder Support () -> proxy a -> CardDef Support
+support' builder _ = support (asCardCode (Proxy @a)) (asName (Proxy @a)) builder
+
+data DefenderOfTheHold
+instance Card DefenderOfTheHold where
+  type KindOfCard DefenderOfTheHold = Unit
+  asCardCode _ = "core-001"
+  asName _ = "Defender of the Hold"
+  asCardDef = unit' do
+    race Dwarf
+    cost 1
+    loyalty 1
+    power 1
+    hitPoints 1
+    trait Warrior
+    body "Battlefield only."
+    flavor "My blood for the hold, 'tis a fair trade."
+    keyword BattlefieldOnly
+
+data ZhufbarEngineers
+instance Card ZhufbarEngineers where
+  type KindOfCard ZhufbarEngineers = Unit
+  asCardCode _ = "core-002"
+  asName _ = "Zhufbar Engineers"
+  asCardDef = unit' do
+    race Dwarf
+    cost 3
+    loyalty 1
+    power 1
+    hitPoints 3
+    trait Engineer
+    flavor
+      "The engineers of Zhufbar are the finest in the Old World. They can build anything, and they can destroy anything."
+
+data HammererOfKarakAzul
+instance Card HammererOfKarakAzul where
+  type KindOfCard HammererOfKarakAzul = Unit
+  asCardCode _ = "core-003"
+  asName _ = "Hammerer of Karak Azul"
+  asCardDef = unit' do
+    race Dwarf
+    cost 2
+    loyalty 1
+    power 1
+    hitPoints 2
+    traits [Warrior, Elite]
+    toughness 1
+    body "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage)."
+    flavor "\"The hammer blow rings out doom to our foe.\"\n-Ancient Hammerer saying"
+
+data Zone = BattlefieldZone
+  deriving stock Show
+
+newtype UnitKey = UnitKey Int
+  deriving stock (Show, Eq)
+
+data RefKind = Target
+
+newtype Ref (k :: RefKind) = UnitRef UnitKey
+
+class Targetable a where
+  toTarget :: a -> Ref Target
+
+modified :: (Targetable a, HasGame m) => a -> ModifierDetails -> ConstantAbilityBuilder m ()
+modified a details = modify (<> [Modified (toTarget a) details])
+
+gainPower :: (Targetable a, HasGame m) => a -> Int -> ConstantAbilityBuilder m ()
+gainPower a n = modified a (GainPower n)
+
+data UnitDetails = UnitDetails
+  { key :: UnitKey
+  , controller :: PlayerKey
+  , zone :: Zone
+  }
+  deriving stock Show
+
+instance Targetable UnitDetails where
+  toTarget details = UnitRef details.key
+
+type family DetailsOfKind (k :: CardKind)
+type family KeyOfKind (k :: CardKind)
+
+type instance DetailsOfKind Unit = UnitDetails
+type instance KeyOfKind Unit = UnitKey
+
+class Entity (k :: CardKind) a where
+  toDetails :: a -> DetailsOfKind k
+  toKey :: a -> KeyOfKind k
+
+instance Entity Unit UnitDetails where
+  toDetails = id
+  toKey = (.key)
+  
+newtype TrollSlayers = TrollSlayers UnitDetails
+  deriving stock Show
+  deriving newtype (Targetable, Entity Unit)
+
+
+instance HasField "controller" TrollSlayers PlayerKey where
+  getField (TrollSlayers details) = details.controller
+
+instance Card TrollSlayers where
+  type KindOfCard TrollSlayers = Unit
+  asCardCode _ = "core-004"
+  asName _ = "Troll Slayers"
+  asCardDef = unit' do
+    race Dwarf
+    cost 3
+    loyalty 1
+    power 1
+    hitPoints 3
+    trait Slayer
+    body
+      "Battlefield. This unit gains {power}{power} while you have at least two developments in this zone."
+  constantAbilities this = do
+    battlefield this \zone -> when (zone.developments >= 2) (gainPower this 2)
 
 runesmith :: CardDef Unit
 runesmith = unit "core-005" "Runesmith" do
@@ -292,13 +409,17 @@ ironbreakersOfAnkhor = unit "core-012" "Ironbreakers of Ankhor" do
   body
     "Toughness X (whenever this unit is assigned damage, cancel X of that damage).\nX is the number of developments in this zone."
 
-runeOfFortitude :: CardDef Support
-runeOfFortitude = support "core-013" "Rune of Fortitude" do
-  race Dwarf
-  cost 2
-  loyalty 1
-  trait Rune
-  body "Each unit attacking this zone loses {power} unless its controller pays 1 resource per unit."
+data RuneOfFortitude
+instance Card RuneOfFortitude where
+  type KindOfCard RuneOfFortitude = Support
+  asName _ = "Rune of Fortitude"
+  asCardCode _ = "core-013"
+  asCardDef = support' do
+    race Dwarf
+    cost 2
+    loyalty 1
+    trait Rune
+    body "Each unit attacking this zone loses {power} unless its controller pays 1 resource per unit."
 
 keystoneForge :: CardDef Support
 keystoneForge = support "core-014" "Keystone Forge" do
@@ -402,13 +523,25 @@ masterRuneOfValaya = tactic "core-025" "Master Rune of Valaya" do
   body "Action: Cancel all damage assigned during the battlefield phase this turn."
   flavor "Valaya preseve and protect us in our hour of need!"
 
+class SomeKindOfCard a where
+  toSomeKindOfCard :: CardDef a -> SomeCardDef
+
+someCardDef :: forall a. Card a => SomeCardDef
+someCardDef = toSomeKindOfCard $ asCardDef (Proxy @a)
+
+instance SomeKindOfCard Unit where
+  toSomeKindOfCard = UnitCardDef
+
+instance SomeKindOfCard Support where
+  toSomeKindOfCard = SupportCardDef
+
 allCards :: Map CardCode SomeCardDef
 allCards =
   Map.fromList
-    [ ("core-001", UnitCardDef defenderOfTheHold)
-    , ("core-002", UnitCardDef zhufbarEngineers)
-    , ("core-003", UnitCardDef hammererOfKarakAzul)
-    , ("core-004", UnitCardDef trollSlayers)
+    [ ("core-001", someCardDef @DefenderOfTheHold)
+    , ("core-002", someCardDef @ZhufbarEngineers)
+    , ("core-003", someCardDef @HammererOfKarakAzul)
+    , ("core-004", someCardDef @TrollSlayers)
     , ("core-005", UnitCardDef runesmith)
     , ("core-006", UnitCardDef durgnarTheBold)
     , ("core-007", UnitCardDef kingKazador)
@@ -417,7 +550,7 @@ allCards =
     , ("core-010", UnitCardDef dwarfRanger)
     , ("core-011", UnitCardDef mountainBrigade)
     , ("core-012", UnitCardDef ironbreakersOfAnkhor)
-    , ("core-013", SupportCardDef runeOfFortitude)
+    , ("core-013", someCardDef @RuneOfFortitude)
     , ("core-014", SupportCardDef keystoneForge)
     , ("core-015", SupportCardDef organGun)
     , ("core-016", SupportCardDef masterRuneOfDismay)
@@ -477,14 +610,13 @@ data PlayerKey = Player1 | Player2
 data Message = Begin | ShuffleDeck PlayerKey
 
 gameMain :: GameT ()
-gameMain =
-  pop >>= \case
-    Nothing -> pure ()
-    Just msg -> do
-      g <- gets (.game)
-      g' <- run msg g
-      modify \env -> env {game = g'}
-      gameMain
+gameMain = do
+  mmsg <- pop
+  for_ mmsg \msg -> do
+    g <- gets (.game)
+    g' <- run msg g
+    modify \env -> env {game = g'}
+    gameMain
 
 class Run a where
   run :: Message -> a -> GameT a
@@ -504,7 +636,7 @@ instance Run Player where
       ShuffleDeck k | k == p.key -> do
         liftIO $ putStrLn $ "Shuffling deck " <> show k
         cards' <- liftIO $ shuffleM p.deck
-        pure $ Player k cards'
+        pure $ p {deck = cards'}
       _ -> pure p
 
 newEnv :: Game -> IO Env
@@ -513,7 +645,7 @@ newEnv g = do
   pure $ Env q g
 
 newPlayer :: PlayerKey -> [CardCode] -> Either DeckLoadError Player
-newPlayer k cs = Player k <$> loadDeck cs
+newPlayer k cs = Player k (Battlefield 0) <$> loadDeck cs
 
 newGame :: [CardCode] -> [CardCode] -> Either DeckLoadError Game
 newGame deck1 deck2 = do

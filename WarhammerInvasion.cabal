@@ -42,6 +42,8 @@ library
       OverloadedStrings
       TypeFamilies
       UndecidableInstances
+      AllowAmbiguousTypes
+      TypeApplications
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       base >=4.7 && <5
@@ -67,6 +69,8 @@ executable WarhammerInvasion-exe
       OverloadedStrings
       TypeFamilies
       UndecidableInstances
+      AllowAmbiguousTypes
+      TypeApplications
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       WarhammerInvasion
@@ -94,6 +98,8 @@ test-suite WarhammerInvasion-test
       OverloadedStrings
       TypeFamilies
       UndecidableInstances
+      AllowAmbiguousTypes
+      TypeApplications
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       WarhammerInvasion

@@ -16,6 +16,8 @@ default-extensions:
 - OverloadedStrings
 - TypeFamilies
 - UndecidableInstances
+- AllowAmbiguousTypes
+- TypeApplications
 
 extra-source-files:
 - README.md
