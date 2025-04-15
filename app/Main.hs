@@ -176,10 +176,9 @@ newtype ConstantAbilityBuilder m a = ConstantAbilityBuilder (StateT [ConstantAbi
 getBattleField :: HasGame m => PlayerKey -> m Battlefield
 getBattleField pkey = do
   g <- getGame
-  let player = case pkey of
-        Player1 -> g.player1
-        Player2 -> g.player2
-  pure $ Battlefield (length player.deck)
+  pure $ case pkey of
+    Player1 -> g.player1.battlefield
+    Player2 -> g.player2.battlefield
 
 battlefield
   :: (HasGame m, HasField "controller" a PlayerKey)
@@ -296,7 +295,6 @@ instance Entity Unit UnitDetails where
 newtype TrollSlayers = TrollSlayers UnitDetails
   deriving stock Show
   deriving newtype (Targetable, Entity Unit)
-
 
 instance HasField "controller" TrollSlayers PlayerKey where
   getField (TrollSlayers details) = details.controller
