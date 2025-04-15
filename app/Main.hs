@@ -173,12 +173,17 @@ instance HasGame m => HasGame (StateT s m) where
 newtype ConstantAbilityBuilder m a = ConstantAbilityBuilder (StateT [ConstantAbility] m a)
   deriving newtype (Functor, Applicative, Monad, MonadIO, MonadState [ConstantAbility], HasGame)
 
-getBattleField :: HasGame m => PlayerKey -> m Battlefield
-getBattleField pkey = do
+getPlayer :: HasGame m => PlayerKey -> m Player
+getPlayer pkey = do
   g <- getGame
   pure $ case pkey of
-    Player1 -> g.player1.battlefield
-    Player2 -> g.player2.battlefield
+    Player1 -> g.player1
+    Player2 -> g.player2
+
+getBattleField :: HasGame m => PlayerKey -> m Battlefield
+getBattleField pkey = do
+  p <- getPlayer pkey
+  pure $ p.battlefield
 
 battlefield
   :: (HasGame m, HasField "controller" a PlayerKey)
