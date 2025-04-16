@@ -25,7 +25,16 @@ source-repository head
 
 library
   exposed-modules:
-      Lib
+      Invasion.Capital
+      Invasion.Card
+      Invasion.CardDef
+      Invasion.Entity
+      Invasion.Game
+      Invasion.Matcher
+      Invasion.Modifier
+      Invasion.Player
+      Invasion.Prelude
+      Invasion.Types
       Queue
   other-modules:
       Paths_WarhammerInvasion
@@ -46,6 +55,8 @@ library
       TypeApplications
       DerivingVia
       ImplicitParams
+      NoImplicitPrelude
+      RoleAnnotations
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       MonadRandom
@@ -76,6 +87,8 @@ executable WarhammerInvasion-exe
       TypeApplications
       DerivingVia
       ImplicitParams
+      NoImplicitPrelude
+      RoleAnnotations
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       MonadRandom
@@ -108,6 +121,8 @@ test-suite WarhammerInvasion-test
       TypeApplications
       DerivingVia
       ImplicitParams
+      NoImplicitPrelude
+      RoleAnnotations
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       MonadRandom

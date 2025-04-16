@@ -1,5 +1,6 @@
 module Queue (newQueue, Queue, HasQueue(..), push, pop, peek) where
 
+import Prelude
 import Data.IORef
 import Control.Monad.IO.Class
 import GHC.Records

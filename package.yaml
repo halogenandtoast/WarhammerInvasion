@@ -20,6 +20,8 @@ default-extensions:
 - TypeApplications
 - DerivingVia
 - ImplicitParams
+- NoImplicitPrelude
+- RoleAnnotations
 
 extra-source-files:
 - README.md
