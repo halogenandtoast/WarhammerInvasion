@@ -22,6 +22,7 @@ default-extensions:
 - ImplicitParams
 - NoImplicitPrelude
 - RoleAnnotations
+- FunctionalDependencies
 
 extra-source-files:
 - README.md
@@ -42,6 +43,7 @@ dependencies:
 - containers
 - random-shuffle
 - MonadRandom
+- aeson
 
 ghc-options:
 - -Wall

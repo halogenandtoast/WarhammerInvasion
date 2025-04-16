@@ -1,7 +1,10 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Invasion.Player (module Invasion.Player) where
 
-import {-# SOURCE #-} Invasion.Card
+import Data.Aeson.TH
 import Invasion.Capital
+import {-# SOURCE #-} Invasion.Card
 import Invasion.Prelude
 import Invasion.Types
 
@@ -18,9 +21,7 @@ data Player = Player
 data PlayerState
   = IdlePlayer
   | Eliminated
-  | Draw Drawing PlayerState
-  | PerformPhase Phase PlayerState
-  | ShuffleDeck PlayerState
+  | PlayerDraw Drawing
   deriving stock Show
 
 instance HasField "battlefield" Player Battlefield where
@@ -34,8 +35,15 @@ instance HasField "idle" Player Bool where
 data DrawingKind = StartingHand | StandardDraw
   deriving stock Show
 
-newtype Drawing = Drawing
+data Drawing = Drawing
   { kind :: DrawingKind
+  , player :: PlayerKey
   }
   deriving stock Show
 
+mconcat
+  [ deriveToJSON defaultOptions ''Player
+  , deriveToJSON defaultOptions ''PlayerState
+  , deriveToJSON defaultOptions ''Drawing
+  , deriveToJSON defaultOptions ''DrawingKind
+  ]

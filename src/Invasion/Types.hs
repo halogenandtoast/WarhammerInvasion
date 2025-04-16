@@ -1,7 +1,10 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Invasion.Types (module Invasion.Types) where
 
 import GHC.Records
 import Invasion.Prelude
+import Data.Aeson.TH
+import Data.Aeson.Types
 
 data PlayerKey = Player1 | Player2
   deriving stock (Show, Eq)
@@ -24,6 +27,7 @@ newtype UnitKey = UnitKey Int
 
 data RefKind = Target | Source
 
+type role Ref phantom
 newtype Ref (k :: RefKind) = UnitRef UnitKey
   deriving stock (Show, Eq, Ord)
 
@@ -32,4 +36,14 @@ class Reference a where
 
 data Phase = KingdomPhase | QuestPhase | CapitalPhase | BattlefieldPhase
   deriving stock (Show, Eq)
+
+mconcat
+  [ deriveToJSON defaultOptions ''Ref
+  , deriveToJSON defaultOptions ''UnitKey
+  , deriveToJSON defaultOptions ''PlayerKey
+  , deriveToJSON defaultOptions ''Number
+  , deriveToJSON defaultOptions ''CardKind
+  ]
+
+instance ToJSONKey (Ref k)
 

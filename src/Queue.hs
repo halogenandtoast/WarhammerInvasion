@@ -3,6 +3,7 @@ module Queue (newQueue, Queue, HasQueue(..), push, pop, peek) where
 import Prelude
 import Data.IORef
 import Control.Monad.IO.Class
+import Control.Monad.State.Strict
 import GHC.Records
 
 newtype Queue msg = Queue (IORef [msg], IORef [msg])
@@ -19,11 +20,14 @@ newQueue = do
   actual <- newIORef []
   pure $ Queue (inbox, actual)
 
-class MonadIO m => HasQueue m where
-  type QueueMessage m
-  getQueue :: m (Queue (QueueMessage m))
+class MonadIO m => HasQueue msg m | m -> msg where
+  getQueue :: m (Queue msg)
 
-pop :: HasQueue m => m (Maybe (QueueMessage m))
+instance HasQueue msg m => HasQueue msg (StateT s m) where
+  getQueue = lift getQueue
+
+
+pop :: HasQueue msg m => m (Maybe msg)
 pop = do
   q <- getQueue
   liftIO do
@@ -34,7 +38,7 @@ pop = do
         [] -> ([], Nothing)
         (x:xs') -> (xs', Just x)
 
-peek :: HasQueue m => m (Maybe (QueueMessage m))
+peek :: HasQueue msg m => m (Maybe msg)
 peek = do
   q <- getQueue
   mail <- liftIO $ readIORef q.inbox
@@ -44,7 +48,7 @@ peek = do
       (x:_) -> pure (Just x)
     (x : _) -> pure (Just x)
 
-push :: HasQueue m => QueueMessage m -> m ()
+push :: HasQueue msg m => msg -> m ()
 push x = do
   q <- getQueue
   liftIO $ atomicModifyIORef' q.inbox \xs -> (x:xs, ())

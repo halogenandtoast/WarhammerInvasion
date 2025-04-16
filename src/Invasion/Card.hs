@@ -3,19 +3,20 @@
 
 module Invasion.Card (module Invasion.Card) where
 
-import Data.Proxy
+import Control.Monad.State.Strict
+import Data.Aeson
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Control.Monad.State.Strict
-import {-# SOURCE #-} Invasion.Game
-import Invasion.Types
+import Data.Proxy
+import Invasion.Capital
 import Invasion.CardDef
 import Invasion.CardDef qualified as CardDef
-import Invasion.Capital
+import Invasion.Entity
+import {-# SOURCE #-} Invasion.Game
 import Invasion.Matcher
 import Invasion.Modifier
 import Invasion.Prelude
-import Invasion.Entity
+import Invasion.Types
 
 data SomeCardDef where
   UnitCardDef :: CardDef 'Unit -> SomeCardDef
@@ -28,6 +29,12 @@ instance Show SomeCardDef where
   show (SupportCardDef card) = show card
   show (QuestCardDef card) = show card
   show (TacticCardDef card) = show card
+
+instance ToJSON SomeCardDef where
+  toJSON (UnitCardDef card) = toJSON card
+  toJSON (SupportCardDef card) = toJSON card
+  toJSON (QuestCardDef card) = toJSON card
+  toJSON (TacticCardDef card) = toJSON card
 
 newtype CardBuilder k a = CardBuilder (State (CardDef k) a)
   deriving newtype (Functor, Applicative, Monad, MonadState (CardDef k))
@@ -508,4 +515,3 @@ untilEndOfTurn f = let ?scope = UntilEndOfTurn in f
 
 constantly :: ((?scope :: ModifierScope) => m ()) -> m ()
 constantly f = let ?scope = ConstantScope in f
-

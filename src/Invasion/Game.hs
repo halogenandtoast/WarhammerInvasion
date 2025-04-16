@@ -1,15 +1,17 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
 module Invasion.Game (module Invasion.Game) where
 
-import Invasion.Player
-import Invasion.Types
-import Invasion.Capital
-import Invasion.Prelude
-import Invasion.Modifier
 import Control.Monad.State.Strict
+import Data.Aeson.TH
 import Data.Map.Strict (Map)
+import Invasion.Capital
+import Invasion.Modifier
+import Invasion.Player
+import Invasion.Prelude
+import Invasion.Types
 
 class Monad m => HasGame m where
   getGame :: m Game
@@ -17,13 +19,7 @@ class Monad m => HasGame m where
 instance HasGame m => HasGame (StateT s m) where
   getGame = lift getGame
 
-data GameState
-  = SetupGame GameState
-  | FinishedGame PlayerKey
-  | IdleGame
-  | DoTurn PlayerKey GameState
-  | GamePhase Phase GameState
-  | WaitOnPlayer PlayerKey GameState
+data GameState = FinishedGame PlayerKey | IdleGame
   deriving stock Show
 
 data Game = Game
@@ -68,3 +64,8 @@ battlefield a f = getBattleField a.controller >>= f
 
 capital :: HasGame m => PlayerKey -> (Capital -> m ()) -> m ()
 capital pkey f = getCapital pkey >>= f
+
+mconcat
+  [ deriveToJSON defaultOptions ''Game
+  , deriveToJSON defaultOptions ''GameState
+  ]

@@ -1,14 +1,17 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
 module Invasion.CardDef (module Invasion.CardDef) where
 
+import Data.Aeson
+import Data.Aeson.TH
 import Data.String (IsString)
 import Invasion.Prelude
 import Invasion.Types
 
 newtype CardCode = CardCode String
-  deriving newtype (Eq, Ord, Show, IsString)
+  deriving newtype (Eq, Ord, Show, IsString, ToJSON)
 
 data CardDef (k :: CardKind) = CardDef
   { code :: CardCode
@@ -50,3 +53,10 @@ data Trait
 
 data Race = Dwarf
   deriving stock Show
+
+mconcat
+  [ deriveToJSON defaultOptions ''CardDef
+  , deriveToJSON defaultOptions ''Keyword
+  , deriveToJSON defaultOptions ''Trait
+  , deriveToJSON defaultOptions ''Race
+  ]
