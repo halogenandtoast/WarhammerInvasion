@@ -51,12 +51,8 @@ data Trait
   | Siege
   deriving stock Show
 
-data Race = Dwarf
-  deriving stock Show
-
 mconcat
   [ deriveToJSON defaultOptions ''CardDef
   , deriveToJSON defaultOptions ''Keyword
   , deriveToJSON defaultOptions ''Trait
-  , deriveToJSON defaultOptions ''Race
   ]

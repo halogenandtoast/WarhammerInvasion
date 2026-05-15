@@ -1,23 +1,22 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
-module Main (main) where
+module Invasion.Engine (module Invasion.Engine) where
 
-import Queue
-import Control.Monad
 import Control.Monad.Random
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as Map
-import Data.Maybe
 import Data.Traversable
-import System.Random.Shuffle
-import Invasion.Prelude
-import Invasion.Player
-import Invasion.Types
-import Invasion.Game
-import Invasion.CardDef
-import Invasion.Card
 import Invasion.Capital
+import Invasion.Card
+import Invasion.CardDef
+import Invasion.Game
+import Invasion.Player
+import Invasion.Prelude
+import Invasion.Types
+import Queue
+import System.Random.Shuffle
 
 data Env = Env
   { queue :: Queue Message
@@ -38,38 +37,46 @@ instance HasQueue Message GameT where
 instance HasGame GameT where
   getGame = gets (.game)
 
-dwarfStarterDeck :: [CardCode]
+data Deck = Deck
+  { cards :: [CardCode]
+  , race :: Race
+  }
+
+dwarfStarterDeck :: Deck
 dwarfStarterDeck =
-  replicate 3 "core-001" -- Defender of the Hold
-    <> replicate 1 "core-002" -- Zhufbar Engineers
-    <> replicate 3 "core-003" -- Hammerer of Karak Azul
-    <> replicate 3 "core-004" -- Troll Slayers
-    <> replicate 3 "core-005" -- Runesmith
-    <> replicate 1 "core-006" -- Durgnar the Bold
-    <> replicate 1 "core-007" -- King Kazador
-    <> replicate 1 "core-008" -- Dwarf Cannon Crew
-    <> replicate 1 "core-009" -- Dwarf Masons
-    <> replicate 2 "core-010" -- Dwarf Ranger
-    <> replicate 2 "core-011" -- Mountain Brigade
-    <> replicate 1 "core-012" -- Ironbreakers of Ankhor
-    <> replicate 1 "core-013" -- Rune of Fortitude
-    <> replicate 3 "core-014" -- Keystone Forge
-    <> replicate 1 "core-015" -- Organ Gun
-    <> replicate 1 "core-016" -- Master Rune of Dismay
-    <> replicate 2 "core-017" -- A Glorious Death
-    <> replicate 2 "core-018" -- Grudge Thrower
-    <> replicate 1 "core-019" -- Burying the Grudge
-    <> replicate 1 "core-020" -- Stubborn Refusal
-    <> replicate 2 "core-021" -- Striking the Grudge
-    <> replicate 1 "core-022" -- Grudge Thrower Assault
-    <> replicate 1 "core-023" -- Demolition!
-    <> replicate 1 "core-024" -- Wake the Mountain
-    <> replicate 1 "core-025" -- Master Rune of Valaya
+  let cards =
+        replicate 3 "core-001"
+          <> replicate 1 "core-002"
+          <> replicate 3 "core-003"
+          <> replicate 3 "core-004"
+          <> replicate 3 "core-005"
+          <> replicate 1 "core-006"
+          <> replicate 1 "core-007"
+          <> replicate 1 "core-008"
+          <> replicate 1 "core-009"
+          <> replicate 2 "core-010"
+          <> replicate 2 "core-011"
+          <> replicate 1 "core-012"
+          <> replicate 1 "core-013"
+          <> replicate 3 "core-014"
+          <> replicate 1 "core-015"
+          <> replicate 1 "core-016"
+          <> replicate 2 "core-017"
+          <> replicate 2 "core-018"
+          <> replicate 1 "core-019"
+          <> replicate 1 "core-020"
+          <> replicate 2 "core-021"
+          <> replicate 1 "core-022"
+          <> replicate 1 "core-023"
+          <> replicate 1 "core-024"
+          <> replicate 1 "core-025"
+      race = Dwarf
+  in Deck {..}
 
 type DeckLoadError = String
 
-loadDeck :: [CardCode] -> Either DeckLoadError [SomeCardDef]
-loadDeck cs = for cs \c ->
+loadDeck :: Deck -> Either DeckLoadError (Race, [SomeCardDef])
+loadDeck Deck {race, cards} = (race,) <$> for cards \c ->
   case Map.lookup c allCards of
     Nothing -> Left $ "Card not found: " <> show c
     Just cardDef -> Right cardDef
@@ -80,14 +87,13 @@ runGame (GameT inner) = evalStateT inner
 overGame :: (Game -> GameT Game) -> GameT ()
 overGame f = do
   game <- f =<< getGame
-  modify \e -> e { game }
+  modify \e -> e {game}
 
 gameMain :: GameT Game
 gameMain = do
   mmsg <- pop
   case mmsg of
     Just msg -> do
-      liftIO $ print msg
       overGame $ distribute msg
       gameMain
     Nothing -> getGame
@@ -147,23 +153,27 @@ instance Run Game where
   receive = \case
     Setup -> do
       firstPlayer <- sample2 Player1 Player2
-      modify \g -> g { firstPlayer }
+      modify \g -> g {firstPlayer}
     BeginTurn currentPlayer -> do
       send $ BeginPhase KingdomPhase
-      modify \g -> g { currentPlayer }
+      modify \g -> g {currentPlayer}
     _ -> pure ()
 
-newPlayer :: PlayerKey -> [CardCode] -> Either DeckLoadError Player
-newPlayer k cs = Player k False IdlePlayer (Capital (Battlefield 0 8 0) (QuestZone 0 8 0)) [] <$> loadDeck cs
+newPlayer :: PlayerKey -> Deck -> Either DeckLoadError Player
+newPlayer k cs = do
+  (race, cards) <- loadDeck cs
+  pure $ Player k False IdlePlayer (Capital (Battlefield 0 8 0) (QuestZone 0 8 0)) [] cards race
 
-newGame :: [CardCode] -> [CardCode] -> Either DeckLoadError Game
+newGame :: Deck -> Deck -> Either DeckLoadError Game
 newGame deck1 deck2 = do
   player1 <- newPlayer Player1 deck1
   player2 <- newPlayer Player2 deck2
   pure $ Game player1 player2 Player1 Player1 mempty IdleGame
 
-main :: IO ()
-main = do
+runSetup :: IO (Either DeckLoadError Game)
+runSetup =
   case newGame dwarfStarterDeck dwarfStarterDeck of
-    Left err -> error err
-    Right game -> print =<< runGame (send Setup >> gameMain) =<< newEnv game
+    Left err -> pure $ Left err
+    Right game -> do
+      env <- newEnv game
+      Right <$> runGame (send Setup >> gameMain) env

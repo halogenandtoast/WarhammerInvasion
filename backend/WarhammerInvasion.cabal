@@ -1,6 +1,6 @@
 cabal-version: 2.2
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -13,10 +13,8 @@ author:         Author name here
 maintainer:     example@example.com
 copyright:      2025 Author name here
 license:        BSD-3-Clause
-license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
-    README.md
     CHANGELOG.md
 
 source-repository head
@@ -28,12 +26,14 @@ library
       Invasion.Capital
       Invasion.Card
       Invasion.CardDef
+      Invasion.Engine
       Invasion.Entity
       Invasion.Game
       Invasion.Matcher
       Invasion.Modifier
       Invasion.Player
       Invasion.Prelude
+      Invasion.Server
       Invasion.Types
       Queue
   other-modules:
@@ -58,14 +58,24 @@ library
       NoImplicitPrelude
       RoleAnnotations
       FunctionalDependencies
+      DuplicateRecordFields
+      NoFieldSelectors
+      RecordWildCards
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       MonadRandom
     , aeson
     , base >=4.7 && <5
+    , bytestring
     , containers
+    , http-types
     , mtl
     , random-shuffle
+    , text
+    , wai
+    , wai-extra
+    , warp
+    , yesod-core
   default-language: GHC2021
 
 executable WarhammerInvasion-exe
@@ -92,15 +102,25 @@ executable WarhammerInvasion-exe
       NoImplicitPrelude
       RoleAnnotations
       FunctionalDependencies
+      DuplicateRecordFields
+      NoFieldSelectors
+      RecordWildCards
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       MonadRandom
     , WarhammerInvasion
     , aeson
     , base >=4.7 && <5
+    , bytestring
     , containers
+    , http-types
     , mtl
     , random-shuffle
+    , text
+    , wai
+    , wai-extra
+    , warp
+    , yesod-core
   default-language: GHC2021
 
 test-suite WarhammerInvasion-test
@@ -128,13 +148,23 @@ test-suite WarhammerInvasion-test
       NoImplicitPrelude
       RoleAnnotations
       FunctionalDependencies
+      DuplicateRecordFields
+      NoFieldSelectors
+      RecordWildCards
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       MonadRandom
     , WarhammerInvasion
     , aeson
     , base >=4.7 && <5
+    , bytestring
     , containers
+    , http-types
     , mtl
     , random-shuffle
+    , text
+    , wai
+    , wai-extra
+    , warp
+    , yesod-core
   default-language: GHC2021

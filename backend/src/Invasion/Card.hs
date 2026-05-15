@@ -476,8 +476,7 @@ instance Card ZhufbarEngineers where
     power 1
     hitPoints 3
     trait Engineer
-    flavor
-      "The engineers of Zhufbar are the finest in the Old World. They can build anything, and they can destroy anything."
+    body "Forced: After this unit leaves play, each opponent must sacrifice a unit in this corresponding zone."
 
 data HammererOfKarakAzul
 instance Card HammererOfKarakAzul where

@@ -15,6 +15,7 @@ data Player = Player
   , capital :: Capital
   , hand :: [SomeCardDef]
   , deck :: [SomeCardDef]
+  , race :: Race
   }
   deriving stock Show
 

@@ -37,12 +37,17 @@ class Reference a where
 data Phase = KingdomPhase | QuestPhase | CapitalPhase | BattlefieldPhase
   deriving stock (Show, Eq)
 
+data Race = Dwarf
+  deriving stock Show
+
+
 mconcat
   [ deriveToJSON defaultOptions ''Ref
   , deriveToJSON defaultOptions ''UnitKey
   , deriveToJSON defaultOptions ''PlayerKey
   , deriveToJSON defaultOptions ''Number
   , deriveToJSON defaultOptions ''CardKind
+  , deriveToJSON defaultOptions ''Race
   ]
 
 instance ToJSONKey (Ref k)
