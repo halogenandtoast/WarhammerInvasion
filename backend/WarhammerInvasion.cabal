@@ -23,13 +23,17 @@ source-repository head
 
 library
   exposed-modules:
+      Invasion.Auth.Jwt
+      Invasion.Auth.Password
       Invasion.Capital
       Invasion.Card
       Invasion.CardDef
+      Invasion.DB
       Invasion.Engine
       Invasion.Entity
       Invasion.Game
       Invasion.Matcher
+      Invasion.Model
       Invasion.Modifier
       Invasion.Player
       Invasion.Prelude
@@ -66,12 +70,32 @@ library
       MonadRandom
     , aeson
     , base >=4.7 && <5
+    , base64-bytestring
+    , bcrypt
     , bytestring
+    , case-insensitive
     , containers
+    , cookie
+    , cryptonite
+    , esqueleto
     , http-types
+    , memory
+    , monad-logger
     , mtl
+    , path-pieces
+    , persistent
+    , persistent-postgresql
+    , postgresql-simple
     , random-shuffle
+    , resource-pool
+    , resourcet
     , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , uuid
+    , vector
     , wai
     , wai-extra
     , warp
@@ -111,12 +135,32 @@ executable WarhammerInvasion-exe
     , WarhammerInvasion
     , aeson
     , base >=4.7 && <5
+    , base64-bytestring
+    , bcrypt
     , bytestring
+    , case-insensitive
     , containers
+    , cookie
+    , cryptonite
+    , esqueleto
     , http-types
+    , memory
+    , monad-logger
     , mtl
+    , path-pieces
+    , persistent
+    , persistent-postgresql
+    , postgresql-simple
     , random-shuffle
+    , resource-pool
+    , resourcet
     , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , uuid
+    , vector
     , wai
     , wai-extra
     , warp
@@ -157,12 +201,32 @@ test-suite WarhammerInvasion-test
     , WarhammerInvasion
     , aeson
     , base >=4.7 && <5
+    , base64-bytestring
+    , bcrypt
     , bytestring
+    , case-insensitive
     , containers
+    , cookie
+    , cryptonite
+    , esqueleto
     , http-types
+    , memory
+    , monad-logger
     , mtl
+    , path-pieces
+    , persistent
+    , persistent-postgresql
+    , postgresql-simple
     , random-shuffle
+    , resource-pool
+    , resourcet
     , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , uuid
+    , vector
     , wai
     , wai-extra
     , warp

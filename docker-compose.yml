@@ -1,4 +1,35 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: whi-db
+    environment:
+      POSTGRES_USER: whi
+      POSTGRES_PASSWORD: whi
+      POSTGRES_DB: whi
+    volumes:
+      - whi-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whi -d whi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+
+  migrate:
+    image: ghcr.io/amacneil/dbmate:2
+    container_name: whi-migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://whi:whi@db:5432/whi?sslmode=disable"
+    volumes:
+      - ./db:/db
+    command: ["up"]
+    restart: "no"
+
   backend:
     build:
       context: ./backend
@@ -6,9 +37,20 @@ services:
     container_name: whi-backend
     environment:
       PORT: "3000"
+      DATABASE_URL: "${DATABASE_URL:-postgres://whi:whi@db:5432/whi?sslmode=disable}"
+      WHI_JWT_SECRET: "${WHI_JWT_SECRET:?WHI_JWT_SECRET must be set (see .env.example)}"
+      WHI_JWT_ACCESS_TTL_SECONDS: "${WHI_JWT_ACCESS_TTL_SECONDS:-900}"
+      WHI_JWT_REFRESH_TTL_SECONDS: "${WHI_JWT_REFRESH_TTL_SECONDS:-2592000}"
+      WHI_COOKIE_SECURE: "${WHI_COOKIE_SECURE:-0}"
+      WHI_DB_POOL_SIZE: "${WHI_DB_POOL_SIZE:-10}"
       WHI_IDLE_TTL_SECONDS: "${WHI_IDLE_TTL_SECONDS:-300}"
       WHI_DEBUG: "${WHI_DEBUG:-0}"
       WHI_ALLOW_OVERWRITE: "${WHI_ALLOW_OVERWRITE:-0}"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     expose:
       - "3000"
@@ -23,3 +65,6 @@ services:
     ports:
       - "80:80"
     restart: unless-stopped
+
+volumes:
+  whi-db-data:

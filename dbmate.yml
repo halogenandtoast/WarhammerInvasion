@@ -1,0 +1,14 @@
+# dbmate configuration. Connection string is read from DATABASE_URL
+# in the environment (or .env, loaded automatically).
+#
+# Usage:
+#   dbmate up        - apply pending migrations
+#   dbmate down      - roll back the most recent migration
+#   dbmate new NAME  - scaffold db/migrations/<timestamp>_<NAME>.sql
+#   dbmate status    - list applied / pending
+#
+# Install (macOS): brew install dbmate
+# Install (linux): https://github.com/amacneil/dbmate#installation
+migrations_dir: ./db/migrations
+schema_file: ./db/schema.sql
+no_dump_schema: false

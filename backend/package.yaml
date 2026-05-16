@@ -53,6 +53,29 @@ dependencies:
 - wai
 - wai-extra
 - http-types
+# DB
+- persistent
+- persistent-postgresql
+- esqueleto
+- resource-pool
+- resourcet
+- monad-logger
+- postgresql-simple
+- unliftio
+- unliftio-core
+- transformers
+# Auth
+- bcrypt
+- uuid
+- time
+- cryptonite
+- memory
+- base64-bytestring
+# Misc
+- cookie
+- case-insensitive
+- vector
+- path-pieces
 
 ghc-options:
 - -Wall
