@@ -457,7 +457,6 @@ function onKey(e: KeyboardEvent) {
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
   position: sticky;
-  top: 60px;
   align-self: start;
   height: calc(100dvh - 60px);
   overflow: hidden;
