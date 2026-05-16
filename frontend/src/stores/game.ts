@@ -3,7 +3,7 @@
 // The store is *assigned to* by server frames. The view layer never
 // mutates GameView directly — every change is a server round-trip.
 
-import { computed, nextTick, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { openSocket, type SocketStatus, type TypedSocket } from '../api/socket'
 import type {
   ChatLine,
@@ -33,29 +33,36 @@ function reset() {
   _closed.value = null
 }
 
-// View Transitions: when the engine snapshot changes, run the mutation
-// inside `document.startViewTransition` so the browser captures the
+// View Transitions: each engine snapshot update runs inside
+// `document.startViewTransition` so the browser captures the
 // before/after DOM and morphs elements that share a
-// `view-transition-name` (see SvgCard's `transitionName` prop). Falls
-// back to a plain assignment on browsers without the API (Firefox).
+// `view-transition-name` (every visible card carries
+// `card-<key>` via its HTML wrapper in PlaySide.vue).
 //
-// Vue flushes DOM updates on the next microtask, so the callback must
-// `await nextTick()` — otherwise the browser snapshots "new" before
-// Vue patches the DOM, leaving the new state identical to the old and
-// the transition does nothing.
+// The callback is intentionally synchronous: Vue's component update
+// for the ref assignment schedules a microtask, which fires before
+// the browser's next-paint snapshot, so by the time the browser
+// captures the new state the DOM is already patched. Awaiting
+// nextTick() here is unnecessary and actively interferes on browsers
+// that interpret the returned promise as "wait for me before
+// snapshotting" — the snapshot then happens too late and the morph
+// degenerates.
+//
+// `prefers-reduced-motion: reduce` and missing-API browsers (Firefox
+// today) fall back to a plain assignment.
 type ViewTransitionDoc = Document & {
   startViewTransition?: (cb: () => Promise<void> | void) => unknown
 }
 function withViewTransition(update: () => void) {
+  const reduce =
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const d = document as ViewTransitionDoc
-  if (typeof d.startViewTransition === 'function') {
-    d.startViewTransition(async () => {
-      update()
-      await nextTick()
-    })
-  } else {
+  if (reduce || typeof d.startViewTransition !== 'function') {
     update()
+    return
   }
+  d.startViewTransition(update)
 }
 
 function handle(msg: GameOut) {

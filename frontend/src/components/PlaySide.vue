@@ -1,7 +1,15 @@
 <script setup lang="ts">
-// SVG-based player table. One inline <svg> per player; viewBox width
-// is reactive (ResizeObserver) so the SVG always fills the container
-// width with no horizontal gutter.
+// SVG-based player table. The static board (zones, capital image,
+// tokens, piles' empty rects, labels, player chip, resources) is drawn
+// inside one inline <svg> per player. Cards themselves are HTML
+// elements in a sibling overlay, positioned in % of the container so
+// they line up with the SVG-coordinate slots.
+//
+// Why the HTML overlay? `view-transition-name` is only reliably
+// applied to elements with a CSS layout box. SVG <g> elements don't
+// have one (they're laid out in SVG user space), so wrapping each card
+// in a plain <div> is what makes the View Transitions API morph a card
+// between hand, zones, and the discard pile.
 //
 // Each side is three rows stacked top → bottom:
 //   self:     [battlefield] [capital row] [combined zone]
@@ -27,7 +35,7 @@ import type {
 import { zoneBurning, zoneHitPoints } from '../api/protocol'
 import { capitalImageFor, raceLabel } from '../lib/capital'
 import { CARD_SM } from '../lib/cardSize'
-import SvgCard from './SvgCard.vue'
+import CardArt from './CardArt.vue'
 
 const props = defineProps<{
   player: EnginePlayer
@@ -82,13 +90,13 @@ const PILE_VERT_GAP = 18
 const PLAYER_COL_W = 130
 
 // ---- reactive width ----
-const svgEl = ref<SVGSVGElement | null>(null)
+const containerEl = ref<HTMLDivElement | null>(null)
 const vbW = ref(VB_W_FALLBACK)
 
 let ro: ResizeObserver | null = null
 
 onMounted(() => {
-  const el = svgEl.value
+  const el = containerEl.value
   if (!el) return
   ro = new ResizeObserver((entries) => {
     for (const entry of entries) {
@@ -189,6 +197,17 @@ const pilesLayout = computed(() => {
     bottomKind: isOpp ? 'deck' : 'discard',
   }
 })
+
+const deckY = computed(() =>
+  pilesLayout.value.topKind === 'deck'
+    ? pilesLayout.value.topY
+    : pilesLayout.value.bottomY,
+)
+const discardY = computed(() =>
+  pilesLayout.value.topKind === 'discard'
+    ? pilesLayout.value.topY
+    : pilesLayout.value.bottomY,
+)
 
 const topDiscard = computed<EngineCard | null>(() => {
   const d = props.player.discard
@@ -330,14 +349,6 @@ function isCardClickable(card: EngineCard | null): boolean {
   return props.canPlayCard(card)
 }
 
-function onHandClick(
-  card: EngineCard | null,
-  payload: { rect: DOMRect },
-) {
-  if (!card) return
-  emit('hand-card-click', { card, rect: payload.rect })
-}
-
 const handXs = computed(() =>
   evenSpread(handCards.value.length, xs.value.handX, xs.value.handW, CARD_SM.w),
 )
@@ -362,233 +373,413 @@ const legendSlot = computed(() => {
     labelY: y - 4,
   }
 })
+
+// ---- flat card-slot list for the HTML overlay ----
+//
+// Every visible card (hand, in-play unit, attached support, legend,
+// deck top, discard top) becomes one entry here. Each slot has a
+// position in SVG-viewBox units that we convert to a percentage of
+// the container; the card-slot <div> uses that as `left`/`top`/etc.
+// so it lines up exactly with where the SVG would have drawn the
+// card. The `cardKey` field is what gets fed into
+// `view-transition-name`.
+interface CardSlot {
+  key: string
+  cardKey: number | null
+  card: { code: string; title: string } | null
+  faceDown: boolean
+  rotated: boolean
+  clickable: boolean
+  // Position in SVG viewBox units.
+  x: number
+  y: number
+  w: number
+  h: number
+  zIndex: number
+  // Original EngineCard (only present for hand cards so the click
+  // handler can pass it back up).
+  handCard?: EngineCard | null
+}
+
+const cardSlots = computed<CardSlot[]>(() => {
+  const slots: CardSlot[] = []
+
+  // Hand
+  const hxs = handXs.value
+  const hy = handCardY.value
+  handCards.value.forEach((c, i) => {
+    slots.push({
+      key: c ? `hand-${c.key}` : `hand-opp-${i}`,
+      cardKey: c?.key ?? null,
+      card: c ? { code: c.code, title: c.title } : null,
+      faceDown: props.perspective === 'opponent',
+      rotated: false,
+      clickable: isCardClickable(c),
+      x: hxs[i],
+      y: hy,
+      w: CARD_SM.w,
+      h: CARD_SM.h,
+      zIndex: 10,
+      handCard: c,
+    })
+  })
+
+  // Legend
+  if (props.legend) {
+    const ls = legendSlot.value
+    slots.push({
+      key: `legend-${props.legend.key}`,
+      cardKey: props.legend.key,
+      card: { code: props.legend.cardDef.code, title: props.legend.cardDef.title },
+      faceDown: false,
+      rotated: false,
+      clickable: false,
+      x: ls.x,
+      y: ls.y,
+      w: ls.w,
+      h: ls.h,
+      zIndex: 20,
+    })
+  }
+
+  // Zone units + their attachments. Attachments first (so they render
+  // BEHIND the unit they're attached to), unit on top.
+  for (const zr of zones.value) {
+    const units = zoneUnits(zr.z)
+    if (zr.w > zr.h) {
+      // Landscape zone — battlefield. Cards spread horizontally.
+      const xsLane = evenSpread(units.length, zr.x + 12, zr.w - 24, CARD_SM.w)
+      const ySlot = zr.y + (zr.h - CARD_SM.h) / 2
+      units.forEach((u, i) => {
+        u.attachments.forEach((att, ai) => {
+          slots.push({
+            key: `att-${att.key}`,
+            cardKey: att.key,
+            card: { code: att.cardDef.code, title: att.cardDef.title },
+            faceDown: false,
+            rotated: false,
+            clickable: false,
+            x: xsLane[i] + (u.attachments.length - ai) * ATTACHMENT_OFFSET,
+            y: ySlot + (u.attachments.length - ai) * (ATTACHMENT_OFFSET / 2),
+            w: CARD_SM.w,
+            h: CARD_SM.h,
+            zIndex: 30 + ai,
+          })
+        })
+        slots.push({
+          key: `unit-${u.key}`,
+          cardKey: u.key,
+          card: { code: u.cardDef.code, title: u.cardDef.title },
+          faceDown: false,
+          rotated: false,
+          clickable: false,
+          x: xsLane[i],
+          y: ySlot,
+          w: CARD_SM.w,
+          h: CARD_SM.h,
+          zIndex: 30 + u.attachments.length + 1,
+        })
+      })
+    } else {
+      // Portrait zone — kingdom / quest. Cards stack vertically.
+      const xSlot = tallStackX(zr.x, zr.w)
+      const ysLane = tallStackYs(zr.y + 26, zr.h - 26 - 30, units.length)
+      units.forEach((u, i) => {
+        u.attachments.forEach((att, ai) => {
+          slots.push({
+            key: `att-${att.key}`,
+            cardKey: att.key,
+            card: { code: att.cardDef.code, title: att.cardDef.title },
+            faceDown: false,
+            rotated: false,
+            clickable: false,
+            x: xSlot,
+            y: ysLane[i] + (u.attachments.length - ai) * ATTACHMENT_OFFSET,
+            w: CARD_SM.w,
+            h: CARD_SM.h,
+            zIndex: 30 + ai,
+          })
+        })
+        slots.push({
+          key: `unit-${u.key}`,
+          cardKey: u.key,
+          card: { code: u.cardDef.code, title: u.cardDef.title },
+          faceDown: false,
+          rotated: false,
+          clickable: false,
+          x: xSlot,
+          y: ysLane[i],
+          w: CARD_SM.w,
+          h: CARD_SM.h,
+          zIndex: 30 + u.attachments.length + 1,
+        })
+      })
+    }
+  }
+
+  // Deck pile top: face-down card if the deck has anything in it.
+  if (props.player.deck.length > 0) {
+    slots.push({
+      key: 'deck-top',
+      // Face-down deck cards don't morph — picking one specific
+      // back-image to morph to/from the next state would be wrong (any
+      // card could come off the deck) and the visual is identical.
+      cardKey: null,
+      card: null,
+      faceDown: true,
+      rotated: true,
+      clickable: false,
+      x: xs.value.pilesX,
+      y: deckY.value,
+      w: PILE_W,
+      h: PILE_H,
+      zIndex: 5,
+    })
+  }
+
+  // Discard top card.
+  if (topDiscard.value) {
+    slots.push({
+      key: `discard-top-${topDiscard.value.key}`,
+      cardKey: topDiscard.value.key,
+      card: { code: topDiscard.value.code, title: topDiscard.value.title },
+      faceDown: false,
+      rotated: true,
+      clickable: false,
+      x: xs.value.pilesX,
+      y: discardY.value,
+      w: PILE_W,
+      h: PILE_H,
+      zIndex: 5,
+    })
+  }
+
+  return slots
+})
+
+function slotStyle(slot: CardSlot): Record<string, string | number | undefined> {
+  const W = vbW.value
+  const H = VB_H
+  return {
+    left: `${(slot.x / W) * 100}%`,
+    top: `${(slot.y / H) * 100}%`,
+    width: `${(slot.w / W) * 100}%`,
+    height: `${(slot.h / H) * 100}%`,
+    zIndex: slot.zIndex,
+    // `view-transition-name` lives on the HTML slot wrapper (not the
+    // inner SVG) so the browser captures a proper layout box.
+    viewTransitionName:
+      slot.cardKey != null ? `card-${slot.cardKey}` : undefined,
+  }
+}
+
+function onSlotClick(slot: CardSlot, ev: MouseEvent) {
+  if (!slot.clickable) return
+  if (!slot.handCard) return
+  ev.stopPropagation()
+  const el = ev.currentTarget as HTMLElement
+  emit('hand-card-click', {
+    card: slot.handCard,
+    rect: el.getBoundingClientRect(),
+  })
+}
 </script>
 
 <template>
-  <svg
+  <div
+    ref="containerEl"
     class="play-side"
     :class="[perspective, { active: isActive }]"
-    ref="svgEl"
-    :viewBox="`0 0 ${vbW} ${VB_H}`"
-    preserveAspectRatio="xMidYMid meet"
-    role="img"
-    :aria-label="`${seatName} play area`"
   >
-    <!-- Capital board (center of capital row) -->
-    <g class="capital-area">
-      <rect
-        :x="xs.capBoardX"
-        :y="capY"
-        :width="CAP_BOARD_W"
-        :height="CAP_H"
-        rx="8"
-        class="capital-frame"
-      />
-      <image
-        :x="xs.capBoardX"
-        :y="capY"
-        :width="CAP_BOARD_W"
-        :height="CAP_H"
-        :href="capitalSrc"
-        preserveAspectRatio="xMidYMid slice"
-        class="capital-img"
-      />
-    </g>
-
-    <!-- Legend slot: sits centered over the bottom of the capital
-         board. Shows the controller's legend if they have one, or an
-         empty placeholder otherwise. Legends aren't units, so they
-         live in their own slot rather than a zone. -->
-    <g class="legend-area">
-      <text
-        :x="legendSlot.labelX"
-        :y="legendSlot.labelY"
-        text-anchor="middle"
-        class="legend-label"
-      >
-        {{ t('game.play.capital.legend').toUpperCase() }}
-      </text>
-      <SvgCard
-        v-if="legend"
-        :x="legendSlot.x"
-        :y="legendSlot.y"
-        :width="legendSlot.w"
-        :height="legendSlot.h"
-        :card="{ code: legend.cardDef.code, title: legend.cardDef.title }"
-        :transition-name="`card-${legend.key}`"
-      />
-      <rect
-        v-else
-        :x="legendSlot.x"
-        :y="legendSlot.y"
-        :width="legendSlot.w"
-        :height="legendSlot.h"
-        rx="6"
-        class="legend-empty"
-      />
-      <text
-        v-if="legend && legend.damage > 0"
-        :x="legendSlot.x + legendSlot.w - 6"
-        :y="legendSlot.y + legendSlot.h - 6"
-        text-anchor="end"
-        class="legend-damage"
-      >
-        {{ legend.damage }}
-      </text>
-    </g>
-
-    <!-- Zone slots (kingdom, quest, battlefield) -->
-    <g
-      v-for="zr in zones"
-      :key="zr.label"
-      class="zone-slot"
-      :class="{ burning: zr.burning, burned: zr.burned }"
+    <svg
+      class="play-side-svg"
+      :viewBox="`0 0 ${vbW} ${VB_H}`"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      :aria-label="`${seatName} play area`"
     >
-      <rect :x="zr.x" :y="zr.y" :width="zr.w" :height="zr.h" rx="6" class="zone-bg" />
-      <text :x="zr.x + 10" :y="zr.y + 16" class="zone-label">{{ zr.label.toUpperCase() }}</text>
-      <text
-        :x="zr.x + zr.w - 10"
-        :y="zr.y + 16"
-        text-anchor="end"
-        class="zone-hp"
-        :class="{ critical: zr.burning }"
-      >
-        {{ zr.z.damage }}/{{ zr.hp }}
-      </text>
+      <!-- Capital board (center of capital row) -->
+      <g class="capital-area">
+        <rect
+          :x="xs.capBoardX"
+          :y="capY"
+          :width="CAP_BOARD_W"
+          :height="CAP_H"
+          rx="8"
+          class="capital-frame"
+        />
+        <image
+          :x="xs.capBoardX"
+          :y="capY"
+          :width="CAP_BOARD_W"
+          :height="CAP_H"
+          :href="capitalSrc"
+          preserveAspectRatio="xMidYMid slice"
+          class="capital-img"
+        />
+      </g>
 
-      <template v-if="zr.w > zr.h">
-        <!-- Landscape zone (battlefield). Cards stay in portrait;
-             rotation is reserved for rules-driven states (exhaust /
-             kneel) and is not used purely to fit the layout.
-             Attachments cascade DOWN-RIGHT from the unit (offset on both
-             axes) so a corner strip of each attachment shows. -->
-        <g v-for="(u, i) in zoneUnits(zr.z)" :key="u.key">
-          <SvgCard
-            v-for="(att, ai) in u.attachments"
-            :key="att.key"
-            :x="evenSpread(zoneUnits(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.w)[i] + (u.attachments.length - ai) * ATTACHMENT_OFFSET"
-            :y="zr.y + (zr.h - CARD_SM.h) / 2 + (u.attachments.length - ai) * (ATTACHMENT_OFFSET / 2)"
-            :card="{ code: att.cardDef.code, title: att.cardDef.title }"
-            :width="CARD_SM.w"
-            :height="CARD_SM.h"
-            :transition-name="`card-${att.key}`"
-          />
-          <SvgCard
-            :x="evenSpread(zoneUnits(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.w)[i]"
-            :y="zr.y + (zr.h - CARD_SM.h) / 2"
-            :card="{ code: u.cardDef.code, title: u.cardDef.title }"
-            :width="CARD_SM.w"
-            :height="CARD_SM.h"
-            :transition-name="`card-${u.key}`"
-          />
-        </g>
-      </template>
-      <template v-else>
-        <!-- Portrait zone. Attachments cascade DOWN behind the unit so
-             a thin bottom strip of each attachment shows below it. -->
-        <g v-for="(u, i) in zoneUnits(zr.z)" :key="u.key">
-          <SvgCard
-            v-for="(att, ai) in u.attachments"
-            :key="att.key"
-            :x="tallStackX(zr.x, zr.w)"
-            :y="tallStackYs(zr.y + 26, zr.h - 26 - 30, zoneUnits(zr.z).length)[i] + (u.attachments.length - ai) * ATTACHMENT_OFFSET"
-            :card="{ code: att.cardDef.code, title: att.cardDef.title }"
-            :width="CARD_SM.w"
-            :height="CARD_SM.h"
-            :transition-name="`card-${att.key}`"
-          />
-          <SvgCard
-            :x="tallStackX(zr.x, zr.w)"
-            :y="tallStackYs(zr.y + 26, zr.h - 26 - 30, zoneUnits(zr.z).length)[i]"
-            :card="{ code: u.cardDef.code, title: u.cardDef.title }"
-            :width="CARD_SM.w"
-            :height="CARD_SM.h"
-            :transition-name="`card-${u.key}`"
-          />
-        </g>
-      </template>
+      <!-- Legend slot: label + empty-state outline. The legend CARD
+           itself lives in the HTML overlay so it can carry a
+           view-transition-name. -->
+      <g class="legend-area">
+        <text
+          :x="legendSlot.labelX"
+          :y="legendSlot.labelY"
+          text-anchor="middle"
+          class="legend-label"
+        >
+          {{ t('game.play.capital.legend').toUpperCase() }}
+        </text>
+        <rect
+          v-if="!legend"
+          :x="legendSlot.x"
+          :y="legendSlot.y"
+          :width="legendSlot.w"
+          :height="legendSlot.h"
+          rx="6"
+          class="legend-empty"
+        />
+        <text
+          v-if="legend && legend.damage > 0"
+          :x="legendSlot.x + legendSlot.w - 6"
+          :y="legendSlot.y + legendSlot.h - 6"
+          text-anchor="end"
+          class="legend-damage"
+        >
+          {{ legend.damage }}
+        </text>
+      </g>
 
+      <!-- Zone slots (kingdom, quest, battlefield): backings, labels,
+           HP, and tokens. Cards inside each zone live in the HTML
+           overlay. -->
       <g
-        v-for="(tok, i) in zoneTokens(zr.z)"
-        :key="`${zr.label}-tok-${i}`"
-        :transform="`translate(${tokenStripXs(zr.x, zr.w, zoneTokens(zr.z).length)[i]}, ${zr.y + zr.h - 26})`"
+        v-for="zr in zones"
+        :key="zr.label"
+        class="zone-slot"
+        :class="{ burning: zr.burning, burned: zr.burned }"
       >
-        <image :href="tokenSrc[tok.kind]" x="0" y="0" width="22" height="22" />
-        <text v-if="typeof tok.count === 'number'" x="26" y="16" class="token-count">
-          {{ tok.count }}
+        <rect :x="zr.x" :y="zr.y" :width="zr.w" :height="zr.h" rx="6" class="zone-bg" />
+        <text :x="zr.x + 10" :y="zr.y + 16" class="zone-label">{{ zr.label.toUpperCase() }}</text>
+        <text
+          :x="zr.x + zr.w - 10"
+          :y="zr.y + 16"
+          text-anchor="end"
+          class="zone-hp"
+          :class="{ critical: zr.burning }"
+        >
+          {{ zr.z.damage }}/{{ zr.hp }}
         </text>
-      </g>
-    </g>
 
-    <!-- Combined zone: player chip + resources, hand, deck-on-discard -->
-    <g class="combined-row">
-      <!-- Player column (chip on top, resources below) -->
-      <g :transform="`translate(${xs.playerColX}, ${combinedY})`" class="player-col">
-        <!-- Player chip: name + race + first-player + active dot -->
-        <text
-          :x="chip.nameX"
-          :y="chipLocalY"
-          :text-anchor="chip.anchor"
-          class="seat-name"
-        >
-          {{ seatName }}
-        </text>
-        <text
-          :x="chip.raceX"
-          :y="raceLocalY"
-          :text-anchor="chip.anchor"
-          class="race-tag"
-        >
-          {{ raceText }}
-        </text>
-        <circle
-          v-if="isActive"
-          :cx="chip.activeCx"
-          :cy="activeLocalY"
-          r="5"
-          class="active-dot"
-        />
         <g
-          v-if="isFirstPlayer"
-          :transform="`translate(${chip.firstPipX}, ${firstPipLocalY})`"
-          class="first-pip"
+          v-for="(tok, i) in zoneTokens(zr.z)"
+          :key="`${zr.label}-tok-${i}`"
+          :transform="`translate(${tokenStripXs(zr.x, zr.w, zoneTokens(zr.z).length)[i]}, ${zr.y + zr.h - 26})`"
         >
-          <rect x="0" y="0" width="50" height="16" rx="8" />
-          <text x="25" y="12" text-anchor="middle">
-            {{ t('game.play.first_player_tag') }}
-          </text>
-        </g>
-
-        <!-- Resources counter -->
-        <g :transform="`translate(${chip.anchor === 'start' ? 0 : PLAYER_COL_W - RESOURCE_ICON_W - 50}, ${resourcesLocalY})`" class="resources">
-          <image
-            href="/tokens/resource.png"
-            x="0"
-            y="0"
-            :width="RESOURCE_ICON_W"
-            :height="RESOURCE_ICON_W"
-          />
-          <text :x="RESOURCE_ICON_W + 8" y="28" class="counter big">
-            {{ player.resources }}
+          <image :href="tokenSrc[tok.kind]" x="0" y="0" width="22" height="22" />
+          <text v-if="typeof tok.count === 'number'" x="26" y="16" class="token-count">
+            {{ tok.count }}
           </text>
         </g>
       </g>
 
-      <!-- Hand cards, centered in the middle, full combined-row height -->
-      <g class="hand">
-        <SvgCard
-          v-for="(c, i) in handCards"
-          :key="c ? c.key : `opp-${i}`"
-          :x="handXs[i]"
-          :y="handCardY"
-          :card="c"
-          :face-down="perspective === 'opponent'"
-          :width="CARD_SM.w"
-          :height="CARD_SM.h"
-          :clickable="isCardClickable(c)"
-          :transition-name="c ? `card-${c.key}` : undefined"
-          @card-click="(payload) => onHandClick(c, payload)"
+      <!-- Combined zone: player chip + resources + pile labels.
+           Cards (hand, deck top, discard top) live in the overlay. -->
+      <g class="combined-row">
+        <g :transform="`translate(${xs.playerColX}, ${combinedY})`" class="player-col">
+          <text
+            :x="chip.nameX"
+            :y="chipLocalY"
+            :text-anchor="chip.anchor"
+            class="seat-name"
+          >
+            {{ seatName }}
+          </text>
+          <text
+            :x="chip.raceX"
+            :y="raceLocalY"
+            :text-anchor="chip.anchor"
+            class="race-tag"
+          >
+            {{ raceText }}
+          </text>
+          <circle
+            v-if="isActive"
+            :cx="chip.activeCx"
+            :cy="activeLocalY"
+            r="5"
+            class="active-dot"
+          />
+          <g
+            v-if="isFirstPlayer"
+            :transform="`translate(${chip.firstPipX}, ${firstPipLocalY})`"
+            class="first-pip"
+          >
+            <rect x="0" y="0" width="50" height="16" rx="8" />
+            <text x="25" y="12" text-anchor="middle">
+              {{ t('game.play.first_player_tag') }}
+            </text>
+          </g>
+
+          <g :transform="`translate(${chip.anchor === 'start' ? 0 : PLAYER_COL_W - RESOURCE_ICON_W - 50}, ${resourcesLocalY})`" class="resources">
+            <image
+              href="/tokens/resource.png"
+              x="0"
+              y="0"
+              :width="RESOURCE_ICON_W"
+              :height="RESOURCE_ICON_W"
+            />
+            <text :x="RESOURCE_ICON_W + 8" y="28" class="counter big">
+              {{ player.resources }}
+            </text>
+          </g>
+        </g>
+
+        <!-- Empty-pile rects sit underneath the overlay cards so the
+             dashed outline shows through when a pile is exhausted. -->
+        <rect
+          v-if="player.deck.length === 0"
+          :x="xs.pilesX"
+          :y="deckY"
+          :width="PILE_W"
+          :height="PILE_H"
+          rx="6"
+          class="empty-pile"
         />
+        <rect
+          v-if="!topDiscard"
+          :x="xs.pilesX"
+          :y="discardY"
+          :width="PILE_W"
+          :height="PILE_H"
+          rx="6"
+          class="empty-pile"
+        />
+        <text
+          :x="xs.pilesX + PILE_W / 2"
+          :y="pilesLayout.topY - 4"
+          text-anchor="middle"
+          class="pile-label"
+        >
+          {{ pilesLayout.topKind === 'deck'
+            ? `${t('game.play.seat.deck').toUpperCase()} · ${player.deck.length}`
+            : `${t('game.play.seat.discard').toUpperCase()} · ${player.discard.length}` }}
+        </text>
+        <text
+          :x="xs.pilesX + PILE_W / 2"
+          :y="pilesLayout.bottomY - 4"
+          text-anchor="middle"
+          class="pile-label"
+        >
+          {{ pilesLayout.bottomKind === 'deck'
+            ? `${t('game.play.seat.deck').toUpperCase()} · ${player.deck.length}`
+            : `${t('game.play.seat.discard').toUpperCase()} · ${player.discard.length}` }}
+        </text>
+
+        <!-- "Hand: 0" placeholder when the player's hand is empty.
+             Skipping the overlay for this case keeps the no-cards
+             state inside the SVG so it's centred predictably. -->
         <text
           v-if="handCards.length === 0"
           :x="xs.handX + xs.handW / 2"
@@ -599,139 +790,61 @@ const legendSlot = computed(() => {
           {{ t('game.play.seat.hand') }}: 0
         </text>
       </g>
+    </svg>
 
-      <!-- Top pile (deck for self, discard for opponent). The cards land
-           in a landscape PILE_W × PILE_H rect at (xs.pilesX, topY); the
-           SvgCard rotation handles the inner art + hover anchor. -->
-      <g class="pile" :class="`pile-${pilesLayout.topKind}`">
-        <template v-if="pilesLayout.topKind === 'deck'">
-          <SvgCard
-            v-if="player.deck.length > 0"
-            :x="xs.pilesX"
-            :y="pilesLayout.topY"
-            :width="PILE_W"
-            :height="PILE_H"
-            face-down
-            rotated
-          />
-          <rect
-            v-if="player.deck.length === 0"
-            :x="xs.pilesX"
-            :y="pilesLayout.topY"
-            :width="PILE_W"
-            :height="PILE_H"
-            rx="6"
-            class="empty-pile"
-          />
-          <text
-            :x="xs.pilesX + PILE_W / 2"
-            :y="pilesLayout.topY - 4"
-            text-anchor="middle"
-            class="pile-label"
-          >
-            {{ t('game.play.seat.deck').toUpperCase() }} · {{ player.deck.length }}
-          </text>
-        </template>
-        <template v-else>
-          <SvgCard
-            v-if="topDiscard"
-            :x="xs.pilesX"
-            :y="pilesLayout.topY"
-            :width="PILE_W"
-            :height="PILE_H"
-            :card="topDiscard"
-            rotated
-            :transition-name="`card-${topDiscard.key}`"
-          />
-          <rect
-            v-if="!topDiscard"
-            :x="xs.pilesX"
-            :y="pilesLayout.topY"
-            :width="PILE_W"
-            :height="PILE_H"
-            rx="6"
-            class="empty-pile"
-          />
-          <text
-            :x="xs.pilesX + PILE_W / 2"
-            :y="pilesLayout.topY - 4"
-            text-anchor="middle"
-            class="pile-label"
-          >
-            {{ t('game.play.seat.discard').toUpperCase() }} · {{ player.discard.length }}
-          </text>
-        </template>
-      </g>
-
-      <!-- Bottom pile (discard for self, deck for opponent) -->
-      <g class="pile" :class="`pile-${pilesLayout.bottomKind}`">
-        <template v-if="pilesLayout.bottomKind === 'deck'">
-          <SvgCard
-            v-if="player.deck.length > 0"
-            :x="xs.pilesX"
-            :y="pilesLayout.bottomY"
-            :width="PILE_W"
-            :height="PILE_H"
-            face-down
-            rotated
-          />
-          <rect
-            v-if="player.deck.length === 0"
-            :x="xs.pilesX"
-            :y="pilesLayout.bottomY"
-            :width="PILE_W"
-            :height="PILE_H"
-            rx="6"
-            class="empty-pile"
-          />
-          <text
-            :x="xs.pilesX + PILE_W / 2"
-            :y="pilesLayout.bottomY - 4"
-            text-anchor="middle"
-            class="pile-label"
-          >
-            {{ t('game.play.seat.deck').toUpperCase() }} · {{ player.deck.length }}
-          </text>
-        </template>
-        <template v-else>
-          <SvgCard
-            v-if="topDiscard"
-            :x="xs.pilesX"
-            :y="pilesLayout.bottomY"
-            :width="PILE_W"
-            :height="PILE_H"
-            :card="topDiscard"
-            rotated
-            :transition-name="`card-${topDiscard.key}`"
-          />
-          <rect
-            v-if="!topDiscard"
-            :x="xs.pilesX"
-            :y="pilesLayout.bottomY"
-            :width="PILE_W"
-            :height="PILE_H"
-            rx="6"
-            class="empty-pile"
-          />
-          <text
-            :x="xs.pilesX + PILE_W / 2"
-            :y="pilesLayout.bottomY - 4"
-            text-anchor="middle"
-            class="pile-label"
-          >
-            {{ t('game.play.seat.discard').toUpperCase() }} · {{ player.discard.length }}
-          </text>
-        </template>
-      </g>
-    </g>
-  </svg>
+    <!-- HTML card-slot overlay. Lives over the SVG so each card has a
+         real CSS layout box for `view-transition-name` to anchor to.
+         Cards are positioned in % relative to the SVG viewBox, so they
+         line up regardless of the actual rendered size. -->
+    <div class="cards-overlay" aria-hidden="false">
+      <div
+        v-for="slot in cardSlots"
+        :key="slot.key"
+        class="card-slot"
+        :class="{ clickable: slot.clickable }"
+        :style="slotStyle(slot)"
+        @click="onSlotClick(slot, $event)"
+      >
+        <CardArt
+          :card="slot.card"
+          :face-down="slot.faceDown"
+          :rotated="slot.rotated"
+        />
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
 .play-side {
+  position: relative;
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.play-side-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.cards-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.card-slot {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.card-slot.clickable {
+  cursor: pointer;
+}
+.card-slot.clickable:hover {
+  filter: drop-shadow(0 0 6px var(--accent, #c4634a));
 }
 
 .seat-name {

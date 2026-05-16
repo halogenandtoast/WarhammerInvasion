@@ -61,30 +61,31 @@ kbd {
 /* ───────── View Transitions ─────────
  *
  * The game store wraps each engine snapshot update in
- * `document.startViewTransition`. Cards opted in via SvgCard's
- * `transition-name` prop (units, attachments, legends) carry stable
- * names across frames, so the browser pairs old/new snapshots and
- * morphs them between zones. Everything else cross-fades.
+ * `document.startViewTransition`. Every visible card carries a
+ * stable `view-transition-name` of the form `card-<key>` (set on the
+ * HTML card-slot wrapper in PlaySide.vue), so the browser pairs the
+ * old and new snapshots by name and morphs them — hand → zone →
+ * discard all use the same key, so a card animates continuously
+ * across surfaces. Everything else cross-fades.
  *
- * `.card` is the view-transition-class set on every named card so
- * we can tune the morph timing in one place. Entering/leaving cards
- * (a unit reaching the table or being destroyed) get a subtle fade
- * instead of the snappy snap the default would give them.
+ * Default UA crossfade on the root is fine on its own, but we want
+ * named slots to read as MOTION (a card sliding) rather than a fade,
+ * so we override the per-group duration here.
  */
 ::view-transition-group(*) {
   animation-duration: 320ms;
   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
-::view-transition-old(.card),
-::view-transition-new(.card) {
-  animation-duration: 320ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 220ms;
+  animation-timing-function: ease-in-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
   ::view-transition-old(*),
   ::view-transition-new(*) {
-    animation-duration: 0ms;
+    animation-duration: 0.001ms !important;
   }
 }
