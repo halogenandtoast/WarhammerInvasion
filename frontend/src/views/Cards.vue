@@ -482,7 +482,7 @@ function onKey(e: KeyboardEvent) {
   position: sticky;
   top: 60px;
   align-self: start;
-  max-height: calc(100dvh - 60px);
+  height: calc(100dvh - 60px);
   overflow: hidden;
 }
 
