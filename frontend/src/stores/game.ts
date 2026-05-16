@@ -106,8 +106,11 @@ function connect(opts: ConnectOpts) {
     socket = null
   }
   reset()
+  // Wait for auth bootstrap so the first connect carries the right
+  // identity (signed-in user with their JWT, or guest spectator). A
+  // null token is valid here — the server accepts guests.
+  if (!auth.ready.value) return
   const token = auth.accessToken.value
-  if (!token) return
   _gameId.value = opts.gameId
 
   const params = new URLSearchParams()

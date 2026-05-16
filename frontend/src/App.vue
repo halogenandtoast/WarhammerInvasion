@@ -31,7 +31,8 @@ function parseRoute(): Route {
   if (hash === 'login') return { name: 'login' }
   if (hash === 'register') return { name: 'register' }
   if (hash === 'decks') return { name: 'decks' }
-  if (hash === 'lobby') return { name: 'lobby' }
+  if (hash === 'rules') return { name: 'rules' }
+  if (hash === 'lobby' || hash === '') return { name: 'lobby' }
   const gameMatch = /^games\/([\w-]+)(?:\?(.*))?$/.exec(hash)
   if (gameMatch) {
     const id = gameMatch[1]
@@ -47,7 +48,7 @@ function parseRoute(): Route {
   if (edit) return { name: 'deck-edit', id: edit[1] }
   const view = /^decks\/([\w-]+)$/.exec(hash)
   if (view) return { name: 'deck-view', id: view[1] }
-  return { name: 'rules' }
+  return { name: 'lobby' }
 }
 
 const route = ref<Route>(parseRoute())
@@ -75,15 +76,16 @@ async function doLogout() {
   navigate('#/login')
 }
 
-// Public nav: always visible. Decks/Play show up once signed in.
+// Public nav: always visible. "Decks" requires sign-in; "Play" links
+// to the lobby and is open to guests (they spectate from there).
 type NavKey = 'rules' | 'cards' | 'decks' | 'play'
 const navItems = computed<{ id: string; href: string; key: NavKey }[]>(() => {
   const base: { id: string; href: string; key: NavKey }[] = [
-    { id: 'rules', href: '#/', key: 'rules' },
+    { id: 'play', href: '#/lobby', key: 'play' },
+    { id: 'rules', href: '#/rules', key: 'rules' },
     { id: 'cards', href: '#/cards', key: 'cards' },
   ]
   if (auth.isAuthenticated.value) {
-    base.push({ id: 'play', href: '#/lobby', key: 'play' })
     base.push({ id: 'decks', href: '#/decks', key: 'decks' })
   }
   return base
@@ -91,6 +93,8 @@ const navItems = computed<{ id: string; href: string; key: NavKey }[]>(() => {
 
 const view = computed(() => {
   switch (route.value.name) {
+    case 'rules':
+      return { component: Rules, props: {} as Record<string, unknown> }
     case 'cards':
       return { component: Cards, props: {} as Record<string, unknown> }
     case 'login':
@@ -116,16 +120,14 @@ const view = computed(() => {
       }
       return { component: DeckEdit, props: { deckId: route.value.id } }
     case 'lobby':
-      if (!auth.isAuthenticated.value && auth.ready.value) {
-        navigate('#/login')
-        return { component: Login, props: {} }
-      }
+      // Lobby is the home page — signed in or not. Guests get a
+      // read-only view (chat + games), with sign-in CTAs for the
+      // affordances they can't use.
       return { component: Lobby, props: {} }
     case 'game':
-      if (!auth.isAuthenticated.value && auth.ready.value) {
-        navigate('#/login')
-        return { component: Login, props: {} }
-      }
+      // Guests are spectator-only; the game socket accepts them on
+      // games that have spectators enabled. Auth-gating happens in
+      // the lobby UI before they navigate here.
       return {
         component: Game,
         props: {
@@ -135,7 +137,7 @@ const view = computed(() => {
         },
       }
     default:
-      return { component: Rules, props: {} }
+      return { component: Lobby, props: {} }
   }
 })
 
@@ -167,8 +169,8 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
       <div class="topnav-inner">
         <a
           class="brand"
-          :href="auth.isAuthenticated.value ? '#/lobby' : '#'"
-          @click="navClick($event, auth.isAuthenticated.value ? '#/lobby' : '#/')"
+          href="#/"
+          @click="navClick($event, '#/')"
         >
           <span class="brand-mark" aria-hidden="true">⚔</span>
           <span class="brand-text">{{ t('app.brand') }}</span>

@@ -137,24 +137,23 @@ resolveUser env qs = case queryText "token" qs of
 
 handleLobby :: WsEnv -> WS.PendingConnection -> Query -> IO ()
 handleLobby env pending qs = do
+  -- Guests (no token, or an invalid/expired one) are accepted as
+  -- read-only viewers — they see chat + games but can't post or host.
   muser <- resolveUser env qs
-  case muser of
-    Nothing -> WS.rejectRequest pending "unauthorized"
-    Just user -> do
-      conn <- WS.acceptRequest pending
-      WS.withPingThread conn 25 (pure ()) (runLobbyConn env user conn)
+  conn <- WS.acceptRequest pending
+  WS.withPingThread conn 25 (pure ()) (runLobbyConn env muser conn)
 
-runLobbyConn :: WsEnv -> UserInfo -> WS.Connection -> IO ()
-runLobbyConn env user conn = do
+runLobbyConn :: WsEnv -> Maybe UserInfo -> WS.Connection -> IO ()
+runLobbyConn env muser conn = do
   outbox <- atomically newTQueue
-  cid <- atomically (addLobbyConn env.lobby user outbox)
+  cid <- atomically (addLobbyConn env.lobby muser outbox)
   -- Build the welcome inside one transaction so the snapshot is consistent.
   (welcome, usersNow) <- atomically do
     hist <- chatHistorySTM env.lobby.chat
     games <- summariesSTM env.lobby
     users <- uniqueUsersSTM env.lobby
     pure
-      ( LobbyWelcome {you = user, users, games, chat = hist}
+      ( LobbyWelcome {you = muser, users, games, chat = hist}
       , users
       )
   -- Send welcome only to this connection.
@@ -171,7 +170,7 @@ runLobbyConn env user conn = do
           pure us
         -- Suppress warning
         pure (now, users')
-  _ <- try @SomeException (race_ (lobbyWriter conn outbox) (lobbyReader env user conn))
+  _ <- try @SomeException (race_ (lobbyWriter conn outbox) (lobbyReader env muser outbox conn))
   _ <- cleanup
   pure ()
 
@@ -180,12 +179,16 @@ lobbyWriter conn outbox = forever do
   msg <- atomically (readTQueue outbox)
   WS.sendTextData conn (Aeson.encode msg)
 
-lobbyReader :: WsEnv -> UserInfo -> WS.Connection -> IO ()
-lobbyReader env user conn = forever do
+lobbyReader :: WsEnv -> Maybe UserInfo -> TQueue LobbyOut -> WS.Connection -> IO ()
+lobbyReader env muser outbox conn = forever do
   raw <- WS.receiveData conn :: IO BSL.ByteString
   case Aeson.eitherDecode raw of
     Left _ -> pure ()
-    Right msg -> handleLobbyIn env user msg
+    Right msg -> case muser of
+      -- Guests reach this only if they raced the UI (we hide the
+      -- affordances). Surface an explicit code rather than dropping it.
+      Nothing -> atomically (sendTo outbox LobbyError {code = "unauthorized"})
+      Just user -> handleLobbyIn env user msg
 
 handleLobbyIn :: WsEnv -> UserInfo -> LobbyIn -> IO ()
 handleLobbyIn env user = \case
@@ -249,7 +252,11 @@ handleLobbyIn env user = \case
 notifyMe :: WsEnv -> UserInfo -> LobbyOut -> IO ()
 notifyMe env user msg = atomically do
   cs <- readTVar env.lobby.connections
-  traverse_ (\c -> when (c.user.userId == user.userId) (sendTo c.outbox msg)) (Map.elems cs)
+  traverse_
+    (\c -> case c.user of
+        Just u | u.userId == user.userId -> sendTo c.outbox msg
+        _ -> pure ())
+    (Map.elems cs)
 
 notifyError :: WsEnv -> UserInfo -> Text -> IO ()
 notifyError env user code = notifyMe env user LobbyError {code}
@@ -267,40 +274,49 @@ handleGame :: WsEnv -> WS.PendingConnection -> Query -> ByteString -> IO ()
 handleGame env pending qs gidBs = case UUID.fromASCIIBytes gidBs of
   Nothing -> WS.rejectRequest pending "bad game id"
   Just gid -> do
+    -- Guests are accepted as spectators only (see 'canEnter').
     muser <- resolveUser env qs
-    case muser of
-      Nothing -> WS.rejectRequest pending "unauthorized"
-      Just user -> do
-        mslot <- atomically (gameLookup env.lobby gid)
-        case mslot of
-          Nothing -> WS.rejectRequest pending "game not found"
-          Just slot -> do
-            let mPw = queryText "password" qs
-                mInvite = queryText "t" qs
-            authed <- canEnter slot user mPw mInvite
-            if not authed
-              then WS.rejectRequest pending "forbidden"
-              else do
-                conn <- WS.acceptRequest pending
-                WS.withPingThread conn 25 (pure ()) (runGameConn env slot user conn)
+    mslot <- atomically (gameLookup env.lobby gid)
+    case mslot of
+      Nothing -> WS.rejectRequest pending "game not found"
+      Just slot -> do
+        let mPw = queryText "password" qs
+            mInvite = queryText "t" qs
+        authed <- canEnter slot muser mPw mInvite
+        if not authed
+          then WS.rejectRequest pending "forbidden"
+          else do
+            conn <- WS.acceptRequest pending
+            WS.withPingThread conn 25 (pure ()) (runGameConn env slot muser conn)
 
-canEnter :: GameSlot -> UserInfo -> Maybe Text -> Maybe Text -> IO Bool
-canEnter slot user mPw mInvite = atomically do
+canEnter :: GameSlot -> Maybe UserInfo -> Maybe Text -> Maybe Text -> IO Bool
+canEnter slot muser mPw mInvite = atomically do
   sm <- readTVar slot.seats
-  let alreadySeated = any (\r -> r.user.userId == user.userId) (Map.elems sm)
-      isHost = user.userId == slot.host.userId
-      hasSlot = Map.size sm < 2
-      -- A user who isn't seated and isn't the host may still enter as a
-      -- spectator if the game allows it.
-      canBeHere = hasSlot || slot.allowSpectators
-  if alreadySeated || isHost
-    then pure True
-    else case slot.visibility of
-      Public -> pure canBeHere
-      Private -> case (mInvite, mPw, slot.password) of
-        (Just t, _, _) | t == slot.inviteToken -> pure canBeHere
-        (_, Just pw, Just expected) | pw == expected -> pure canBeHere
-        _ -> pure False
+  case muser of
+    -- Guest: spectator-only. The visibility/password gate still applies.
+    Nothing
+      | not slot.allowSpectators -> pure False
+      | otherwise -> case slot.visibility of
+          Public -> pure True
+          Private -> case (mInvite, mPw, slot.password) of
+            (Just t, _, _) | t == slot.inviteToken -> pure True
+            (_, Just pw, Just expected) | pw == expected -> pure True
+            _ -> pure False
+    Just user -> do
+      let alreadySeated = any (\r -> r.user.userId == user.userId) (Map.elems sm)
+          isHost = user.userId == slot.host.userId
+          hasSlot = Map.size sm < 2
+          -- A signed-in viewer who isn't seated and isn't the host may
+          -- still enter as a spectator if the game allows it.
+          canBeHere = hasSlot || slot.allowSpectators
+      if alreadySeated || isHost
+        then pure True
+        else case slot.visibility of
+          Public -> pure canBeHere
+          Private -> case (mInvite, mPw, slot.password) of
+            (Just t, _, _) | t == slot.inviteToken -> pure canBeHere
+            (_, Just pw, Just expected) | pw == expected -> pure canBeHere
+            _ -> pure False
 
 -- | Lobby-side check used by 'LobbyJoinPublic' / 'LobbyJoinWithPassword'
 -- after the visibility/password gate has passed. A user can enter the
@@ -313,12 +329,16 @@ canJoinAsAnything slot user = do
       hasSlot = Map.size sm < 2
   pure (alreadySeated || hasSlot || slot.allowSpectators)
 
-runGameConn :: WsEnv -> GameSlot -> UserInfo -> WS.Connection -> IO ()
-runGameConn env slot user conn = do
+runGameConn :: WsEnv -> GameSlot -> Maybe UserInfo -> WS.Connection -> IO ()
+runGameConn env slot muser conn = do
   outbox <- atomically newTQueue
-  -- Try to reserve a seat (or reclaim existing one). If both seats are
-  -- taken and the slot allows spectators, attach as a spectator instead.
-  mSeat <- atomically (reserveSeat slot user)
+  -- Try to reserve a seat (or reclaim existing one). Guests skip this
+  -- entirely and always attach as spectators. If both seats are taken
+  -- for an authed viewer and the slot allows spectators, attach as a
+  -- spectator instead.
+  mSeat <- case muser of
+    Nothing -> pure Nothing
+    Just user -> atomically (reserveSeat slot user)
   let kind = case mSeat of
         Just _ -> ConnSeated
         Nothing -> ConnSpectator
@@ -327,22 +347,22 @@ runGameConn env slot user conn = do
       WS.sendTextData conn (Aeson.encode GameError {code = "no_seat"})
       WS.sendClose conn ("full" :: ByteString)
     _ -> do
-      cid <- atomically (attachGameConn slot user outbox kind)
-      welcomeView <- atomically (gameViewSTM slot user)
-      atomically (sendTo outbox GameWelcome {you = user, game = welcomeView})
+      cid <- atomically (attachGameConn slot muser outbox kind)
+      welcomeView <- atomically (gameViewSTM slot muser)
+      atomically (sendTo outbox GameWelcome {you = muser, game = welcomeView})
       -- Inform other connections + lobby listings about the new viewer.
       atomically do
-        v <- gameViewSTM slot user
+        v <- gameViewSTM slot muser
         broadcastGameWithView slot v
         sm <- summariesSTM env.lobby
         broadcastLobby env.lobby LobbyGamesUpdate {games = sm}
       _ <- try @SomeException
-        (race_ (gameWriter conn outbox) (gameReader env slot user conn))
+        (race_ (gameWriter conn outbox) (gameReader env slot muser outbox conn))
       now <- getCurrentTime
       atomically do
         detachGameConn slot cid now
         -- Slot view changes when conns drop (live count). Re-broadcast.
-        v <- gameViewSTM slot user
+        v <- gameViewSTM slot muser
         broadcastGameWithView slot v
         sm <- summariesSTM env.lobby
         broadcastLobby env.lobby LobbyGamesUpdate {games = sm}
@@ -364,12 +384,14 @@ gameWriter conn outbox = forever do
   msg <- atomically (readTQueue outbox)
   WS.sendTextData conn (Aeson.encode msg)
 
-gameReader :: WsEnv -> GameSlot -> UserInfo -> WS.Connection -> IO ()
-gameReader env slot user conn = forever do
+gameReader :: WsEnv -> GameSlot -> Maybe UserInfo -> TQueue GameOut -> WS.Connection -> IO ()
+gameReader env slot muser outbox conn = forever do
   raw <- WS.receiveData conn :: IO BSL.ByteString
   case Aeson.eitherDecode raw of
     Left _ -> pure ()
-    Right msg -> handleGameIn env slot user msg
+    Right msg -> case muser of
+      Nothing -> atomically (sendTo outbox GameError {code = "unauthorized"})
+      Just user -> handleGameIn env slot user msg
 
 handleGameIn :: WsEnv -> GameSlot -> UserInfo -> GameIn -> IO ()
 handleGameIn env slot user = \case
@@ -407,7 +429,7 @@ handleGameIn env slot user = \case
                       }
                 atomically do
                   setSeatDeck slot k dv
-                  v <- gameViewSTM slot user
+                  v <- gameViewSTM slot (Just user)
                   broadcastGameWithView slot v
   GameClearDeck -> do
     sts <- readTVarIO slot.status
@@ -419,7 +441,7 @@ handleGameIn env slot user = \case
         Nothing -> pure ()
         Just k -> atomically do
           clearSeatDeck slot k
-          v <- gameViewSTM slot user
+          v <- gameViewSTM slot (Just user)
           broadcastGameWithView slot v
   GameStart
     | user.userId /= slot.host.userId -> sendGameError slot user "not_host"
@@ -455,7 +477,7 @@ handleGameIn env slot user = \case
                             atomically do
                               writeTVar slot.engine (Just g2)
                               trySetStatus slot StatusPlaying
-                              v <- gameViewSTM slot user
+                              v <- gameViewSTM slot (Just user)
                               broadcastGameWithView slot v
                               summaries <- summariesSTM env.lobby
                               broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
@@ -473,7 +495,7 @@ handleGameIn env slot user = \case
             g' <- applyMessage g (PassPriority pk)
             atomically do
               writeTVar slot.engine (Just g')
-              v <- gameViewSTM slot user
+              v <- gameViewSTM slot (Just user)
               broadcastGameWithView slot v
   GamePlayCard {cardKey, zone, target} -> do
     mGame <- readTVarIO slot.engine
@@ -493,7 +515,7 @@ handleGameIn env slot user = \case
                 g' <- applyMessage g msg
                 atomically do
                   writeTVar slot.engine (Just g')
-                  v <- gameViewSTM slot user
+                  v <- gameViewSTM slot (Just user)
                   broadcastGameWithView slot v
   GameTriggerAction {source, actionIndex, target, targetZone} -> do
     mGame <- readTVarIO slot.engine
@@ -514,7 +536,7 @@ handleGameIn env slot user = \case
             g' <- applyMessage g (TriggerCardAction pk source actionIndex actionTarget)
             atomically do
               writeTVar slot.engine (Just g')
-              v <- gameViewSTM slot user
+              v <- gameViewSTM slot (Just user)
               broadcastGameWithView slot v
   GameLeave -> do
     sts <- readTVarIO slot.status
@@ -524,7 +546,7 @@ handleGameIn env slot user = \case
     atomically do
       wasSeated <- removeSeat slot user.userId
       when (wasSeated && sts == StatusPlaying) (trySetStatus slot StatusEnded)
-      v <- gameViewSTM slot user
+      v <- gameViewSTM slot (Just user)
       broadcastGameWithView slot v
       summaries <- summariesSTM env.lobby
       broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
@@ -532,8 +554,10 @@ handleGameIn env slot user = \case
       -- redirect them back to the lobby cleanly.
       conns <- readTVar slot.connections
       traverse_
-        (\c -> when (c.user.userId == user.userId)
-          (sendTo c.outbox GameClosed {reason = "left"}))
+        (\c -> case c.user of
+            Just u | u.userId == user.userId ->
+              sendTo c.outbox GameClosed {reason = "left"}
+            _ -> pure ())
         (Map.elems conns)
 
 findSeatFor :: UserInfo -> Map.Map Text SeatRow -> Maybe Text
@@ -597,7 +621,9 @@ sendGameError :: GameSlot -> UserInfo -> Text -> IO ()
 sendGameError slot user code = atomically do
   cs <- readTVar slot.connections
   traverse_
-    (\c -> when (c.user.userId == user.userId) (sendTo c.outbox GameError {code}))
+    (\c -> case c.user of
+        Just u | u.userId == user.userId -> sendTo c.outbox GameError {code}
+        _ -> pure ())
     (Map.elems cs)
 
 countCards :: Aeson.Value -> Int

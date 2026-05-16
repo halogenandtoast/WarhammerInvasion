@@ -82,8 +82,12 @@ function handle(msg: LobbyOut) {
 
 function connect() {
   if (socket) return
+  // Wait for the auth bootstrap to settle so we don't open a guest
+  // socket only to immediately replace it once the access token
+  // arrives. Once `ready`, we open either authed (token present) or
+  // guest (token null); the server handles both.
+  if (!auth.ready.value) return
   const token = auth.accessToken.value
-  if (!token) return
   socket = openSocket<LobbyOut, LobbyIn>(
     { url: '/ws/lobby', token },
     {
@@ -111,6 +115,7 @@ function createGame(input: {
   name: string
   visibility: 'Public' | 'Private'
   password: string | null
+  allowSpectators: boolean | null
 }) {
   socket?.send({ tag: 'LobbyCreateGame', ...input })
 }

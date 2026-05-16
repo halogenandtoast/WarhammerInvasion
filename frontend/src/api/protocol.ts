@@ -39,6 +39,8 @@ export interface GameSummary {
   hasPassword: boolean
   filledSeats: number
   status: GameStatus
+  allowSpectators: boolean
+  spectatorCount: number
 }
 
 export interface GameView {
@@ -47,6 +49,8 @@ export interface GameView {
   host: UserInfo
   visibility: Visibility
   hasPassword: boolean
+  allowSpectators: boolean
+  spectatorCount: number
   inviteToken: string | null
   seats: SeatView[]
   status: GameStatus
@@ -293,6 +297,9 @@ export type LobbyIn =
       name: string
       visibility: Visibility
       password: string | null
+      // Optional: when null, server defaults to true for public games
+      // and false for private ones.
+      allowSpectators: boolean | null
     }
   | { tag: 'LobbyJoinPublic'; gameId: string }
   | { tag: 'LobbyJoinWithPassword'; gameId: string; password: string | null }
@@ -300,7 +307,9 @@ export type LobbyIn =
 export type LobbyOut =
   | {
       tag: 'LobbyWelcome'
-      you: UserInfo
+      // Null for guest connections — they see chat + games but can't
+      // post or host.
+      you: UserInfo | null
       users: UserInfo[]
       games: GameSummary[]
       chat: ChatLine[]
@@ -333,7 +342,8 @@ export type GameIn =
   | { tag: 'GameLeave' }
 
 export type GameOut =
-  | { tag: 'GameWelcome'; you: UserInfo; game: GameView }
+  // Null `you` indicates a guest spectator (no signed-in account).
+  | { tag: 'GameWelcome'; you: UserInfo | null; game: GameView }
   | { tag: 'GameUpdate'; game: GameView }
   | { tag: 'GameChatNew'; line: ChatLine }
   | { tag: 'GameError'; code: string }

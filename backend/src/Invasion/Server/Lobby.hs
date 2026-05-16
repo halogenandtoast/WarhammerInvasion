@@ -78,7 +78,9 @@ type ConnId = Int
 
 data LobbyConn = LobbyConn
   { connId :: ConnId
-  , user :: UserInfo
+  , user :: Maybe UserInfo
+    -- ^ 'Nothing' for guest connections (no JWT in the upgrade query).
+    -- Guests receive broadcasts but can't post chat or host/join games.
   , outbox :: TQueue LobbyOut
   }
 
@@ -90,7 +92,9 @@ data ConnKind = ConnSeated | ConnSpectator
 
 data GameConn = GameConn
   { connId :: ConnId
-  , user :: UserInfo
+  , user :: Maybe UserInfo
+    -- ^ 'Nothing' for guest spectators. Seated connections always carry
+    -- a 'Just'; guests are always 'ConnSpectator'.
   , outbox :: TQueue GameOut
   , kind :: ConnKind
   }
@@ -150,7 +154,7 @@ freshConnId st = do
 -- ----------------------------------------------------------------------------
 -- Lobby connection book-keeping
 
-addLobbyConn :: LobbyState -> UserInfo -> TQueue LobbyOut -> STM ConnId
+addLobbyConn :: LobbyState -> Maybe UserInfo -> TQueue LobbyOut -> STM ConnId
 addLobbyConn st user outbox = do
   cid <- freshConnId st
   modifyTVar' st.connections (Map.insert cid LobbyConn {connId = cid, user, outbox})
@@ -174,7 +178,12 @@ uniqueUsersSTM :: LobbyState -> STM [UserInfo]
 uniqueUsersSTM st = do
   conns <- readTVar st.connections
   let users :: Set (UUID, Text)
-      users = Set.fromList [(u.userId, u.displayName) | c <- Map.elems conns, let u = c.user]
+      users =
+        Set.fromList
+          [ (u.userId, u.displayName)
+          | c <- Map.elems conns
+          , Just u <- [c.user]
+          ]
   pure [UserInfo i n | (i, n) <- Set.toList users]
 
 broadcastLobby :: LobbyState -> LobbyOut -> STM ()
@@ -245,19 +254,22 @@ summariesSTM st = do
       , spectatorCount = spec
       }
 
--- | Count unique spectator users currently connected to a slot. A user
--- with multiple browser tabs spectating still counts once.
+-- | Count spectators currently connected to a slot. Authenticated
+-- spectators are deduplicated by user id (one viewer can have several
+-- tabs open and still counts once). Guest spectators have no identity
+-- to dedupe on, so each guest connection contributes one.
 countSpectatorsSTM :: GameSlot -> STM Int
 countSpectatorsSTM slot = do
   conns <- readTVar slot.connections
-  let userIds =
-        Set.fromList
-          [c.user.userId | c <- Map.elems conns, c.kind == ConnSpectator]
-  pure (Set.size userIds)
+  let spectators = [c | c <- Map.elems conns, c.kind == ConnSpectator]
+      authedIds = Set.fromList [u.userId | c <- spectators, Just u <- [c.user]]
+      guestCount = length [() | c <- spectators, case c.user of Nothing -> True; _ -> False]
+  pure (Set.size authedIds + guestCount)
 
 -- | Attach a fresh WS connection to a game slot. Bumps the slot out of
--- "everybody left" idle countdown.
-attachGameConn :: GameSlot -> UserInfo -> TQueue GameOut -> ConnKind -> STM ConnId
+-- "everybody left" idle countdown. 'Nothing' for the user means a guest
+-- spectator (the caller must have already validated this is allowed).
+attachGameConn :: GameSlot -> Maybe UserInfo -> TQueue GameOut -> ConnKind -> STM ConnId
 attachGameConn slot user outbox kind = do
   -- Use the slot's own connId space — we never collide with lobby ids
   -- because the conn id is only ever compared within a slot.
@@ -324,7 +336,7 @@ removeSeat slot uid = do
 trySetStatus :: GameSlot -> GameStatus -> STM ()
 trySetStatus slot s = writeTVar slot.status s
 
-gameViewSTM :: GameSlot -> UserInfo -> STM GameView
+gameViewSTM :: GameSlot -> Maybe UserInfo -> STM GameView
 gameViewSTM slot viewer = do
   sm <- readTVar slot.seats
   sts <- readTVar slot.status
@@ -340,9 +352,9 @@ gameViewSTM slot viewer = do
             }
         | (k, r) <- sortOn fst (Map.toList sm)
         ]
-      tokenForViewer
-        | viewer.userId == slot.host.userId = Just slot.inviteToken
-        | otherwise = Nothing
+      tokenForViewer = case viewer of
+        Just u | u.userId == slot.host.userId -> Just slot.inviteToken
+        _ -> Nothing
   pure GameView
     { gameId = slot.gameId
     , name = slot.name

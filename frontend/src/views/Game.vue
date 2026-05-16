@@ -40,6 +40,11 @@ const errorBanner = ref<string | null>(null)
 const view = computed(() => game.view.value)
 const you = computed(() => game.you.value)
 const engine = computed(() => game.engine.value)
+// Guest = signed-out viewer. They land here via the lobby's
+// "Spectate" button on a public spectator-friendly game. The server
+// rejects all `GameIn` actions from guests, so the UI hides those
+// affordances rather than presenting a button that silently fails.
+const isGuest = computed(() => auth.ready.value && you.value === null)
 
 const isPlaying = computed(() => view.value?.status === 'StatusPlaying' && !!engine.value)
 const isWaiting = computed(() => view.value?.status === 'StatusWaiting')
@@ -55,6 +60,19 @@ const seat2 = computed<SeatView | null>(() =>
 const isHost = computed<boolean>(
   () => !!view.value && !!you.value && view.value.host.userId === you.value.userId,
 )
+
+// True when you're not occupying either seat. Includes guests, who can
+// never be seated. Host watching their own (unstarted) game still
+// counts as seated only if they're in the seat list — see `mySeatKey`.
+const isSpectator = computed<boolean>(() => {
+  const v = view.value
+  if (!v) return false
+  const me = you.value
+  if (!me) return true
+  return !v.seats.some((s) => s.user.userId === me.userId)
+})
+
+const spectatorCount = computed<number>(() => view.value?.spectatorCount ?? 0)
 
 const bothReady = computed<boolean>(() => {
   const v = view.value
@@ -165,12 +183,19 @@ onMounted(async () => {
     password: props.password,
   })
 
-  decksLoading.value = true
-  try {
-    decks.value = await listDecks()
-  } catch (e) {
-    decksError.value = e instanceof ApiError ? e.code : 'load_failed'
-  } finally {
+  // Guests can't load decks (the API is auth-gated) and can't take a
+  // seat anyway, so don't bother fetching. Drop the loading flag so
+  // the SeatBody doesn't get stuck on its "Loading decks…" line.
+  if (auth.isAuthenticated.value) {
+    decksLoading.value = true
+    try {
+      decks.value = await listDecks()
+    } catch (e) {
+      decksError.value = e instanceof ApiError ? e.code : 'load_failed'
+    } finally {
+      decksLoading.value = false
+    }
+  } else {
     decksLoading.value = false
   }
 })
@@ -182,22 +207,19 @@ watch(
   (id) => game.connect({ gameId: id, inviteToken: props.inviteToken, password: props.password }),
 )
 
+// Reconnect whenever the auth identity changes. The first firing
+// covers the cold bootstrap (ready flips false→true) so the initial
+// `game.connect` in onMounted bails harmlessly and this watcher opens
+// the real socket once we know whether we're authed or a guest.
 watch(
-  () => auth.isAuthenticated.value,
-  (v) => {
-    if (!v) {
-      game.disconnect()
-      emit('navigate', '#/login')
-    } else {
-      // Auth bootstrap completed after this view mounted (refresh on a
-      // game URL). The initial connect call bailed because the access
-      // token wasn't ready yet — try again now.
-      game.connect({
-        gameId: props.gameId,
-        inviteToken: props.inviteToken,
-        password: props.password,
-      })
-    }
+  () => [auth.ready.value, auth.accessToken.value] as const,
+  () => {
+    game.disconnect()
+    game.connect({
+      gameId: props.gameId,
+      inviteToken: props.inviteToken,
+      password: props.password,
+    })
   },
 )
 
@@ -326,6 +348,7 @@ function mapError(code: string): string {
     'card_unknown',
     'zone_required',
     'target_required',
+    'unauthorized',
   ]
   if (known.includes(code)) return t(`game.errors.${code}`, code)
   return code
@@ -342,6 +365,13 @@ function selectDeck(e: Event) {
 function clearDeck() { game.clearDeck() }
 function start() { game.startGame() }
 function leave() {
+  // Spectators aren't seated, so leaving doesn't end the game — just
+  // navigate back. Confirming would be misleading ("ends the game for
+  // both players").
+  if (isSpectator.value) {
+    emit('navigate', '#/lobby')
+    return
+  }
   if (!confirm(t('game.controls.confirm_leave'))) return
   game.leaveGame()
 }
@@ -389,6 +419,15 @@ function formatTime(at: string): string {
           <span class="status-dot" aria-hidden="true" />
           {{ t(`lobby.status.${game.status.value}`) }}
         </span>
+        <span
+          v-if="spectatorCount > 0"
+          class="spec-pill"
+          :title="t('game.spectators.tooltip', { n: spectatorCount })"
+        >
+          <span class="spec-eye" aria-hidden="true">👁</span>
+          {{ t('game.spectators.count', { n: spectatorCount }) }}
+        </span>
+        <span v-if="isSpectator" class="spec-tag">{{ t('game.spectators.you_tag') }}</span>
         <span class="phase-heading">{{ phaseHeading }}</span>
       </div>
     </header>
@@ -465,19 +504,22 @@ function formatTime(at: string): string {
           </section>
 
           <section class="controls">
-            <button
-              class="primary big"
-              type="button"
-              :disabled="startDisabledReason !== null"
-              :title="startDisabledReason ?? undefined"
-              @click="start"
-            >
-              {{ t('game.controls.start') }}
-            </button>
-            <p v-if="startDisabledReason" class="hint">{{ startDisabledReason }}</p>
+            <template v-if="!isSpectator">
+              <button
+                class="primary big"
+                type="button"
+                :disabled="startDisabledReason !== null"
+                :title="startDisabledReason ?? undefined"
+                @click="start"
+              >
+                {{ t('game.controls.start') }}
+              </button>
+              <p v-if="startDisabledReason" class="hint">{{ startDisabledReason }}</p>
+            </template>
+            <p v-else class="hint">{{ t('game.spectators.waiting_note') }}</p>
 
             <button class="danger" type="button" @click="leave">
-              {{ t('game.controls.leave') }}
+              {{ isSpectator ? t('game.spectators.leave') : t('game.controls.leave') }}
             </button>
           </section>
         </template>
@@ -537,7 +579,7 @@ function formatTime(at: string): string {
               </template>
             </ol>
           </div>
-          <form class="chat-input" @submit.prevent="sendChat">
+          <form v-if="!isGuest" class="chat-input" @submit.prevent="sendChat">
             <input
               v-model="chatText"
               type="text"
@@ -549,6 +591,12 @@ function formatTime(at: string): string {
               {{ t('game.chat.send') }}
             </button>
           </form>
+          <div v-else class="chat-input chat-input-guest">
+            <p class="guest-cta-text">{{ t('game.chat.guest_cta') }}</p>
+            <button class="primary" type="button" @click="emit('navigate', '#/login')">
+              {{ t('app.nav.login') }}
+            </button>
+          </div>
         </section>
       </aside>
     </section>
@@ -595,7 +643,7 @@ function formatTime(at: string): string {
         </li>
       </ol>
       <button class="leave-btn" type="button" @click="leave">
-        {{ t('game.controls.leave') }}
+        {{ isSpectator ? t('game.spectators.leave') : t('game.controls.leave') }}
       </button>
     </footer>
   </main>
@@ -716,6 +764,35 @@ function formatTime(at: string): string {
 .status-pill[data-status='open'] .status-dot { background: #5da46a; }
 .status-pill[data-status='connecting'] .status-dot { background: #d8b66c; animation: pulse 1.2s infinite; }
 .status-pill[data-status='closed'] .status-dot { background: var(--accent-strong); }
+
+.spec-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 24px;
+  padding: 0 0.55rem;
+  background: rgba(95, 160, 214, 0.10);
+  border: 1px solid rgba(95, 160, 214, 0.30);
+  border-radius: var(--radius-pill);
+  color: var(--race-high-elf, #5fa0d6);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+.spec-eye { font-size: 0.85rem; line-height: 1; }
+
+.spec-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 0.55rem;
+  background: rgba(212, 179, 87, 0.16);
+  border: 1px solid rgba(212, 179, 87, 0.4);
+  border-radius: var(--radius-pill);
+  color: var(--race-empire, #d4b357);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 
 .phase-heading {
   font-size: 0.78rem;
@@ -1053,6 +1130,17 @@ function formatTime(at: string): string {
 .chat-input input:focus-visible {
   outline: 2px solid var(--accent-strong);
   border-color: var(--accent-strong);
+}
+
+.chat-input-guest {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+.guest-cta-text {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 0.82rem;
 }
 
 /* ───────── bottom phase bar ───────── */

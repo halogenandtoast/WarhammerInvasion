@@ -712,6 +712,7 @@ lobby:
     send: Send
     empty: No messages yet. Be the first to say hello.
     user_joined_label: "{name} is online"
+    guest_cta: Sign in to join the conversation.
   users:
     heading: "Online ({count})"
   games:
@@ -719,6 +720,7 @@ lobby:
     none: No public games yet. Host one to start the fun.
     host_button: Host a game
     cancel_host: Cancel
+    guest_host_cta: Sign in to host
     new_form:
       name_label: Game name
       name_placeholder: e.g. Friday night brawl
@@ -730,6 +732,8 @@ lobby:
       password_label: Password (optional)
       password_placeholder: Leave blank to require the link
       password_help: If you set a password, friends can join via this lobby without the link.
+      spectators_label: Allow spectators
+      spectators_help: Anyone with access can watch even when both seats are taken.
       submit: Create game
       submitting: Creating…
     card:
@@ -737,15 +741,19 @@ lobby:
       private_badge: Private
       public_badge: Public
       password_badge: Password
+      spectators_badge: Spectators welcome
+      spectators_count: "👁 {n} watching"
       seats_label: "{filled}/2 seated"
       status_waiting: Waiting
       status_playing: In progress
       status_ended: Ended
       join: Join
+      spectate: Spectate
       resume: Open
       password_prompt: "Enter password for {name}"
       cancel: Cancel
       join_password: Join with password
+      guest_blocked: Sign in to join — this game isn't open to spectators.
   errors:
     network: Lost the connection to the lobby. Trying again…
     name_too_short: Give the game a name.
@@ -755,6 +763,10 @@ lobby:
     game_is_private: That game is private; ask the host for a link or password.
     game_full: That game already has two players.
     wrong_password: Wrong password.
+    unauthorized: Sign in to do that.
+  guest_banner:
+    lead: You're browsing as a guest — you can read the hall and spectate public games.
+    cta: Sign in to chat and play.
 
 game:
   page_title: Game
@@ -794,12 +806,19 @@ game:
     start_disabled_started: Game has already started.
     leave: Leave game
     confirm_leave: Leaving will end the game for both players. Continue?
+  spectators:
+    count: "{n} watching"
+    tooltip: "{n} spectators are watching this game"
+    you_tag: Spectating
+    waiting_note: You're watching this game. The host will start when both players are ready.
+    leave: Stop watching
   messages:
     heading: Messages
     empty: No messages yet.
   chat:
     placeholder: Say something to your opponent…
     send: Send
+    guest_cta: Sign in to chat with the players.
   errors:
     not_seated: You're not seated in this game.
     deck_not_found: That deck no longer exists.
@@ -814,6 +833,7 @@ game:
     card_unknown: That card isn't recognised by the engine.
     zone_required: Pick a zone for that card first.
     target_required: Pick a target unit for that attachment first.
+    unauthorized: Sign in to take that action.
   invite_join:
     heading: Join this game
     lead: You're joining via an invite link. Connecting…

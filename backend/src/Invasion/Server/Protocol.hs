@@ -139,7 +139,9 @@ data LobbyIn
 
 data LobbyOut
   = LobbyWelcome
-      { you :: UserInfo
+      { you :: Maybe UserInfo
+        -- ^ 'Nothing' for guest (unauthenticated) connections. Guests
+        -- see the chat + game list but can't post or host.
       , users :: [UserInfo]
       , games :: [GameSummary]
       , chat :: [ChatLine]
@@ -211,7 +213,8 @@ data ZoneTarget = ZoneTarget
 
 data GameOut
   = GameWelcome
-      { you :: UserInfo
+      { you :: Maybe UserInfo
+        -- ^ 'Nothing' for guest spectators (no signed-in account).
       , game :: GameView
       }
   | GameUpdate { game :: GameView }

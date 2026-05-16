@@ -13,6 +13,11 @@ const showHost = ref(false)
 const newName = ref('')
 const newVisibility = ref<'Public' | 'Private'>('Public')
 const newPassword = ref('')
+// Spectator preference. Resets to the visibility-driven default each
+// time the user flips visibility (see watcher below), so the form
+// matches the new default when they change their mind. They can still
+// override it.
+const newAllowSpectators = ref(true)
 const creating = ref(false)
 
 const promptForPassword = ref<GameSummary | null>(null)
@@ -30,21 +35,32 @@ onMounted(() => {
 onBeforeUnmount(() => {
   // Keep the connection alive when navigating to a game (the game view
   // is responsible for its own socket). Only fully disconnect when
-  // logging out, which auth.logout handles via the watcher below.
+  // logging out, which the watcher below handles.
 })
 
+// Reconnect whenever the auth identity changes — including the cold
+// bootstrap (ready flips false→true), sign-in, and sign-out. The
+// server hands back a fresh welcome that reflects whichever identity
+// we open the socket with (signed-in user or anonymous guest).
 watch(
-  () => auth.isAuthenticated.value,
-  (v) => {
-    if (!v) {
-      lobby.disconnect()
-    } else {
-      lobby.connect()
-    }
+  () => [auth.ready.value, auth.accessToken.value] as const,
+  () => {
+    lobby.disconnect()
+    lobby.connect()
   },
 )
 
 // Errors from the lobby socket: surface the latest one as a banner.
+// Default the spectator toggle to match the chosen visibility: public
+// games invite spectators by default, private ones don't. The user can
+// override after flipping if they want.
+watch(
+  () => newVisibility.value,
+  (v) => {
+    newAllowSpectators.value = v === 'Public'
+  },
+)
+
 watch(
   () => lobby.lastError.value?.at,
   () => {
@@ -100,6 +116,10 @@ const publicGames = computed(() =>
 )
 
 const me = computed(() => lobby.you.value)
+// Guests (anonymous viewers) see the lobby in read-only mode: chat
+// and game list visible, but the chat input, host button, and seated
+// join button are gated behind sign-in.
+const isGuest = computed(() => auth.ready.value && me.value === null)
 
 function isMine(g: GameSummary): boolean {
   return me.value != null && g.host.userId === me.value.userId
@@ -114,16 +134,22 @@ function errorMessage(code: string): string {
     'game_is_private',
     'game_full',
     'wrong_password',
+    'unauthorized',
   ]
   if (known.includes(code)) return t(`lobby.errors.${code}`)
   return code
 }
 
 function sendChat() {
+  if (isGuest.value) return
   const text = chatText.value.trim()
   if (!text) return
   lobby.sendChat(text)
   chatText.value = ''
+}
+
+function goSignIn() {
+  emit('navigate', '#/login')
 }
 
 function openHost() {
@@ -141,11 +167,19 @@ function submitHost() {
     name,
     visibility: newVisibility.value,
     password: newVisibility.value === 'Private' && pw.length > 0 ? pw : null,
+    allowSpectators: newAllowSpectators.value,
   })
 }
 
 function clickJoin(g: GameSummary) {
   errorBanner.value = null
+  if (isGuest.value) {
+    // Guests skip the `LobbyJoinPublic` round trip — they can't claim
+    // a seat anyway, so we route them straight to the game socket as
+    // a spectator. The game socket itself enforces allowSpectators.
+    emit('navigate', `#/games/${g.gameId}`)
+    return
+  }
   if (isMine(g)) {
     emit('navigate', `#/games/${g.gameId}`)
     return
@@ -171,6 +205,24 @@ function submitPasswordJoin() {
 function cancelPasswordJoin() {
   promptForPassword.value = null
   passwordInput.value = ''
+}
+
+// Label for the join button. "Resume" if it's our own game, "Spectate"
+// when both seats are taken on a spectator-friendly game (or for any
+// guest viewer, who can never claim a seat), otherwise plain "Join".
+// The button still fires `clickJoin` either way; the server attaches
+// us as the right kind of viewer.
+function joinLabel(g: GameSummary): string {
+  if (isMine(g)) return t('lobby.games.card.resume')
+  if (isGuest.value) return t('lobby.games.card.spectate')
+  if (g.filledSeats >= 2 && g.allowSpectators) return t('lobby.games.card.spectate')
+  return t('lobby.games.card.join')
+}
+
+// Guests can only enter games that explicitly welcome spectators.
+function canClickJoin(g: GameSummary): boolean {
+  if (!isGuest.value) return true
+  return g.visibility === 'Public' && g.allowSpectators
 }
 
 function statusLabel(s: GameSummary['status']): string {
@@ -204,6 +256,13 @@ function formatTime(at: string): string {
       </div>
     </header>
 
+    <p v-if="isGuest" class="guest-banner">
+      {{ t('lobby.guest_banner.lead') }}
+      <button class="link-button" type="button" @click="goSignIn">
+        {{ t('lobby.guest_banner.cta') }}
+      </button>
+    </p>
+
     <p v-if="errorBanner" class="error" role="alert">{{ errorBanner }}</p>
 
     <section class="lobby-grid">
@@ -226,7 +285,7 @@ function formatTime(at: string): string {
             </li>
           </ul>
         </div>
-        <form class="chat-input" @submit.prevent="sendChat">
+        <form v-if="!isGuest" class="chat-input" @submit.prevent="sendChat">
           <input
             v-model="chatText"
             type="text"
@@ -238,6 +297,12 @@ function formatTime(at: string): string {
             {{ t('lobby.chat.send') }}
           </button>
         </form>
+        <div v-else class="chat-input chat-input-guest">
+          <p class="guest-cta-text">{{ t('lobby.chat.guest_cta') }}</p>
+          <button class="primary" type="button" @click="goSignIn">
+            {{ t('app.nav.login') }}
+          </button>
+        </div>
       </section>
 
       <!-- Sidebar -->
@@ -258,8 +323,11 @@ function formatTime(at: string): string {
         <section class="games-panel">
           <header class="panel-head with-action">
             <h2>{{ t('lobby.games.heading') }}</h2>
-            <button class="ghost" type="button" @click="openHost">
+            <button v-if="!isGuest" class="ghost" type="button" @click="openHost">
               {{ showHost ? t('lobby.games.cancel_host') : t('lobby.games.host_button') }}
+            </button>
+            <button v-else class="ghost" type="button" @click="goSignIn">
+              {{ t('lobby.games.guest_host_cta') }}
             </button>
           </header>
 
@@ -304,6 +372,14 @@ function formatTime(at: string): string {
               <small class="hint">{{ t('lobby.games.new_form.password_help') }}</small>
             </label>
 
+            <label class="spec-option">
+              <input v-model="newAllowSpectators" type="checkbox" />
+              <span>
+                <strong>{{ t('lobby.games.new_form.spectators_label') }}</strong>
+                <small>{{ t('lobby.games.new_form.spectators_help') }}</small>
+              </span>
+            </label>
+
             <button class="primary" type="submit" :disabled="creating || !newName.trim()">
               {{ creating ? t('lobby.games.new_form.submitting') : t('lobby.games.new_form.submit') }}
             </button>
@@ -331,16 +407,28 @@ function formatTime(at: string): string {
                     <span v-if="g.hasPassword" class="badge badge-pw">
                       {{ t('lobby.games.card.password_badge') }}
                     </span>
+                    <span v-if="g.allowSpectators" class="badge badge-spec">
+                      {{ t('lobby.games.card.spectators_badge') }}
+                    </span>
                   </div>
                 </div>
                 <p class="game-meta">
                   {{ t('lobby.games.card.host_by', { name: g.host.displayName }) }}
                   · {{ t('lobby.games.card.seats_label', { filled: g.filledSeats }) }}
                   · <span class="status-tag" :data-status="g.status">{{ statusLabel(g.status) }}</span>
+                  <template v-if="g.spectatorCount > 0">
+                    · {{ t('lobby.games.card.spectators_count', { n: g.spectatorCount }) }}
+                  </template>
                 </p>
               </div>
-              <button class="primary" type="button" @click="clickJoin(g)">
-                {{ isMine(g) ? t('lobby.games.card.resume') : t('lobby.games.card.join') }}
+              <button
+                class="primary"
+                type="button"
+                :disabled="!canClickJoin(g)"
+                :title="!canClickJoin(g) ? t('lobby.games.card.guest_blocked') : undefined"
+                @click="clickJoin(g)"
+              >
+                {{ joinLabel(g) }}
               </button>
             </li>
           </ul>
@@ -452,6 +540,43 @@ h1 {
   background: var(--bg-elev);
   border-left: 3px solid var(--accent-strong);
   border-radius: var(--radius-sm);
+}
+
+.guest-banner {
+  margin: 0 0 1rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--fg-dim);
+  font-size: 0.88rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.link-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+.link-button:hover { color: var(--accent); }
+
+.chat-input-guest {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.guest-cta-text {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 0.85rem;
 }
 
 .lobby-grid {
@@ -686,6 +811,12 @@ h1 {
   color: var(--race-empire);
 }
 
+.badge-spec {
+  background: rgba(95, 160, 214, 0.10);
+  border-color: rgba(95, 160, 214, 0.30);
+  color: var(--race-high-elf, #5fa0d6);
+}
+
 .game-meta {
   margin: 0;
   font-size: 0.79rem;
@@ -777,6 +908,33 @@ h1 {
 }
 
 .vis-option small {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--fg-faint);
+  margin-top: 0.05rem;
+}
+
+.spec-option {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  cursor: pointer;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.spec-option input[type='checkbox'] {
+  margin-top: 0.32rem;
+}
+
+.spec-option strong {
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+
+.spec-option small {
   display: block;
   font-size: 0.78rem;
   color: var(--fg-faint);
