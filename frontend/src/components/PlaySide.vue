@@ -340,15 +340,14 @@ const handXs = computed(() =>
 const capitalSrc = computed(() => capitalImageFor(props.player.race))
 const raceText = computed(() => raceLabel(props.player.race))
 
-// Legend slot: a landscape card-sized region centered horizontally on
-// the capital board, parked near the board's bottom edge. PILE_W /
-// PILE_H are already the rotated-card dims (100 × 72) we use for the
-// pile cards, which is a comfortable fit inside CAP_BOARD_W = 175.
+// Legend slot: a portrait card-sized region centered on the capital
+// board. Legend cards are printed portrait like every other unit card,
+// so we use the standard CARD_SM dims (72 × 100) and don't rotate.
 const legendSlot = computed(() => {
-  const w = PILE_W
-  const h = PILE_H
+  const w = CARD_SM.w
+  const h = CARD_SM.h
   const x = xs.value.capBoardX + (CAP_BOARD_W - w) / 2
-  const y = layout.value.capY + CAP_H - h - 10
+  const y = layout.value.capY + (CAP_H - h) / 2
   return {
     w,
     h,
@@ -411,7 +410,6 @@ const legendSlot = computed(() => {
         :width="legendSlot.w"
         :height="legendSlot.h"
         :card="{ code: legend.cardDef.code, title: legend.cardDef.title }"
-        rotated
       />
       <rect
         v-else
