@@ -55,9 +55,13 @@ const VB_W_FALLBACK = 1600
 
 const PAD = 12
 const ROW_GAP = 8
-const BATTLE_H = 90
+// Battlefield is wide and short, but tall enough to seat a portrait
+// card. Battlefield cards must NOT be rotated unless the engine
+// reports them rotated for a rules reason (exhaust / kneel) — the
+// row's height is what gives the renderer room to keep them upright.
+const BATTLE_H = 130
 const CAP_H = 240
-const COMBINED_H = 200
+const COMBINED_H = 170
 
 // Capital board: width fixed to preserve the printed ~0.72 portrait
 // aspect at 240 tall.
@@ -212,11 +216,13 @@ const firstPipLocalY = chipLocalY + 22
 const resourcesLocalY = chipLocalY + 50
 const RESOURCE_ICON_W = 40
 
-// ---- units in this zone, mapped to SvgCard meta ----
-const zoneCards = (z: EngineZone): Array<{ code?: string; title?: string }> =>
-  props.units
-    .filter((u) => u.zone === zoneToZoneKind(z))
-    .map((u) => ({ code: u.cardDef.code, title: u.cardDef.title }))
+// ---- units in this zone ----
+// Attachments cascade behind their host unit with a small per-attachment
+// offset so each one shows a thin strip of card art beneath / beside the
+// unit. The unit is drawn last so it stays fully visible on top.
+const ATTACHMENT_OFFSET = 16
+const zoneUnits = (z: EngineZone): EngineUnit[] =>
+  props.units.filter((u) => u.zone === zoneToZoneKind(z))
 
 function zoneToZoneKind(z: EngineZone): ZoneKind {
   return z.kind
@@ -447,31 +453,51 @@ const legendSlot = computed(() => {
       </text>
 
       <template v-if="zr.w > zr.h">
-        <!-- Landscape zone (battlefield). Portrait card height (CARD_SM.h
-             = 100) is taller than the zone (BATTLE_H = 90), so render
-             cards rotated to fit. (x, y, w, h) describe the landscape
-             rect on screen; SvgCard handles the inner rotation. -->
-        <SvgCard
-          v-for="(c, i) in zoneCards(zr.z)"
-          :key="i"
-          :x="evenSpread(zoneCards(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.h)[i]"
-          :y="zr.y + (zr.h - CARD_SM.w) / 2"
-          :card="c"
-          :width="CARD_SM.h"
-          :height="CARD_SM.w"
-          rotated
-        />
+        <!-- Landscape zone (battlefield). Cards stay in portrait;
+             rotation is reserved for rules-driven states (exhaust /
+             kneel) and is not used purely to fit the layout.
+             Attachments cascade DOWN-RIGHT from the unit (offset on both
+             axes) so a corner strip of each attachment shows. -->
+        <g v-for="(u, i) in zoneUnits(zr.z)" :key="u.key">
+          <SvgCard
+            v-for="(att, ai) in u.attachments"
+            :key="att.key"
+            :x="evenSpread(zoneUnits(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.w)[i] + (u.attachments.length - ai) * ATTACHMENT_OFFSET"
+            :y="zr.y + (zr.h - CARD_SM.h) / 2 + (u.attachments.length - ai) * (ATTACHMENT_OFFSET / 2)"
+            :card="{ code: att.cardDef.code, title: att.cardDef.title }"
+            :width="CARD_SM.w"
+            :height="CARD_SM.h"
+          />
+          <SvgCard
+            :x="evenSpread(zoneUnits(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.w)[i]"
+            :y="zr.y + (zr.h - CARD_SM.h) / 2"
+            :card="{ code: u.cardDef.code, title: u.cardDef.title }"
+            :width="CARD_SM.w"
+            :height="CARD_SM.h"
+          />
+        </g>
       </template>
       <template v-else>
-        <SvgCard
-          v-for="(c, i) in zoneCards(zr.z)"
-          :key="i"
-          :x="tallStackX(zr.x, zr.w)"
-          :y="tallStackYs(zr.y + 26, zr.h - 26 - 30, zoneCards(zr.z).length)[i]"
-          :card="c"
-          :width="CARD_SM.w"
-          :height="CARD_SM.h"
-        />
+        <!-- Portrait zone. Attachments cascade DOWN behind the unit so
+             a thin bottom strip of each attachment shows below it. -->
+        <g v-for="(u, i) in zoneUnits(zr.z)" :key="u.key">
+          <SvgCard
+            v-for="(att, ai) in u.attachments"
+            :key="att.key"
+            :x="tallStackX(zr.x, zr.w)"
+            :y="tallStackYs(zr.y + 26, zr.h - 26 - 30, zoneUnits(zr.z).length)[i] + (u.attachments.length - ai) * ATTACHMENT_OFFSET"
+            :card="{ code: att.cardDef.code, title: att.cardDef.title }"
+            :width="CARD_SM.w"
+            :height="CARD_SM.h"
+          />
+          <SvgCard
+            :x="tallStackX(zr.x, zr.w)"
+            :y="tallStackYs(zr.y + 26, zr.h - 26 - 30, zoneUnits(zr.z).length)[i]"
+            :card="{ code: u.cardDef.code, title: u.cardDef.title }"
+            :width="CARD_SM.w"
+            :height="CARD_SM.h"
+          />
+        </g>
       </template>
 
       <g
