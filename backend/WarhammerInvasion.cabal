@@ -33,6 +33,7 @@ library
       Invasion.Entity
       Invasion.Game
       Invasion.Matcher
+      Invasion.Message
       Invasion.Model
       Invasion.Modifier
       Invasion.Player

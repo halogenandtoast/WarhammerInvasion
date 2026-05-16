@@ -5,7 +5,7 @@ import { auth } from '../stores/auth'
 import { game } from '../stores/game'
 import { listDecks, type DeckRecord } from '../api/decks'
 import { ApiError } from '../api/client'
-import type { Phase, PlayerKey, SeatView } from '../api/protocol'
+import type { LogEntry, Phase, PlayerKey, SeatView } from '../api/protocol'
 import SeatBody from './SeatBody'
 import PlayView from './PlayView.vue'
 
@@ -25,6 +25,7 @@ const decksError = ref<string | null>(null)
 
 const chatText = ref('')
 const chatBox = ref<HTMLElement | null>(null)
+const logBox = ref<HTMLElement | null>(null)
 const copied = ref(false)
 
 const errorBanner = ref<string | null>(null)
@@ -177,6 +178,79 @@ watch(
     if (el) el.scrollTop = el.scrollHeight
   },
 )
+
+watch(
+  () => engine.value?.log.length,
+  async () => {
+    await nextTick()
+    const el = logBox.value
+    if (el) el.scrollTop = el.scrollHeight
+  },
+)
+
+const logEntries = computed<LogEntry[]>(() => engine.value?.log ?? [])
+
+// Resolve a player key in a log param to that player's display name,
+// pulled from the seat list. Falls back to a generic "Player 1/2"
+// label when seats haven't been populated yet (shouldn't happen once
+// the engine is live, but it's harmless).
+function playerDisplayName(playerKey: string): string {
+  const seat = view.value?.seats.find((s) => s.seat === playerKey)
+  if (seat) return seat.user.displayName
+  if (playerKey === 'Player1') return t('game.seat.heading_player1')
+  if (playerKey === 'Player2') return t('game.seat.heading_player2')
+  return playerKey
+}
+
+// Param keys whose values are themselves i18n keys (enum-shaped). We
+// resolve them through a nested t() lookup before passing the params
+// to the outer message — that's what keeps engine output decoupled
+// from any locale's word order.
+const ENUM_PARAM_TABLE: Record<string, string> = {
+  phase: 'log.phase_name',
+  trigger: 'log.trigger_name',
+  reason: 'log.elim_reason',
+  // Game-over uses `reason` too, but with a different value space; the
+  // engine emits 'OpponentDeckedOut' / 'OpponentCapitalBurned' there,
+  // which only resolve under 'log.win_reason'. Try elim first, fall
+  // back to win at render time.
+}
+
+function resolveParam(name: string, value: string): string {
+  if (name === 'player' || name === 'winner') {
+    return playerDisplayName(value)
+  }
+  const base = ENUM_PARAM_TABLE[name]
+  if (base) {
+    const elim = t(`${base}.${value}`, value)
+    if (elim !== value) return elim
+    if (name === 'reason') return t(`log.win_reason.${value}`, value)
+    return value
+  }
+  return value
+}
+
+function formatLogEntry(entry: LogEntry): string {
+  const resolved: Record<string, string> = {}
+  for (const [k, v] of Object.entries(entry.params)) {
+    resolved[k] = resolveParam(k, v)
+  }
+  return t(entry.key, resolved, { default: t('log.unknown', { key: entry.key }) })
+}
+
+function logEntryKey(entry: LogEntry, i: number): string {
+  return `${entry.at}-${i}`
+}
+
+function logCategoryClass(cat: LogEntry['category']): string {
+  switch (cat) {
+    case 'LogTurn': return 'cat-turn'
+    case 'LogPhase': return 'cat-phase'
+    case 'LogPlayerAction': return 'cat-action'
+    case 'LogResult': return 'cat-result'
+    default: return 'cat-system'
+  }
+}
 
 function mapError(code: string): string {
   const known = [
@@ -360,37 +434,63 @@ function formatTime(at: string): string {
         </template>
       </section>
 
-      <!-- Chat sidebar -->
-      <aside class="chat-panel" :aria-label="t('game.chat.heading')">
-        <header class="panel-head">
-          <h2>{{ t('game.chat.heading') }}</h2>
-        </header>
-        <div ref="chatBox" class="chat-scroll">
-          <div v-if="!view || view.chat.length === 0" class="chat-empty">
-            {{ t('game.chat.empty') }}
+      <!-- Side rail: game log on top, chat on bottom. They share the
+           same column so wide layouts get both at once, narrow layouts
+           stack them under the table surface. -->
+      <aside class="side-panel">
+        <section class="log-panel" :aria-label="t('game.log.heading')">
+          <header class="panel-head">
+            <h2>{{ t('game.log.heading') }}</h2>
+          </header>
+          <div ref="logBox" class="log-scroll">
+            <div v-if="logEntries.length === 0" class="log-empty">
+              {{ t('game.log.empty') }}
+            </div>
+            <ol v-else class="log-list" role="log" aria-live="polite">
+              <li
+                v-for="(entry, i) in logEntries"
+                :key="logEntryKey(entry, i)"
+                class="log-line"
+                :class="logCategoryClass(entry.category)"
+              >
+                <time class="log-time">{{ formatTime(entry.at) }}</time>
+                <p class="log-text">{{ formatLogEntry(entry) }}</p>
+              </li>
+            </ol>
           </div>
-          <ul v-else class="chat-list" role="log" aria-live="polite">
-            <li v-for="(line, i) in view.chat" :key="`${line.at}-${i}`" class="chat-line">
-              <div class="chat-meta">
-                <span class="chat-author">{{ line.from.displayName }}</span>
-                <time class="chat-time">{{ formatTime(line.at) }}</time>
-              </div>
-              <p class="chat-text">{{ line.text }}</p>
-            </li>
-          </ul>
-        </div>
-        <form class="chat-input" @submit.prevent="sendChat">
-          <input
-            v-model="chatText"
-            type="text"
-            maxlength="1000"
-            :placeholder="t('game.chat.placeholder')"
-            :aria-label="t('game.chat.placeholder')"
-          />
-          <button class="primary" type="submit" :disabled="!chatText.trim()">
-            {{ t('game.chat.send') }}
-          </button>
-        </form>
+        </section>
+
+        <section class="chat-panel" :aria-label="t('game.chat.heading')">
+          <header class="panel-head">
+            <h2>{{ t('game.chat.heading') }}</h2>
+          </header>
+          <div ref="chatBox" class="chat-scroll">
+            <div v-if="!view || view.chat.length === 0" class="chat-empty">
+              {{ t('game.chat.empty') }}
+            </div>
+            <ul v-else class="chat-list" role="log" aria-live="polite">
+              <li v-for="(line, i) in view.chat" :key="`${line.at}-${i}`" class="chat-line">
+                <div class="chat-meta">
+                  <span class="chat-author">{{ line.from.displayName }}</span>
+                  <time class="chat-time">{{ formatTime(line.at) }}</time>
+                </div>
+                <p class="chat-text">{{ line.text }}</p>
+              </li>
+            </ul>
+          </div>
+          <form class="chat-input" @submit.prevent="sendChat">
+            <input
+              v-model="chatText"
+              type="text"
+              maxlength="1000"
+              :placeholder="t('game.chat.placeholder')"
+              :aria-label="t('game.chat.placeholder')"
+            />
+            <button class="primary" type="submit" :disabled="!chatText.trim()">
+              {{ t('game.chat.send') }}
+            </button>
+          </form>
+        </section>
       </aside>
     </section>
 
@@ -720,19 +820,36 @@ function formatTime(at: string): string {
 .ghost:hover { color: var(--fg); border-color: var(--fg-dim); }
 .hint { margin: 0; font-size: 0.78rem; color: var(--fg-faint); }
 
-/* ───────── chat sidebar ───────── */
+/* ───────── side rail (log + chat) ───────── */
 
-.chat-panel {
+.side-panel {
   background: var(--bg-elev);
   border-left: 1px solid var(--border);
+  display: grid;
+  /* Log gets a generous share at the top; chat keeps a tighter slice
+     since most exchanges are short. minmax(0, …) keeps both children
+     scrollable rather than letting one push the other off-screen. */
+  grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+@media (max-width: 880px) {
+  .side-panel {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    min-height: 320px;
+  }
+}
+
+.log-panel,
+.chat-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
 }
-@media (max-width: 880px) {
-  .chat-panel { border-left: none; border-top: 1px solid var(--border); min-height: 240px; }
-}
+.chat-panel { border-top: 1px solid var(--border); }
+
 .panel-head {
   display: flex;
   align-items: center;
@@ -742,6 +859,39 @@ function formatTime(at: string): string {
   flex-shrink: 0;
 }
 .panel-head h2 { margin: 0; font-size: 0.88rem; font-weight: 600; }
+
+/* ─── game log ─── */
+.log-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.log-empty { margin: auto; color: var(--fg-faint); font-style: italic; }
+.log-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.log-line {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  column-gap: 0.45rem;
+  align-items: baseline;
+  border-left: 2px solid transparent;
+  padding-left: 0.4rem;
+  color: var(--fg-dim);
+}
+.log-time { color: var(--fg-faint); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
+.log-text { margin: 0; word-break: break-word; }
+.log-line.cat-turn   { border-left-color: var(--accent); color: var(--fg); font-weight: 600; }
+.log-line.cat-phase  { border-left-color: var(--race-empire, #d4b357); color: var(--fg); }
+.log-line.cat-action { border-left-color: var(--accent-strong, #c4634a); color: var(--fg); }
+.log-line.cat-result { border-left-color: var(--accent-strong, #c4634a); color: var(--fg); font-weight: 600; }
+.log-line.cat-system { /* default colors */ }
+
+/* ─── chat ─── */
 .chat-scroll {
   flex: 1;
   overflow-y: auto;

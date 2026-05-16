@@ -831,7 +831,8 @@ button.primary:hover {
   position: relative;
   aspect-ratio: 5 / 7;
   background: var(--bg);
-  border-radius: var(--radius-sm);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -930,7 +931,8 @@ button.primary:hover {
   width: 100%;
   max-height: 70vh;
   object-fit: contain;
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-card);
 }
 
 .no-img.big {

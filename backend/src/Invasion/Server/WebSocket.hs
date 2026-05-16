@@ -21,6 +21,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad (forever, unless, when)
 import Crypto.Random (getRandomBytes)
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Key qualified as Aeson.Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteArray.Encoding qualified as BAE
 import Data.ByteString (ByteString)
@@ -46,14 +47,14 @@ import Invasion.DB (DbPool, runDB)
 import Invasion.Engine
   ( Message (BeginGame, PassPriority, Setup)
   , applyMessage
-  , dwarfStarterDeck
   , newGame
   )
+import Invasion.Engine qualified as Engine
 import Invasion.Model
 import Invasion.Prelude
 import Invasion.Server.Lobby
 import Invasion.Server.Protocol
-import Invasion.Types (PlayerKey (..))
+import Invasion.Types (CardCode (..), PlayerKey (..), Race (..))
 import Network.HTTP.Types (Query, parseQuery)
 import Network.Wai (Application, rawPathInfo, rawQueryString)
 import Network.Wai.Handler.WebSockets (websocketsOr)
@@ -396,26 +397,31 @@ handleGameIn env slot user = \case
                        (Map.elems sm)
             if not ready
               then sendGameError slot user "not_ready"
-              else do
-                -- Build the engine game and pump it through Setup +
-                -- BeginGame so we land on the first action window. We
-                -- still use the dwarf starter for both seats — actual
-                -- deck loading from the chosen deckIds is the next
-                -- step, but the engine has nothing to do with the
-                -- card pool yet so this is enough to drive the basic
-                -- phase machinery.
-                case newGame dwarfStarterDeck dwarfStarterDeck of
-                  Left err -> sendGameError slot user (T.pack err)
-                  Right g0 -> do
-                    g1 <- applyMessage g0 Setup
-                    g2 <- applyMessage g1 BeginGame
-                    atomically do
-                      writeTVar slot.engine (Just g2)
-                      trySetStatus slot StatusPlaying
-                      v <- gameViewSTM slot user
-                      broadcastGameWithView slot v
-                      summaries <- summariesSTM env.lobby
-                      broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
+              else case (,) <$> (Map.lookup "Player1" sm >>= (.deck))
+                            <*> (Map.lookup "Player2" sm >>= (.deck)) of
+                Nothing -> sendGameError slot user "not_ready"
+                Just (dv1, dv2) -> do
+                  md1 <- runDB env.dbPool (P.get (DeckKey dv1.deckId))
+                  md2 <- runDB env.dbPool (P.get (DeckKey dv2.deckId))
+                  case (md1, md2) of
+                    (Nothing, _) -> sendGameError slot user "deck_not_found"
+                    (_, Nothing) -> sendGameError slot user "deck_not_found"
+                    (Just d1, Just d2) ->
+                      case (engineDeckFromDb d1, engineDeckFromDb d2) of
+                        (Left e, _) -> sendGameError slot user e
+                        (_, Left e) -> sendGameError slot user e
+                        (Right ed1, Right ed2) -> case newGame ed1 ed2 of
+                          Left err -> sendGameError slot user (T.pack err)
+                          Right g0 -> do
+                            g1 <- applyMessage g0 Setup
+                            g2 <- applyMessage g1 BeginGame
+                            atomically do
+                              writeTVar slot.engine (Just g2)
+                              trySetStatus slot StatusPlaying
+                              v <- gameViewSTM slot user
+                              broadcastGameWithView slot v
+                              summaries <- summariesSTM env.lobby
+                              broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
   GamePassPriority -> do
     mGame <- readTVarIO slot.engine
     case mGame of
@@ -471,12 +477,35 @@ sendGameError slot user code = atomically do
     (Map.elems cs)
 
 countCards :: Aeson.Value -> Int
-countCards (Aeson.Object o) =
-  sum [countOne v | (_, v) <- KM.toList o]
-  where
-    countOne (Aeson.Number n) = truncate (realToFrac n :: Double)
-    countOne _ = 0
-countCards _ = 0
+countCards v = sum [n | (_, n) <- deckCardCounts v]
+
+-- | Parse the @{code: count}@ JSONB shape stored in @decks.cards@. Keys
+-- whose values are not non-negative numbers are silently dropped — they
+-- can't represent a real card-count anyway.
+deckCardCounts :: Aeson.Value -> [(Text, Int)]
+deckCardCounts (Aeson.Object o) =
+  [ (Aeson.Key.toText k, n)
+  | (k, Aeson.Number num) <- KM.toList o
+  , let n = truncate (realToFrac num :: Double)
+  , n > 0
+  ]
+deckCardCounts _ = []
+
+-- | Translate a persistent 'Deck' row into the engine's 'Engine.Deck'.
+-- Returns a protocol error code on failure so the client can localize it.
+engineDeckFromDb :: Deck -> Either Text Engine.Deck
+engineDeckFromDb d = do
+  race <- case deckCapital d of
+    Just "dwarf" -> Right Dwarf
+    Just "chaos" -> Right Chaos
+    Just _ -> Left "unsupported_capital"
+    Nothing -> Left "missing_capital"
+  let cards =
+        [ CardCode (T.unpack code)
+        | (code, n) <- deckCardCounts (deckCards d)
+        , _ <- replicate n ()
+        ]
+  Right Engine.Deck {cards, race}
 
 -- ----------------------------------------------------------------------------
 -- Idle sweeper

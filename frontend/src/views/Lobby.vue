@@ -197,11 +197,7 @@ function formatTime(at: string): string {
 <template>
   <main class="lobby-page">
     <header class="page-head">
-      <div>
-        <p class="eyebrow">{{ t('lobby.eyebrow') }}</p>
-        <h1>{{ t('lobby.heading') }}</h1>
-        <p class="lead">{{ t('lobby.lead') }}</p>
-      </div>
+      <div><h1>{{ t('lobby.heading') }}</h1></div>
       <div class="status-pill" :data-status="lobby.status.value">
         <span class="status-dot" aria-hidden="true" />
         {{ t(`lobby.status.${lobby.status.value}`) }}

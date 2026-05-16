@@ -8,7 +8,10 @@ import Control.Monad.State.Strict
 import Data.Aeson (ToJSON)
 import Data.Aeson.TH
 import Data.Map.Strict (Map)
+import Data.Text (Text)
+import Data.Time (UTCTime)
 import Invasion.Capital
+import Invasion.Entity (QuestDetails, SupportDetails, UnitDetails)
 import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
@@ -97,6 +100,39 @@ priorityHolder = \case
   NoPasses p -> p
   OnePass p -> p
 
+-- | A single line in the game-event transcript. The engine appends
+-- entries as it processes messages; the frontend renders them in the
+-- side-panel above chat. The engine never produces user-visible text:
+-- 'key' is an i18n key (resolved in @frontend/src/locales/@) and
+-- 'params' are the interpolation arguments. Enum-shaped param values
+-- (e.g. @"Player1"@, @"KingdomPhase"@) are themselves resolved via
+-- nested i18n lookups on the client so player display names and phase
+-- labels respect the active locale.
+data LogEntry = LogEntry
+  { at :: UTCTime
+  , category :: LogCategory
+  , key :: Text
+  , params :: Map Text Text
+  }
+  deriving stock Show
+
+-- | Tag for client-side styling. Add cases as new event groupings
+-- become useful; the wire JSON uses the constructor name verbatim.
+data LogCategory
+  = LogSystem
+    -- ^ Engine bookkeeping: setup, shuffles, draws, resources, action
+    -- window open/close.
+  | LogPhase
+    -- ^ Phase boundaries.
+  | LogTurn
+    -- ^ Turn boundaries.
+  | LogPlayerAction
+    -- ^ Choices originating from a player (currently just
+    -- 'PassPriority'; will grow as cards/abilities land).
+  | LogResult
+    -- ^ Eliminations and the final game-over line.
+  deriving stock (Show, Eq)
+
 data Game = Game
   { player1 :: Player
   , player2 :: Player
@@ -113,6 +149,26 @@ data Game = Game
     -- ^ Named 'lifecycle' (not 'state') because 'Player' also has a
     -- 'state' field, and using the same name would force every record
     -- update site to annotate which type it's updating.
+  , log :: [LogEntry]
+    -- ^ Append-only transcript of engine events, oldest first. Capped
+    -- at 500 entries (see 'Invasion.Engine.logIt').
+  , units :: [UnitDetails]
+    -- ^ All units in play across both capitals. Each carries its
+    -- 'controller' and 'zone' so callers filter rather than indexing
+    -- through 'Capital'. 'Zone' lives in 'Invasion.Capital', which is
+    -- compiled below this module, so we can't hang the list off
+    -- 'Zone' directly.
+  , supports :: [SupportDetails]
+    -- ^ Free-standing (non-attached) support cards across both
+    -- capitals. Attached supports live inside their host unit's
+    -- 'attachments' field.
+  , quests :: [QuestDetails]
+    -- ^ Quest cards currently in play (sit in the quest zone for the
+    -- controller who played them, or — for Mission quests — in an
+    -- opponent's zone).
+  , nextUnitKey :: UnitKey
+    -- ^ Monotonic counter for minting fresh 'UnitKey's as units enter
+    -- play.
   }
   deriving stock Show
 
@@ -165,6 +221,10 @@ mconcat
   , deriveToJSON defaultOptions ''ActionWindow
   , deriveToJSON defaultOptions ''WinReason
   , deriveToJSON defaultOptions ''GameResult
+  , deriveToJSON
+      defaultOptions {tagSingleConstructors = True, allNullaryToStringTag = True}
+      ''LogCategory
+  , deriveToJSON defaultOptions ''LogEntry
   , deriveToJSON defaultOptions ''Game
   , deriveToJSON defaultOptions ''GameState
   ]

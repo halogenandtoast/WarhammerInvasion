@@ -799,6 +799,9 @@ game:
     placeholder: Say something to your opponent…
     empty: No messages yet.
     send: Send
+  log:
+    heading: Game log
+    empty: The game hasn't started yet.
   errors:
     not_seated: You're not seated in this game.
     deck_not_found: That deck no longer exists.
@@ -923,3 +926,82 @@ cards:
       Engine text has not been transcribed yet.
     illustrator: "Illustration · {name}"
     cycle_suffix: " cycle"
+
+# Engine transcript ─ keys emitted by backend/src/Invasion/Engine.hs.
+# Enum params (player/phase/trigger/reason) are pre-resolved on the
+# client (see formatLogEntry in views/Game.vue) before interpolation.
+log:
+  setup:
+    begins: "Setup begins. {player} will go first."
+  game:
+    begins: The game begins.
+    over: "Game over. {winner} wins ({reason})."
+  turn:
+    begins: "Turn {turn}: {player} begins their turn."
+    ends: "{player}'s turn ends."
+  phase:
+    begins: "{phase} phase begins."
+    ends: "{phase} phase ends."
+    skipped: "{phase} phase skipped (first-turn penalty)."
+  window:
+    open: "Action window opens ({trigger}). {player} has priority."
+    close: Action window closes (both players passed).
+  priority:
+    pass: "{player} passes priority."
+  player:
+    eliminated: "{player} is eliminated ({reason})."
+  deck:
+    shuffled: "{player} shuffles their deck."
+  draw:
+    opening: "{player} draws their opening hand (7 cards)."
+    card: "{player} draws a card."
+  resources:
+    returned: "{player} returns unspent resources to the pool."
+    collected: "{player} collects {count} resources."
+  unit:
+    played: "{player} plays {card} ({cost} resources)."
+    entered_play: "{player} brings a unit into play."
+    damaged: "{card} takes {amount} damage."
+    healed: "{card} heals {amount} damage."
+    destroyed: "{player}'s {card} is destroyed."
+    corrupted: "{card} is corrupted."
+    cleansed: "{card} sheds its corruption."
+    experience_attached: "{card} gains an experience ({count} total)."
+  attachment:
+    played: "{player} attaches {card} to {target} ({cost} resources)."
+  support:
+    played: "{player} plays {card} ({cost} resources)."
+    tokens: "{card} now has {count} tokens."
+    destroyed: "{player}'s {card} is destroyed."
+  quest:
+    draw: "{player} draws from questing."
+    played: "{player} starts the quest {card} ({cost} resources)."
+    tokens: "{card} now has {count} tokens."
+  tactic:
+    played: "{player} plays the tactic {card} ({cost} resources)."
+  # Enum-value lookups. Engine emits raw constructor names; the client
+  # resolves these before interpolating into the message above.
+  phase_name:
+    KingdomPhase: Kingdom
+    QuestPhase: Quest
+    CapitalPhase: Capital
+    BattlefieldPhase: Battlefield
+  trigger_name:
+    KingdomActionWindow: Kingdom
+    QuestActionWindow: Quest
+    CapitalActionWindow: Capital
+    BattlefieldActionWindow: Battlefield
+    AfterDeclareCombatTarget: After declare combat target
+    AfterDeclareAttackers: After declare attackers
+    AfterDeclareDefenders: After declare defenders
+    AfterAssignCombatDamage: After assign combat damage
+    AfterApplyCombatDamage: After apply combat damage
+  elim_reason:
+    DeckedOut: decked out
+    CapitalBurned: capital burned
+  win_reason:
+    OpponentDeckedOut: opponent decked out
+    OpponentCapitalBurned: opponent's capital burned
+  # Fallback shown when an engine entry uses a key with no translation
+  # yet (e.g. a new event added in a backend-only change).
+  unknown: "[unknown event: {key}]"

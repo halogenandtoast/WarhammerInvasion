@@ -808,7 +808,8 @@ watch(editingCapital, () => scheduleSave())
   position: relative;
   aspect-ratio: 5 / 7;
   background: var(--bg);
-  border-radius: var(--radius-sm);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
   display: grid;
   place-items: center;

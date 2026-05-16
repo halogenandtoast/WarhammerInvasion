@@ -143,6 +143,25 @@ export type GameLifecycle =
       }
     }
 
+export type LogCategory =
+  | 'LogSystem'
+  | 'LogPhase'
+  | 'LogTurn'
+  | 'LogPlayerAction'
+  | 'LogResult'
+
+// Engine-emitted transcript entry. `key` is an i18n key (resolved in
+// frontend/src/locales/). `params` carries interpolation values; enum-
+// shaped values (player keys, phases, triggers, reasons) are written
+// raw and resolved through nested i18n lookups before substitution —
+// see `formatLogEntry` in the game view.
+export interface LogEntry {
+  at: string
+  category: LogCategory
+  key: string
+  params: Record<string, string>
+}
+
 export interface EngineGame {
   player1: EnginePlayer
   player2: EnginePlayer
@@ -153,6 +172,9 @@ export interface EngineGame {
   actionWindow: EngineActionWindow | null
   modifiers: unknown
   lifecycle: GameLifecycle
+  log: LogEntry[]
+  units: unknown[]
+  nextUnitKey: unknown
 }
 
 // Derived helpers — keep alongside the wire types so they stay in sync.

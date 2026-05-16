@@ -1,10 +1,15 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Invasion.Types (module Invasion.Types) where
 
+import Data.String (IsString)
 import GHC.Records
 import Invasion.Prelude
+import Data.Aeson
 import Data.Aeson.TH
 import Data.Aeson.Types
+
+newtype CardCode = CardCode String
+  deriving newtype (Eq, Ord, Show, IsString, ToJSON)
 
 data PlayerKey = Player1 | Player2
   deriving stock (Show, Eq, Ord)
@@ -48,8 +53,8 @@ nextPhase = \case
   CapitalPhase -> Just BattlefieldPhase
   BattlefieldPhase -> Nothing
 
-data Race = Dwarf
-  deriving stock Show
+data Race = Dwarf | Chaos
+  deriving stock (Show, Eq)
 
 
 mconcat
