@@ -15,7 +15,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { EnginePlayer, EngineZone } from '../api/protocol'
+import type { EngineCardDef, EnginePlayer, EngineUnit, EngineZone, ZoneKind } from '../api/protocol'
 import { zoneBurning, zoneHitPoints } from '../api/protocol'
 import { capitalImageFor, raceLabel } from '../lib/capital'
 import { CARD_SM } from '../lib/cardSize'
@@ -23,10 +23,16 @@ import SvgCard from './SvgCard.vue'
 
 const props = defineProps<{
   player: EnginePlayer
+  units: EngineUnit[]
   perspective: 'self' | 'opponent'
   seatName: string
   isActive: boolean
   isFirstPlayer: boolean
+  canPlayCard?: (card: EngineCardDef) => boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'hand-card-click', payload: { card: EngineCardDef | null; rect: DOMRect }): void
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
@@ -198,8 +204,15 @@ const firstPipLocalY = chipLocalY + 22
 const resourcesLocalY = chipLocalY + 50
 const RESOURCE_ICON_W = 40
 
-// ---- zone tokens (engine doesn't yet track units in zones) ----
-const zoneCards = (_z: EngineZone): Array<{ code?: string; title?: string }> => []
+// ---- units in this zone, mapped to SvgCard meta ----
+const zoneCards = (z: EngineZone): Array<{ code?: string; title?: string }> =>
+  props.units
+    .filter((u) => u.zone === zoneToZoneKind(z))
+    .map((u) => ({ code: u.cardDef.code, title: u.cardDef.title }))
+
+function zoneToZoneKind(z: EngineZone): ZoneKind {
+  return z.kind
+}
 
 function evenSpread(n: number, areaX: number, areaW: number, cardW: number): number[] {
   if (n === 0) return []
@@ -285,12 +298,26 @@ const handCardY = computed(
   () => combinedY.value + (COMBINED_H - CARD_SM.h) / 2,
 )
 
-const handCards = computed(() => {
+const handCards = computed<Array<EngineCardDef | null>>(() => {
   if (props.perspective === 'opponent') {
     return new Array(props.player.hand.length).fill(null)
   }
-  return props.player.hand as Array<{ code?: string; title?: string }>
+  return props.player.hand
 })
+
+function isCardClickable(card: EngineCardDef | null): boolean {
+  if (!card || props.perspective !== 'self') return false
+  if (!props.canPlayCard) return false
+  return props.canPlayCard(card)
+}
+
+function onHandClick(
+  card: EngineCardDef | null,
+  payload: { rect: DOMRect },
+) {
+  if (!card) return
+  emit('hand-card-click', { card, rect: payload.rect })
+}
 
 const handXs = computed(() =>
   evenSpread(handCards.value.length, xs.value.handX, xs.value.handW, CARD_SM.w),
@@ -455,6 +482,8 @@ const raceText = computed(() => raceLabel(props.player.race))
           :face-down="perspective === 'opponent'"
           :width="CARD_SM.w"
           :height="CARD_SM.h"
+          :clickable="isCardClickable(c)"
+          @card-click="(payload) => onHandClick(c, payload)"
         />
         <text
           v-if="handCards.length === 0"

@@ -62,6 +62,14 @@ data UnitDetails = UnitDetails
     -- ^ Cards (usually destroyed enemy units) facedown-attached as
     -- "experience" markers, e.g. Skulltaker. Each one is functionally a
     -- counter that the host card's text can reference.
+  , effectivePower :: Int
+    -- ^ Cached current power: printed value plus contributions from
+    -- attachments, experiences, and other buffs. The engine
+    -- recomputes this after every message so cards, the wire, and the
+    -- frontend always see the same value.
+  , effectiveMaxHP :: Int
+    -- ^ Cached current max HP. Damage destruction is checked against
+    -- this, not the printed 'hitPoints'.
   }
   deriving stock Show
 
@@ -149,6 +157,8 @@ instance ToJSON UnitDetails where
       , "corrupted" .= d.corrupted
       , "attachments" .= d.attachments
       , "experiences" .= d.experiences
+      , "effectivePower" .= d.effectivePower
+      , "effectiveMaxHP" .= d.effectiveMaxHP
       ]
 
 instance ToJSON SupportDetails where

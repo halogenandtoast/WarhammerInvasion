@@ -38,7 +38,20 @@ const props = defineProps<{
   card?: CardMeta | null
   faceDown?: boolean
   rotated?: boolean
+  clickable?: boolean
 }>()
+
+const emit = defineEmits<{
+  (e: 'card-click', payload: { card: CardMeta | null | undefined; rect: DOMRect }): void
+}>()
+
+function onCardClick(e: MouseEvent) {
+  if (!props.clickable) return
+  const el = e.currentTarget as SVGGraphicsElement | null
+  if (!el) return
+  e.stopPropagation()
+  emit('card-click', { card: props.card ?? null, rect: el.getBoundingClientRect() })
+}
 
 // Outer (visible) rect on screen. When rotated this is the landscape
 // rect; when not, it's the portrait rect.
@@ -181,9 +194,11 @@ onBeforeUnmount(() => {
   <g
     :transform="`translate(${x}, ${y})`"
     class="svg-card"
+    :class="{ clickable: clickable }"
     :clip-path="`url(#${clipId})`"
     @mouseenter="onCardEnter"
     @mouseleave="onCardLeave"
+    @click="onCardClick"
   >
     <!-- Clipping is applied at the wrapper, so anything inside — rotated
          or not — shares the same rounded silhouette. The clip rect uses
@@ -253,6 +268,13 @@ onBeforeUnmount(() => {
      group filters by alpha, so the shadow follows the rounded card
      silhouette rather than its bounding box. */
   filter: drop-shadow(var(--shadow-card));
+}
+
+.svg-card.clickable {
+  cursor: pointer;
+}
+.svg-card.clickable:hover {
+  filter: drop-shadow(0 0 6px var(--accent, #c4634a)) drop-shadow(var(--shadow-card));
 }
 
 .svg-card .bg,

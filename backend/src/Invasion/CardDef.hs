@@ -50,7 +50,7 @@ data Trait
   | CapitalCenter
   | Rift
   | Relic
-  deriving stock Show
+  deriving stock (Show, Eq)
 
 mconcat
   [ deriveToJSON defaultOptions ''Keyword

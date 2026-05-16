@@ -6,10 +6,9 @@ import GHC.Records
 import Invasion.Prelude
 import Data.Aeson
 import Data.Aeson.TH
-import Data.Aeson.Types
 
 newtype CardCode = CardCode String
-  deriving newtype (Eq, Ord, Show, IsString, ToJSON)
+  deriving newtype (Eq, Ord, Show, IsString, ToJSON, FromJSON)
 
 data PlayerKey = Player1 | Player2
   deriving stock (Show, Eq, Ord)
@@ -59,7 +58,7 @@ data Race = Dwarf | Chaos
 
 mconcat
   [ deriveToJSON defaultOptions ''Ref
-  , deriveToJSON defaultOptions ''UnitKey
+  , deriveJSON defaultOptions ''UnitKey
   , deriveToJSON defaultOptions ''PlayerKey
   , deriveToJSON defaultOptions ''Number
   , deriveToJSON defaultOptions ''CardKind
@@ -71,7 +70,7 @@ mconcat
       defaultOptions {tagSingleConstructors = True, allNullaryToStringTag = True}
       ''Race
   , deriveToJSON defaultOptions ''Phase
-  , deriveToJSON defaultOptions ''ZoneKind
+  , deriveJSON defaultOptions ''ZoneKind
   ]
 
 instance ToJSONKey (Ref k)

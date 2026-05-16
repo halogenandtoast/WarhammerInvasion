@@ -813,6 +813,9 @@ game:
     closed_left: You left the game.
     closed_unknown: The game ended.
     game_not_started: The game hasn't started yet.
+    card_unknown: That card isn't recognised by the engine.
+    zone_required: Pick a zone for that card first.
+    target_required: Pick a target unit for that attachment first.
   invite_join:
     heading: Join this game
     lead: You're joining via an invite link. Connecting…
@@ -868,6 +871,16 @@ game:
       you_lose: "{name} wins."
       reason_decked: Decked out.
       reason_burned: Capital burned.
+    action:
+      heading: Play card
+      kingdom: Kingdom
+      quest: Quest zone
+      battlefield: Battlefield
+      select_target: Choose a unit to attach to.
+      no_targets: No valid targets in play.
+      play_quest: Play quest
+      play_tactic: Play tactic
+      cancel: Cancel
 
 cards:
   page_title: Card Database
@@ -967,6 +980,8 @@ log:
     corrupted: "{card} is corrupted."
     cleansed: "{card} sheds its corruption."
     experience_attached: "{card} gains an experience ({count} total)."
+    summoned_free: "{player} brings {card} into play (free)."
+    damage_moved: "{source}'s damage ({amount}) is moved onto {target}."
   attachment:
     played: "{player} attaches {card} to {target} ({cost} resources)."
   support:
@@ -979,6 +994,20 @@ log:
     tokens: "{card} now has {count} tokens."
   tactic:
     played: "{player} plays the tactic {card} ({cost} resources)."
+  effect:
+    deferred_damage: "Scheduled {amount} damage at {trigger}."
+  zone:
+    damaged: "{player}'s {zone} zone takes {amount} damage."
+    burned: "{player}'s {zone} zone burns!"
+  combat:
+    begins: "{attacker} attacks the {zone}."
+    resolved: "Combat resolves: attackers {attacker_damage}, defenders {defender_damage}."
+    ends: "Combat ends."
+  # ZoneKind enum lookup
+  zone_name:
+    KingdomZone: Kingdom
+    QuestZone: Quest
+    BattlefieldZone: Battlefield
   # Enum-value lookups. Engine emits raw constructor names; the client
   # resolves these before interpolating into the message above.
   phase_name:

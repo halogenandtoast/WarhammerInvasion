@@ -5,7 +5,14 @@
 
 import { computed, ref } from 'vue'
 import { openSocket, type SocketStatus, type TypedSocket } from '../api/socket'
-import type { ChatLine, GameIn, GameOut, GameView, UserInfo } from '../api/protocol'
+import type {
+  ChatLine,
+  GameIn,
+  GameOut,
+  GameView,
+  UserInfo,
+  ZoneKind,
+} from '../api/protocol'
 import { auth } from './auth'
 
 const _status = ref<SocketStatus>('idle')
@@ -116,6 +123,10 @@ function passPriority() {
   socket?.send({ tag: 'GamePassPriority' })
 }
 
+function playCard(card: string, zone: ZoneKind | null = null, target: number | null = null) {
+  socket?.send({ tag: 'GamePlayCard', card, zone, target })
+}
+
 export const game = {
   status: computed(() => _status.value),
   gameId: computed(() => _gameId.value),
@@ -133,5 +144,6 @@ export const game = {
   clearDeck,
   startGame,
   passPriority,
+  playCard,
   leaveGame,
 }

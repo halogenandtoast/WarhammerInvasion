@@ -100,6 +100,25 @@ priorityHolder = \case
   NoPasses p -> p
   OnePass p -> p
 
+-- | A scheduled effect that fires at a specific trigger. Currently
+-- only end-of-turn fires; add more constructors as cards need new
+-- trigger points (start of phase, after combat, …).
+data PendingEffect
+  = PEDealDamageToUnit UnitKey Int
+    -- ^ At end of turn: deal N damage to the named unit.
+  deriving stock Show
+
+-- | In-flight combat state. Set on 'BeginCombat', mutated through the
+-- sub-steps, cleared on 'EndCombat'.
+data CombatState = CombatState
+  { attackingPlayer :: PlayerKey
+  , defendingPlayer :: PlayerKey
+  , targetZone :: ZoneKind
+  , attackers :: [UnitKey]
+  , defenders :: [UnitKey]
+  }
+  deriving stock Show
+
 -- | A single line in the game-event transcript. The engine appends
 -- entries as it processes messages; the frontend renders them in the
 -- side-panel above chat. The engine never produces user-visible text:
@@ -169,6 +188,13 @@ data Game = Game
   , nextUnitKey :: UnitKey
     -- ^ Monotonic counter for minting fresh 'UnitKey's as units enter
     -- play.
+  , pendingEndOfTurn :: [PendingEffect]
+    -- ^ Effects scheduled to fire at the next 'EndTurn'. Cleared as
+    -- they fire so they don't leak across turns.
+  , combat :: Maybe CombatState
+    -- ^ 'Just' while a combat is in progress between 'BeginCombat' and
+    -- 'EndCombat'. Card receives consult this to know they're in the
+    -- combat path.
   }
   deriving stock Show
 
@@ -225,6 +251,8 @@ mconcat
       defaultOptions {tagSingleConstructors = True, allNullaryToStringTag = True}
       ''LogCategory
   , deriveToJSON defaultOptions ''LogEntry
+  , deriveToJSON defaultOptions ''PendingEffect
+  , deriveToJSON defaultOptions ''CombatState
   , deriveToJSON defaultOptions ''Game
   , deriveToJSON defaultOptions ''GameState
   ]

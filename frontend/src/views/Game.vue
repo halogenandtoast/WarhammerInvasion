@@ -263,6 +263,9 @@ function mapError(code: string): string {
     'forbidden',
     'game_started',
     'game_not_started',
+    'card_unknown',
+    'zone_required',
+    'target_required',
   ]
   if (known.includes(code)) return t(`game.errors.${code}`, code)
   return code

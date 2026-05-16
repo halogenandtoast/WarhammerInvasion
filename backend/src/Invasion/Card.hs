@@ -500,6 +500,25 @@ valkiaTheBloody = unit "core-087" "Valkia the Bloody" do
   body
     "Limit one Hero per zone.\n\
     \Quest. Action: Spend 2 resources to move any number of damage on this unit to a target corrupted unit."
+  -- Auto-fires at end of her controller's quest phase: if she has any
+  -- damage and a corrupted enemy unit exists, shuffle all of it over.
+  -- Skips the 2-resource cost (no clean way to debit without a free
+  -- action prompt). Real implementation needs the action-prompt
+  -- subsystem.
+  onReceive $ Receive \msg owner self -> case msg of
+    EndPhase QuestPhase
+      | self.controller == owner.key
+      , Damage d <- self.damage
+      , d > 0 -> do
+          g <- getGame
+          let corruptedEnemies =
+                filter
+                  (\u -> u.controller /= self.controller && u.corrupted)
+                  g.units
+          case corruptedEnemies of
+            (target : _) -> push (MoveAllDamage self.key target.key)
+            [] -> pure ()
+    _ -> pure ()
 
 bloodthirster :: CardDef Unit
 bloodthirster = unit "core-092" "Bloodthirster" do
@@ -706,15 +725,15 @@ berserkFury = tactic "the-warpstone-chronicles-094" "Berserk Fury" do
   loyalty 3
   body
     "Action: One target Unit gains 3 Power until the end of the turn. At the end of the turn, that unit takes 2 damage."
-  -- Compressed: target the first friendly unit and immediately apply 2
-  -- damage (the +3 power buff needs dynamic-power computation; the
-  -- "until end of turn" timing needs deferred-effect support). The
-  -- damage-half is the more impactful half of the rules text.
+  -- Auto-target the first friendly unit. The 2-damage half is now
+  -- scheduled until end of turn via 'DeferDamageToUnitUntilEoT'. The
+  -- +3 power until end of turn still needs scoped modifier support;
+  -- TODO once dynamic modifiers can be timed.
   onReceive $ Receive \msg _owner self -> case msg of
     TacticResolved pk _code | pk == self.controller -> do
       g <- getGame
       case filter (\u -> u.controller == self.controller) g.units of
-        (target : _) -> push (DealDamageToUnit target.key 2)
+        (target : _) -> push (DeferDamageToUnitUntilEoT target.key 2)
         [] -> pure ()
     _ -> pure ()
 
@@ -814,16 +833,28 @@ ironThroneroom = support "the-inevitable-city-013" "Iron Throneroom" do
     "This card enters play with 4 resource tokens on it. \
     \Action: At the beginning of your turn, remove a resource token from this card. \
     \Then, if there are no resource tokens on this card, put up to 3 {chaos} units into play from your hand or discard pile."
-  -- On entry: load 4 tokens. On your turn-begin: tick one off. The
-  -- "put up to 3 Chaos units into play" payoff is a player action and
-  -- waits on the action-prompt iteration; for now it just empties.
-  onReceive $ Receive \msg _owner self -> case msg of
+  -- On entry: load 4 tokens. On your turn-begin: tick one off and, on
+  -- the transition to 0, fire the payoff (auto-pick first 3 Chaos
+  -- units from hand and put them into play in the kingdom zone free).
+  onReceive $ Receive \msg owner self -> case msg of
     SupportEnteredPlay _pk key
       | key == self.key ->
           push (AdjustSupportTokens self.key 4)
     BeginTurn turnOwner
-      | turnOwner == self.controller && self.tokens > 0 ->
+      | turnOwner == self.controller && self.tokens > 0 -> do
           push (AdjustSupportTokens self.key (-1))
+          -- If this tick is going to land us at 0 tokens, immediately
+          -- schedule the summon of up to 3 Chaos units. We pick from
+          -- the controller's hand snapshot (taken pre-receive); 'owner'
+          -- carries that hand.
+          when (self.tokens == 1) $ do
+            let chaosUnits =
+                  [ cd.code
+                  | UnitCardDef cd <- owner.hand
+                  , Chaos `elem` cd.races
+                  ]
+                picks = take 3 chaosUnits
+            traverse_ (\c -> push (PutUnitIntoPlay self.controller c KingdomZone)) picks
     _ -> pure ()
 
 raidingCamps :: CardDef Quest

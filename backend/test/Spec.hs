@@ -8,7 +8,7 @@
 
 module Main (main) where
 
-import Invasion.Capital (Damage (..))
+import Invasion.Capital (Capital (..), Damage (..), Zone (..))
 import Invasion.Card (SomeCardDef (..))
 import Invasion.CardDef (CardDef (..))
 import Invasion.Engine
@@ -159,6 +159,48 @@ main = do
       check "DestroyUnit: card lands in controller's discard"
         (length (activePlayer g7).discard >= discardBefore + 1
           || null g6.units)
+
+  -- Combat smoke: feed an artificial state with a unit on each side
+  -- and run BeginCombat → assert damage landed.
+  setupResult2 <- runSetup
+  gA <- case setupResult2 of
+    Right g -> applyMessage g BeginGame
+    Left err -> do
+      putStrLn $ "FAIL second runSetup: " <> err
+      exitFailure
+  -- Skip turn 1 entirely, get to turn 2 capital window.
+  gB <- applyMessages gA
+    [ PassPriority gA.currentPlayer
+    , PassPriority gA.currentPlayer.next
+    , PassPriority gA.currentPlayer
+    , PassPriority gA.currentPlayer.next
+    ]
+  -- Now on opponent's turn 1 (still "turn 2" counter-wise).
+  -- Drop a 1-HP unit into the active player's battlefield via PlayUnit
+  -- if one is in hand. Otherwise skip the rest of this smoke.
+  case findPlayableUnit (activePlayer gB) of
+    Nothing -> putStrLn "  skip combat smoke (no playable unit)"
+    Just (code, _) -> do
+      gC <- applyMessage gB (PlayUnit gB.currentPlayer code BattlefieldZone)
+      -- BeginCombat attacker against opponent's battlefield. Auto-pick
+      -- the attacker we just placed.
+      let attackerKeys =
+            [ k
+            | UnitDetails {key = k, controller = c} <- gC.units
+            , c == gB.currentPlayer
+            ]
+      gD <- applyMessage gC (BeginCombat gB.currentPlayer BattlefieldZone attackerKeys)
+      check "Combat: combat state cleared after resolve"
+        (case gD.combat of Nothing -> True; Just _ -> False)
+      check "Combat: at least some damage left a mark"
+        (let Player {capital = Capital {battlefield = Zone {damage = Damage zd}}} =
+                case gB.currentPlayer of
+                  Player1 -> gD.player2
+                  Player2 -> gD.player1
+             anyUnitHurt = any
+               (\UnitDetails {damage = Damage d} -> d > 0)
+               gD.units
+          in zd > 0 || anyUnitHurt)
 
   putStrLn "Phase / turn smoke test: OK"
 

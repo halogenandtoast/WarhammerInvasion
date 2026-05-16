@@ -67,6 +67,68 @@ export type Phase = 'KingdomPhase' | 'QuestPhase' | 'CapitalPhase' | 'Battlefiel
 
 export type ZoneKind = 'KingdomZone' | 'QuestZone' | 'BattlefieldZone'
 
+export type CardKind = 'Unit' | 'Support' | 'Quest' | 'Tactic' | 'DraftFormat'
+
+// Mirror of Invasion.Types.Number: either Fixed n or Variable.
+export type EngineNumber =
+  | { tag: 'Fixed'; contents: number }
+  | { tag: 'Variable' }
+
+// Mirror of Invasion.CardDef.Trait. Enum constructors serialize as their
+// bare names (allNullaryToStringTag = True by default).
+export type Trait =
+  | 'Warrior' | 'Spell' | 'Engineer' | 'Elite' | 'Slayer' | 'Priest' | 'Hero'
+  | 'Ranger' | 'Rune' | 'Building' | 'Attachment' | 'Weapon' | 'Siege'
+  | 'Daemon' | 'Creature' | 'Sorcerer' | 'Knight' | 'Cavalry' | 'Mission'
+  | 'QuestTrait' | 'Wasteland' | 'CapitalCenter' | 'Rift' | 'Relic'
+
+// Card definition as serialized by Invasion.CardDef.ToJSON. The 'receive'
+// function field is dropped on the wire — see CardDef.hs.
+export interface EngineCardDef {
+  code: string
+  title: string
+  kind: CardKind
+  races: Race[]
+  cost: EngineNumber
+  loyalty: number
+  power: number
+  hitPoints: EngineNumber | null
+  traits: Trait[]
+  text: string | null
+  flavor: string | null
+  keywords: unknown[]
+  unique: boolean
+}
+
+// In-play unit (Invasion.Entity.UnitDetails). 'key' is the engine's
+// 'UnitKey', written as a bare integer on the wire.
+export interface EngineUnit {
+  key: number
+  controller: PlayerKey
+  zone: ZoneKind
+  cardDef: EngineCardDef
+  damage: number
+  corrupted: boolean
+  attachments: EngineSupport[]
+  experiences: string[]
+}
+
+export interface EngineSupport {
+  key: number
+  controller: PlayerKey
+  zone: ZoneKind
+  cardDef: EngineCardDef
+  attachedTo: number | null
+  tokens: number
+}
+
+export interface EngineQuest {
+  key: number
+  controller: PlayerKey
+  cardDef: EngineCardDef
+  tokens: number
+}
+
 export interface EngineZone {
   kind: ZoneKind
   developments: number
@@ -124,11 +186,12 @@ export interface EnginePlayer {
   state: PlayerLifecycle
   capital: EngineCapital
   resources: number
-  // hand / deck / discard are arrays of card-def JSON; we only need
-  // their .length for the basic in-game UI, so leave them unknown.
-  hand: unknown[]
-  deck: unknown[]
-  discard: unknown[]
+  // Hand cards carry the full card-def payload so the UI can render the
+  // art and decide what kind of "play" action to send. Deck/discard only
+  // need their lengths for piles, but the same payload arrives there too.
+  hand: EngineCardDef[]
+  deck: EngineCardDef[]
+  discard: EngineCardDef[]
   race: Race
 }
 
@@ -173,8 +236,10 @@ export interface EngineGame {
   modifiers: unknown
   lifecycle: GameLifecycle
   log: LogEntry[]
-  units: unknown[]
-  nextUnitKey: unknown
+  units: EngineUnit[]
+  supports: EngineSupport[]
+  quests: EngineQuest[]
+  nextUnitKey: number
 }
 
 // Derived helpers — keep alongside the wire types so they stay in sync.
@@ -228,6 +293,12 @@ export type GameIn =
   | { tag: 'GameClearDeck' }
   | { tag: 'GameStart' }
   | { tag: 'GamePassPriority' }
+  | {
+      tag: 'GamePlayCard'
+      card: string
+      zone: ZoneKind | null
+      target: number | null
+    }
   | { tag: 'GameLeave' }
 
 export type GameOut =

@@ -180,18 +180,18 @@ instance Run Game where
   distribute msg g = do
     player1 <- distribute msg g.player1
     player2 <- distribute msg g.player2
-    -- Snapshot in-play state BEFORE Game's receive runs so leaving
-    -- cards still see the message that removed them. New cards entering
-    -- during this message see the next one (typically the
-    -- '*EnteredPlay' notice the handler emits).
     let preUnits = g.units
         preSupports = g.supports
         preQuests = g.quests
     g' <- execStateT (receive msg) (g {player1, player2})
-    dispatchToInPlayUnits msg preUnits g'
-    dispatchToInPlaySupports msg preSupports g'
-    dispatchToInPlayQuests msg preQuests g'
-    pure g'
+    -- Recompute cached effective stats on every unit before card
+    -- receives run. This way attachments/experiences/burning all show
+    -- through immediately and damage destruction uses the right HP.
+    let g'' = recomputeUnitStats g'
+    dispatchToInPlayUnits msg preUnits g''
+    dispatchToInPlaySupports msg preSupports g''
+    dispatchToInPlayQuests msg preQuests g''
+    pure g''
   receive = \case
     Setup -> do
       fp <- sample2 Player1 Player2
@@ -210,8 +210,11 @@ instance Run Game where
         [("turn", turnText t), ("player", playerParam k)]
       send (BeginPhase KingdomPhase)
     EndTurn k -> do
-      -- TODO once we have effects: clear UntilEndOfTurn modifiers,
-      -- fire "after your turn ends" forced effects.
+      -- Fire scheduled end-of-turn effects before handing off. Each
+      -- effect becomes a real message in the queue.
+      pending <- gets (.pendingEndOfTurn)
+      modify \g -> g {pendingEndOfTurn = []}
+      traverse_ firePendingEffect pending
       modify \g -> g {phase = Nothing}
       logIt LogTurn "log.turn.ends" [("player", playerParam k)]
       send (BeginTurn k.next)
@@ -342,8 +345,9 @@ instance Run Game where
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard) -> case cardDef.cost of
           Variable -> pure ()
-          Fixed n ->
-            when (player.resources >= Resources n) $ do
+          Fixed printed ->
+            let n = effectiveUnitCost g cardDef printed
+            in when (player.resources >= Resources n) $ do
               let UnitKey nextN = g.nextUnitKey
                   unitKey = UnitKey nextN
                   paidPlayer =
@@ -359,6 +363,8 @@ instance Run Game where
                       , corrupted = False
                       , attachments = []
                       , experiences = []
+                      , effectivePower = cardDef.power
+                      , effectiveMaxHP = unitPrintedHPFromDef cardDef
                       }
               modify \gx ->
                 (setPlayer pk paidPlayer gx)
@@ -396,7 +402,9 @@ instance Run Game where
             , ("amount", T.pack (show inflated))
             ]
           let Damage total = newDmg
-          when (total >= unitPrintedHP u) $
+          -- Destruction threshold is the cached effective max HP
+          -- (attachments etc. already folded in by the recompute pass).
+          when (total >= u.effectiveMaxHP) $
             send (DestroyUnit ukey)
     HealUnit ukey amount -> do
       g <- get
@@ -668,6 +676,180 @@ instance Run Game where
           case cardDef.receive of
             Receive f -> f (TacticResolved pk code) owner ctx
         _ -> pure ()
+    DeferDamageToUnitUntilEoT ukey n -> do
+      modify \g ->
+        g {pendingEndOfTurn = PEDealDamageToUnit ukey n : g.pendingEndOfTurn}
+      logIt LogSystem
+        "log.effect.deferred_damage"
+        [ ("amount", T.pack (show n))
+        , ("trigger", "EndTurn")
+        ]
+    DealDamageToZone targetPlayer zoneKind raw -> do
+      let amount = max 0 raw
+      when (amount > 0) $ do
+        g <- get
+        let target = lookupPlayer targetPlayer g
+            zoneL = getZone zoneKind target
+            -- Add damage; burn if it now meets or exceeds HP, and if
+            -- that's the second burn on this capital eliminate the
+            -- player.
+            Damage existing = zoneL.damage
+            HitPoints zoneHp = zoneL.hitPoints
+            total = existing + amount
+            (newDmg, justBurned) =
+              if total >= zoneHp && not zoneL.burned
+                then (Damage 0, True)
+                else (Damage total, False)
+            zoneL' =
+              zoneL
+                { damage = newDmg
+                , burned = zoneL.burned || justBurned
+                }
+            target' = setZone zoneKind zoneL' target
+        modify (setPlayer targetPlayer target')
+        logIt LogSystem
+          "log.zone.damaged"
+          [ ("player", playerParam targetPlayer)
+          , ("zone", zoneParam zoneKind)
+          , ("amount", T.pack (show amount))
+          ]
+        when justBurned $ do
+          logIt LogResult
+            "log.zone.burned"
+            [ ("player", playerParam targetPlayer)
+            , ("zone", zoneParam zoneKind)
+            ]
+          -- Check for elimination (two burned zones = lose).
+          let burnedNow = burnedZoneCount target'.capital
+          when (burnedNow >= 2) $
+            send (Eliminate targetPlayer CapitalBurned)
+    BeginCombat attacker zone attackerKeys -> do
+      g <- get
+      -- Auto-pick defenders: every enemy unit currently in the
+      -- corresponding zone. Real combat would prompt the defender.
+      let defender = attacker.next
+          autoDefenders =
+            [ u.key
+            | u <- g.units
+            , u.controller == defender
+            , u.zone == zone
+            , not u.corrupted
+            ]
+          combatState =
+            CombatState
+              { attackingPlayer = attacker
+              , defendingPlayer = defender
+              , targetZone = zone
+              , attackers = attackerKeys
+              , defenders = autoDefenders
+              }
+      modify \gx -> gx {combat = Just combatState}
+      logIt LogPlayerAction
+        "log.combat.begins"
+        [ ("attacker", playerParam attacker)
+        , ("zone", zoneParam zone)
+        ]
+      send (DeclareDefenders autoDefenders)
+    DeclareDefenders defs -> do
+      modify \gx -> case gx.combat of
+        Just cs -> gx {combat = Just (cs {defenders = defs} :: CombatState)}
+        Nothing -> gx
+      send ResolveCombat
+    ResolveCombat -> do
+      g <- get
+      case g.combat of
+        Nothing -> pure ()
+        Just cs -> do
+          let attackerUnits =
+                [ u
+                | k <- cs.attackers
+                , Just u <- [findUnit k g]
+                ]
+              defenderUnits =
+                [ u
+                | k <- cs.defenders
+                , Just u <- [findUnit k g]
+                ]
+              attackerDamage =
+                sum (map (combatDamageOf g cs.attackingPlayer) attackerUnits)
+              defenderDamage =
+                sum (map (combatDamageOf g cs.defendingPlayer) defenderUnits)
+              -- Defenders soak first; leftover goes to the zone.
+              defenderHP =
+                sum (map (\u -> u.effectiveMaxHP) defenderUnits)
+              spilloverToZone =
+                max 0 (attackerDamage - defenderHP)
+          -- Apply attacker damage to defending units, in order, then
+          -- send spillover to the zone.
+          applyDamageToUnits attackerDamage defenderUnits
+          when (spilloverToZone > 0) $
+            send (DealDamageToZone cs.defendingPlayer cs.targetZone spilloverToZone)
+          -- Counterattack: defender damage soaks against attackers.
+          applyDamageToUnits defenderDamage attackerUnits
+          logIt LogSystem
+            "log.combat.resolved"
+            [ ("attacker_damage", T.pack (show attackerDamage))
+            , ("defender_damage", T.pack (show defenderDamage))
+            ]
+          send EndCombat
+    EndCombat -> do
+      modify \gx -> gx {combat = Nothing}
+      logIt LogSystem "log.combat.ends" []
+    PutUnitIntoPlay pk code zone -> do
+      g <- get
+      let player = lookupPlayer pk g
+      case takeUnitFromHand code player of
+        Nothing -> pure ()
+        Just (cardDef, playerWithoutCard) -> do
+          -- Skip cost; same wiring as 'PlayUnit' but no resource debit
+          -- and no Variable-cost gate.
+          let UnitKey nextN = g.nextUnitKey
+              unitKey = UnitKey nextN
+              unitDetails =
+                UnitDetails
+                  { key = unitKey
+                  , controller = pk
+                  , zone
+                  , cardDef
+                  , damage = Damage 0
+                  , corrupted = False
+                  , attachments = []
+                  , experiences = []
+                  , effectivePower = cardDef.power
+                  , effectiveMaxHP = unitPrintedHPFromDef cardDef
+                  }
+          modify \gx ->
+            (setPlayer pk playerWithoutCard gx)
+              { units = unitDetails : gx.units
+              , nextUnitKey = UnitKey (nextN + 1)
+              }
+          logIt LogSystem
+            "log.unit.summoned_free"
+            [ ("player", playerParam pk)
+            , ("card", T.pack cardDef.title)
+            ]
+          send (UnitEnteredPlay pk unitKey)
+    MoveAllDamage fromKey toKey -> do
+      g <- get
+      case (findUnit fromKey g, findUnit toKey g) of
+        (Just src, Just dst) -> do
+          let Damage srcDmg = src.damage
+          when (srcDmg > 0) $ do
+            let src' = (src {damage = Damage 0}) :: UnitDetails
+                Damage dstDmg = dst.damage
+                dst' = (dst {damage = Damage (dstDmg + srcDmg)}) :: UnitDetails
+            modify \gx ->
+              gx {units = replaceUnit src' (replaceUnit dst' gx.units)}
+            logIt LogSystem
+              "log.unit.damage_moved"
+              [ ("source", T.pack src.cardDef.title)
+              , ("target", T.pack dst.cardDef.title)
+              , ("amount", T.pack (show srcDmg))
+              ]
+            -- Destination might now exceed its HP.
+            when (dstDmg + srcDmg >= dst.effectiveMaxHP) $
+              send (DestroyUnit toKey)
+        _ -> pure ()
 
 -- | First-turn penalty: the starting player skips Quest and Battlefield
 -- on the very first turn of the game.
@@ -712,6 +894,8 @@ newGame deck1 deck2 = do
       , supports = []
       , quests = []
       , nextUnitKey = UnitKey 0
+      , pendingEndOfTurn = []
+      , combat = Nothing
       }
 
 -- | Look up a player record by key.
@@ -768,6 +952,73 @@ takeQuestFromHand code p = go p.hand []
             Just (cd, p {hand = reverse acc ++ rest})
       _ -> go rest (s : acc)
 
+-- | Fire one scheduled end-of-turn effect by translating it into a
+-- normal message and enqueuing it.
+firePendingEffect :: PendingEffect -> StateT Game GameT ()
+firePendingEffect = \case
+  PEDealDamageToUnit ukey n -> send (DealDamageToUnit ukey n)
+
+-- | The damage a single unit contributes in combat. Adds card-specific
+-- bonuses (Lord of Khorne, Rift of Battle, …) on top of the cached
+-- effective power. The 'PlayerKey' is the unit's side, which lets
+-- some bonuses scope to attackers vs defenders if they grow such a
+-- distinction later.
+combatDamageOf :: Game -> PlayerKey -> UnitDetails -> Int
+combatDamageOf g _side u =
+  u.effectivePower + lordOfKhorne + riftOfBattle
+  where
+    -- Lord of Khorne (cataclysm-033) deals +1 damage in combat per
+    -- burning zone (across both capitals).
+    lordOfKhorne
+      | u.cardDef.code == CardCode "cataclysm-033" =
+          burningZoneCount g
+      | otherwise = 0
+    -- Rift of Battle (the-accursed-dead-052) buffs every unit's
+    -- combat damage by +1 while it's in play.
+    riftOfBattle
+      | any (\s -> s.cardDef.code == CardCode "the-accursed-dead-052") g.supports =
+          1
+      | otherwise = 0
+
+-- | Apply a total damage budget to a list of units, in order. Each
+-- unit absorbs up to its remaining HP (effectiveMaxHP minus current
+-- damage). Once budget is exhausted the rest of the list is ignored.
+applyDamageToUnits :: Int -> [UnitDetails] -> StateT Game GameT ()
+applyDamageToUnits = go
+  where
+    go _ [] = pure ()
+    go budget _ | budget <= 0 = pure ()
+    go budget (u : rest) = do
+      let Damage existing = u.damage
+          slack = max 0 (u.effectiveMaxHP - existing)
+          dealt = min budget slack
+      when (dealt > 0) (send (DealDamageToUnit u.key dealt))
+      go (budget - dealt) rest
+
+-- | Read a zone from a 'Capital' by 'ZoneKind'.
+getZone :: ZoneKind -> Player -> Zone
+getZone kind p = case kind of
+  KingdomZone -> p.capital.kingdom
+  QuestZone -> p.capital.quest
+  BattlefieldZone -> p.capital.battlefield
+
+-- | Replace a zone within a player's capital, preserving the other two.
+setZone :: ZoneKind -> Zone -> Player -> Player
+setZone kind z p =
+  let c = p.capital
+      c' = case kind of
+        KingdomZone -> c {kingdom = z}
+        QuestZone -> c {quest = z}
+        BattlefieldZone -> c {battlefield = z}
+   in p {capital = c'}
+
+-- | Wire-side enum encoding for 'ZoneKind' (mirrors 'playerParam').
+zoneParam :: ZoneKind -> Text
+zoneParam = \case
+  KingdomZone -> "KingdomZone"
+  QuestZone -> "QuestZone"
+  BattlefieldZone -> "BattlefieldZone"
+
 -- | Apply any in-play passive damage multipliers to a raw damage
 -- amount. Currently only Bloodletter (legends-031) doubles, but
 -- additional multipliers (Slaaneshi mirror effects, etc.) plug in here.
@@ -776,6 +1027,63 @@ applyDamageMultipliers g amount =
   let hasBloodletter =
         any (\u -> u.cardDef.code == CardCode "legends-031") g.units
    in if hasBloodletter then amount * 2 else amount
+
+-- | Card-specific cost adjustments applied at play time. Centralised
+-- here as a small switch by 'CardCode'; cards whose printed cost is
+-- contextual list themselves below. Returns the cost AFTER adjustment,
+-- floored at 0.
+effectiveUnitCost :: Game -> CardDef Unit -> Int -> Int
+effectiveUnitCost g cardDef printed = max 0 (printed + adjust)
+  where
+    adjust = case cardDef.code of
+      -- Bloodcrusher: -1 per burning zone (across both capitals).
+      CardCode "cataclysm-034" -> negate (burningZoneCount g)
+      _ -> 0
+
+-- | Printed HP for a 'CardDef Unit' (no in-play context). Variable HP
+-- defaults to 1; we'll grow this once X-cost units are in scope.
+unitPrintedHPFromDef :: CardDef Unit -> Int
+unitPrintedHPFromDef cd = case cd.hitPoints of
+  Just (Fixed n) -> n
+  Just Variable -> 1
+  Nothing -> 1
+
+-- | Recompute cached effective stats for every in-play unit. Called
+-- after each engine step so 'effectivePower' and 'effectiveMaxHP'
+-- always reflect current attachments, experiences, and zone state.
+recomputeUnitStats :: Game -> Game
+recomputeUnitStats g = g {units = map update g.units}
+  where
+    update u =
+      u {effectivePower = computePower u, effectiveMaxHP = computeMaxHP u}
+        :: UnitDetails
+    computePower u =
+      u.cardDef.power
+        + sum (map (attachmentPowerBonus u) u.attachments)
+        + experiencePowerBonus u
+    computeMaxHP u =
+      unitPrintedHPFromDef u.cardDef
+        + sum (map (attachmentHPBonus u) u.attachments)
+
+-- | Per-attachment power contribution. Hard-coded by 'CardCode'.
+attachmentPowerBonus :: UnitDetails -> SupportDetails -> Int
+attachmentPowerBonus _host s = case s.cardDef.code of
+  CardCode "the-warpstone-chronicles-095" -> 3 -- Daemonsword
+  CardCode "omens-of-ruin-013" -> 2 -- Mark of Chaos
+  _ -> 0
+
+-- | Per-attachment HP contribution.
+attachmentHPBonus :: UnitDetails -> SupportDetails -> Int
+attachmentHPBonus _host s = case s.cardDef.code of
+  CardCode "the-warpstone-chronicles-095" -> 2 -- Daemonsword
+  _ -> 0
+
+-- | Power gained from experience markers. Only Skulltaker reads them
+-- today.
+experiencePowerBonus :: UnitDetails -> Int
+experiencePowerBonus u = case u.cardDef.code of
+  CardCode "faith-and-steel-113" -> length u.experiences
+  _ -> 0
 
 -- | Pull a Tactic card matching the given 'CardCode' out of a player's
 -- hand.

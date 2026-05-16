@@ -43,9 +43,20 @@ import Invasion.Auth.Jwt
   , JwtSecret
   , verifyJwt
   )
+import Invasion.Card (SomeCardDef (..), allCards)
+import Invasion.CardDef (CardDef (..), Trait (Attachment))
 import Invasion.DB (DbPool, runDB)
 import Invasion.Engine
-  ( Message (BeginGame, PassPriority, Setup)
+  ( Message
+      ( BeginGame
+      , PassPriority
+      , PlayAttachment
+      , PlayQuest
+      , PlaySupport
+      , PlayTactic
+      , PlayUnit
+      , Setup
+      )
   , applyMessage
   , newGame
   )
@@ -54,7 +65,13 @@ import Invasion.Model
 import Invasion.Prelude
 import Invasion.Server.Lobby
 import Invasion.Server.Protocol
-import Invasion.Types (CardCode (..), PlayerKey (..), Race (..))
+import Invasion.Types
+  ( CardCode (..)
+  , PlayerKey (..)
+  , Race (..)
+  , UnitKey
+  , ZoneKind
+  )
 import Network.HTTP.Types (Query, parseQuery)
 import Network.Wai (Application, rawPathInfo, rawQueryString)
 import Network.Wai.Handler.WebSockets (websocketsOr)
@@ -438,6 +455,26 @@ handleGameIn env slot user = \case
               writeTVar slot.engine (Just g')
               v <- gameViewSTM slot user
               broadcastGameWithView slot v
+  GamePlayCard {card, zone, target} -> do
+    mGame <- readTVarIO slot.engine
+    case mGame of
+      Nothing -> sendGameError slot user "game_not_started"
+      Just g -> do
+        seatKey <- atomically do
+          sm <- readTVar slot.seats
+          pure $ findSeatFor user sm
+        case seatKey >>= seatKeyToPlayerKey of
+          Nothing -> sendGameError slot user "not_seated"
+          Just pk -> case Map.lookup card allCards of
+            Nothing -> sendGameError slot user "card_unknown"
+            Just someCard -> case playMessageFor pk card zone target someCard of
+              Left code -> sendGameError slot user code
+              Right msg -> do
+                g' <- applyMessage g msg
+                atomically do
+                  writeTVar slot.engine (Just g')
+                  v <- gameViewSTM slot user
+                  broadcastGameWithView slot v
   GameLeave -> do
     sts <- readTVarIO slot.status
     -- A "leave" while playing ends the game.
@@ -468,6 +505,31 @@ seatKeyToPlayerKey = \case
   "Player1" -> Just Player1
   "Player2" -> Just Player2
   _ -> Nothing
+
+-- | Choose the engine 'Message' that corresponds to the player's
+-- 'GamePlayCard' request, based on the card's static kind. Returns a
+-- protocol error code if the request doesn't carry the data the kind
+-- needs (e.g. attachments must include a target unit).
+playMessageFor
+  :: PlayerKey
+  -> CardCode
+  -> Maybe ZoneKind
+  -> Maybe UnitKey
+  -> SomeCardDef
+  -> Either Text Message
+playMessageFor pk code mZone mTarget = \case
+  UnitCardDef _ -> case mZone of
+    Just z -> Right (PlayUnit pk code z)
+    Nothing -> Left "zone_required"
+  SupportCardDef cd
+    | Attachment `elem` cd.traits -> case mTarget of
+        Just t -> Right (PlayAttachment pk code t)
+        Nothing -> Left "target_required"
+    | otherwise -> case mZone of
+        Just z -> Right (PlaySupport pk code z)
+        Nothing -> Left "zone_required"
+  QuestCardDef _ -> Right (PlayQuest pk code)
+  TacticCardDef _ -> Right (PlayTactic pk code)
 
 sendGameError :: GameSlot -> UserInfo -> Text -> IO ()
 sendGameError slot user code = atomically do

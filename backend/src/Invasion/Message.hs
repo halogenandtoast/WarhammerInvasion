@@ -94,5 +94,34 @@ data Message where
     -- ^ Dispatch hook fired exactly once when a tactic resolves. The
     -- tactic's CardDef.receive is invoked with this message; cards
     -- like Berserk Fury and Blood for the Blood God react here.
+  -- Deferred effects
+  DeferDamageToUnitUntilEoT :: UnitKey -> Int -> Message
+    -- ^ Schedule N damage to land on the target at end of turn.
+  -- Zone damage
+  DealDamageToZone :: PlayerKey -> ZoneKind -> Int -> Message
+    -- ^ Add N damage tokens to a capital zone. May burn the zone (and
+    -- a second burn eliminates the player).
+  -- Free unit summons (Iron Throneroom payoff, Reckless Attack, …).
+  PutUnitIntoPlay :: PlayerKey -> CardCode -> ZoneKind -> Message
+    -- ^ Like 'PlayUnit' but skips the cost check / payment and pulls
+    -- from hand. Used by effects that explicitly bypass the resource
+    -- system.
+  -- Damage shuffling (Valkia)
+  MoveAllDamage :: UnitKey -> UnitKey -> Message
+    -- ^ Move all damage on 'fromKey' to 'toKey'. Source unit ends with
+    -- 0 damage; destination accumulates.
+  -- Combat sequence
+  BeginCombat :: PlayerKey -> ZoneKind -> [UnitKey] -> Message
+    -- ^ Declare an attack: 'PlayerKey' is the attacker, 'ZoneKind' is
+    -- the defending zone (of the opponent), and the list is the
+    -- attacking unit keys.
+  DeclareDefenders :: [UnitKey] -> Message
+    -- ^ Defender locks in which of their units block. Auto-picks all
+    -- eligible defenders if no list is supplied (we always supply
+    -- one from the engine today).
+  ResolveCombat :: Message
+    -- ^ Compute and apply combat damage on both sides, then 'EndCombat'.
+  EndCombat :: Message
+    -- ^ Combat ends; clear 'Game.combat'.
 
 deriving stock instance Show Message
