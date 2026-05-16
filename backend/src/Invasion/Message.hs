@@ -149,6 +149,36 @@ data Message where
     -- ^ Remove a legend from play; its card goes to the controller's
     -- discard. Triggers 'LegendLeftPlay'.
   LegendLeftPlay :: PlayerKey -> UnitKey -> CardCode -> Message
+  -- Zone bookkeeping
+  HealCapital :: PlayerKey -> Int -> Message
+    -- ^ Remove up to N total damage tokens from the named player's
+    -- capital, distributed across zones (most-damaged first). Burned
+    -- zones are not healed.
+  HealZone :: PlayerKey -> ZoneKind -> Int -> Message
+    -- ^ Remove up to N damage tokens from one specific zone.
+  AddDevelopment :: PlayerKey -> ZoneKind -> Message
+    -- ^ Place a facedown development in the named zone. Bypasses the
+    -- once-per-turn limit (used by Dwarf Masons, Wake the Mountain).
+  -- Bulk / AoE damage
+  DealDamageToEachEnemyUnitInZone :: PlayerKey -> ZoneKind -> Int -> Message
+    -- ^ N damage to every enemy unit currently sitting in the named
+    -- zone. 'PlayerKey' is the caster's side; the engine deals to
+    -- units whose controller is the opponent.
+  DealDamageToEachUnitInCombat :: Int -> Message
+    -- ^ N damage to every unit currently engaged in combat (attackers
+    -- and defenders). No-op outside combat.
+  -- Cancellation
+  CancelAllBattlefieldDamageThisTurn :: Message
+    -- ^ Master Rune of Valaya. Suppress all subsequent damage assigned
+    -- during this battlefield phase by clearing combat resolution.
+  -- Hand interaction
+  DiscardRandomFromHand :: PlayerKey -> Message
+    -- ^ Discard one card chosen at random from the player's hand.
+  -- Resources
+  GainResources :: PlayerKey -> Int -> Message
+    -- ^ Credit N resources to the named player's pool. Used by tactic
+    -- effects (Burying the Grudge, …) that bypass the kingdom-phase
+    -- collection step.
   -- Combat sequence
   BeginCombat :: PlayerKey -> ZoneKind -> [UnitKey] -> Message
     -- ^ Declare an attack: 'PlayerKey' is the attacker, 'ZoneKind' is

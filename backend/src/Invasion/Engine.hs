@@ -212,6 +212,7 @@ instance Run Game where
           { currentPlayer = k
           , turn = g.turn + Turn 1
           , limitedPlayedThisTurn = False
+          , unitsDiscardedThisTurn = 0
           }
       t <- gets (.turn)
       logIt LogTurn
@@ -370,7 +371,7 @@ instance Run Game where
         Just (cardDef, playerWithoutCard) -> case cardDef.cost of
           Variable -> pure ()
           Fixed printed ->
-            let n = effectiveUnitCost g cardDef printed
+            let n = effectiveUnitCost g pk cardDef printed
             in when (player.resources >= Resources n) $ do
               -- Reuse the card's existing key as its in-play UnitKey.
               -- This is what lets the frontend's view-transition map a
@@ -474,6 +475,8 @@ instance Run Game where
                       {units = filter (\v -> v.key /= ukey) g.units}
               gFinal = foldl dropSupport gAfterUnit u.attachments
           put gFinal
+          modify \gx ->
+            gx {unitsDiscardedThisTurn = gx.unitsDiscardedThisTurn + 1}
           logIt LogSystem
             "log.unit.destroyed"
             [ ("player", playerParam u.controller)
@@ -758,6 +761,123 @@ instance Run Game where
           let burnedNow = burnedZoneCount target'.capital
           when (burnedNow >= 2) $
             send (Eliminate targetPlayer CapitalBurned)
+    HealCapital pk raw -> do
+      -- Heal up to N total damage tokens off the capital, spending the
+      -- budget greedily on the most-damaged unburned zone, then the
+      -- next, and so on. Burned zones are not healed.
+      let budget = max 0 raw
+      when (budget > 0) $ do
+        g <- get
+        let player0 = lookupPlayer pk g
+            step p b
+              | b <= 0 = p
+              | otherwise =
+                  let candidates =
+                        [ (d, z)
+                        | z <- [KingdomZone, QuestZone, BattlefieldZone]
+                        , let zL = getZone z p
+                        , not zL.burned
+                        , let Damage d = zL.damage
+                        , d > 0
+                        ]
+                   in case candidates of
+                        [] -> p
+                        _ ->
+                          let (dMost, zMost) = maximum candidates
+                              taken = min b dMost
+                              zL = getZone zMost p
+                              zL' = (zL {damage = Damage (dMost - taken)}) :: Zone
+                           in step (setZone zMost zL' p) (b - taken)
+            player' = step player0 budget
+        modify (setPlayer pk player')
+        logIt LogSystem
+          "log.capital.healed"
+          [("player", playerParam pk), ("amount", T.pack (show budget))]
+    HealZone pk zone raw -> do
+      let amount = max 0 raw
+      when (amount > 0) $ do
+        g <- get
+        let player = lookupPlayer pk g
+            zoneL = getZone zone player
+            Damage d = zoneL.damage
+            taken = min amount d
+        when (taken > 0) $ do
+          let zoneL' = (zoneL {damage = Damage (d - taken)}) :: Zone
+              player' = setZone zone zoneL' player
+          modify (setPlayer pk player')
+          logIt LogSystem
+            "log.zone.healed"
+            [ ("player", playerParam pk)
+            , ("zone", zoneParam zone)
+            , ("amount", T.pack (show taken))
+            ]
+    AddDevelopment pk zone -> do
+      g <- get
+      let player = lookupPlayer pk g
+          zoneL = getZone zone player
+          Developments d = zoneL.developments
+          zoneL' = (zoneL {developments = Developments (d + 1)}) :: Zone
+          player' = setZone zone zoneL' player
+      modify (setPlayer pk player')
+      logIt LogSystem
+        "log.zone.development_added"
+        [("player", playerParam pk), ("zone", zoneParam zone)]
+    DealDamageToEachEnemyUnitInZone pk zone raw -> do
+      let amount = max 0 raw
+      when (amount > 0) $ do
+        g <- get
+        let targets =
+              [ u.key
+              | u <- g.units
+              , u.controller /= pk
+              , u.zone == zone
+              ]
+        traverse_ (\k -> send (DealDamageToUnit k amount)) targets
+    DealDamageToEachUnitInCombat amount -> do
+      g <- get
+      case g.combat of
+        Nothing -> pure ()
+        Just cs ->
+          traverse_ (\k -> send (DealDamageToUnit k (max 0 amount))) (cs.attackers <> cs.defenders)
+    CancelAllBattlefieldDamageThisTurn -> do
+      -- The crude version: drop the in-flight combat (cancels any
+      -- pending damage that would have been dealt) and clear the
+      -- attacker list. Subsequent attacks this phase are still allowed
+      -- per the card text — the engine doesn't yet expose a "this
+      -- turn" suppression flag, so this is a best-effort approximation.
+      modify \gx -> gx {combat = Nothing}
+      logIt LogSystem "log.combat.cancelled" []
+    DiscardRandomFromHand pk -> do
+      g <- get
+      let player = lookupPlayer pk g
+      case player.hand of
+        [] -> pure ()
+        cards -> do
+          idx <- getRandomR (0, length cards - 1)
+          let (before, after) = splitAt idx cards
+          case after of
+            (picked : rest) -> do
+              let player' =
+                    player
+                      { hand = before <> rest
+                      , discard = picked : player.discard
+                      }
+              modify (setPlayer pk player')
+              logIt LogSystem
+                "log.hand.discarded"
+                [("player", playerParam pk)]
+            [] -> pure ()
+    GainResources pk raw -> do
+      let amount = max 0 raw
+      when (amount > 0) $ do
+        g <- get
+        let player = lookupPlayer pk g
+            Resources r = player.resources
+            player' = player {resources = Resources (r + amount)}
+        modify (setPlayer pk player')
+        logIt LogSystem
+          "log.resources.gained"
+          [("player", playerParam pk), ("amount", T.pack (show amount))]
     BeginCombat attacker zone attackerKeys -> do
       g <- get
       let defender = attacker.next
@@ -1105,6 +1225,7 @@ newGame deck1 deck2 = do
       , attackersThisPhase = []
       , pendingEndOfPhase = []
       , limitedPlayedThisTurn = False
+      , unitsDiscardedThisTurn = 0
       }
 
 -- | Look up a player record by key.
@@ -1172,20 +1293,83 @@ firePendingEffect = \case
 -- some bonuses scope to attackers vs defenders if they grow such a
 -- distinction later.
 combatDamageOf :: Game -> PlayerKey -> UnitDetails -> Int
-combatDamageOf g _side u =
-  u.effectivePower + lordOfKhorne + riftOfBattle
+combatDamageOf g side u =
+  u.effectivePower
+    + lordOfKhorne
+    + riftOfBattle
+    + organGunDefendingBonus
+    + daBadMoonAttackingAura
+    + bigBossesBannerAura
+    + gorbadIronclawSelf
   where
+    isAttacker = case g.combat of
+      Just cs -> side == cs.attackingPlayer && u.key `elem` cs.attackers
+      Nothing -> False
+    isDefender = case g.combat of
+      Just cs -> side == cs.defendingPlayer && u.key `elem` cs.defenders
+      Nothing -> False
+
     -- Lord of Khorne (cataclysm-033) deals +1 damage in combat per
     -- burning zone (across both capitals).
     lordOfKhorne
       | u.cardDef.code == CardCode "cataclysm-033" =
           burningZoneCount g
       | otherwise = 0
+
     -- Rift of Battle (the-accursed-dead-052) buffs every unit's
     -- combat damage by +1 while it's in play.
     riftOfBattle
       | any (\s -> s.cardDef.code == CardCode "the-accursed-dead-052") g.supports =
           1
+      | otherwise = 0
+
+    -- Organ Gun (core-015): attached unit gains +2 power while
+    -- defending. Implemented per-unit because the bonus is conditional.
+    organGunDefendingBonus
+      | isDefender
+      , any (\a -> a.cardDef.code == CardCode "core-015") u.attachments = 2
+      | otherwise = 0
+
+    -- Da Bad Moon (core-121): your other Orc units gain {power} while
+    -- attacking, provided the Bad Moon support is in play under your
+    -- control.
+    daBadMoonAttackingAura
+      | isAttacker
+      , Orc `elem` u.cardDef.races
+      , any
+          ( \s ->
+              s.controller == u.controller
+                && s.cardDef.code == CardCode "core-121"
+          )
+          g.supports = 1
+      | otherwise = 0
+
+    -- Big Boss's Banner (core-123): the attached unit's other Orc
+    -- attackers gain {power}. Granted to U if there's an Orc attacker
+    -- carrying the banner on this side that isn't U itself.
+    bigBossesBannerAura
+      | isAttacker
+      , Orc `elem` u.cardDef.races
+      , let bannerHosts =
+              [ v
+              | v <- g.units
+              , v.controller == u.controller
+              , v.key /= u.key
+              , any (\a -> a.cardDef.code == CardCode "core-123") v.attachments
+              ]
+      , not (null bannerHosts)
+      , let isHostAttacker v = case g.combat of
+              Just cs -> v.key `elem` cs.attackers
+              Nothing -> False
+      , any isHostAttacker bannerHosts = 1
+      | otherwise = 0
+
+    -- Gorbad Ironclaw (core-108): +1 damage in combat when this unit
+    -- damages a zone — approximated as a flat +1 to its own combat
+    -- power (spillover to the zone scales naturally with that).
+    gorbadIronclawSelf
+      | u.cardDef.code == CardCode "core-108"
+      , isAttacker = 1
       | otherwise = 0
 
 -- | Card-aware attacker eligibility check at 'BeginCombat'. Returns
@@ -1259,14 +1443,40 @@ applyDamageMultipliers g amount =
 -- | Card-specific cost adjustments applied at play time. Centralised
 -- here as a small switch by 'CardCode'; cards whose printed cost is
 -- contextual list themselves below. Returns the cost AFTER adjustment,
--- floored at 0.
-effectiveUnitCost :: Game -> CardDef Unit -> Int -> Int
-effectiveUnitCost g cardDef printed = max 0 (printed + adjust)
+-- floored at 0. 'PlayerKey' is the player playing the card so that
+-- effects scoped to "you" vs. "your opponent" can distinguish.
+effectiveUnitCost :: Game -> PlayerKey -> CardDef Unit -> Int -> Int
+effectiveUnitCost g pk cardDef printed =
+  max 0 (printed + selfAdjust + opponentAdjust + globalAdjust)
   where
-    adjust = case cardDef.code of
-      -- Bloodcrusher: -1 per burning zone (across both capitals).
+    -- Bloodcrusher: -1 per burning zone (across both capitals).
+    selfAdjust = case cardDef.code of
       CardCode "cataclysm-034" -> negate (burningZoneCount g)
       _ -> 0
+
+    -- Imperial Crown (core-041): your Empire heroes cost 1 less while
+    -- you control the crown.
+    globalAdjust
+      | Empire `elem` cardDef.races
+      , Hero `elem` cardDef.traits
+      , any
+          ( \s ->
+              s.controller == pk
+                && s.cardDef.code == CardCode "core-041"
+          )
+          g.supports = -1
+      | otherwise = 0
+
+    -- Master Rune of Dismay (core-016): opponent's units cost +1 to
+    -- play.
+    opponentAdjust
+      | any
+          ( \s ->
+              s.controller == pk.next
+                && s.cardDef.code == CardCode "core-016"
+          )
+          g.supports = 1
+      | otherwise = 0
 
 -- | Printed HP for a 'CardDef Unit' (no in-play context). Variable HP
 -- defaults to 1; we'll grow this once X-cost units are in scope.
@@ -1291,6 +1501,8 @@ recomputeUnitStats g = g {units = map update g.units}
         + sum (map (attachmentPowerBonus u) u.attachments)
         + experiencePowerBonus u
         + modifierPowerBonus u
+        + auraPowerBonus g u
+        + selfScalingPowerBonus g u
     computeMaxHP u =
       unitPrintedHPFromDef u.cardDef
         + sum (map (attachmentHPBonus u) u.attachments)
@@ -1303,12 +1515,105 @@ attachmentPowerBonus :: UnitDetails -> SupportDetails -> Int
 attachmentPowerBonus _host s = case s.cardDef.code of
   CardCode "the-warpstone-chronicles-095" -> 3 -- Daemonsword
   CardCode "omens-of-ruin-013" -> 2 -- Mark of Chaos
+  CardCode "core-042" -> 2 -- Hammer of Sigmar
+  CardCode "core-043" -> 1 -- Banner of Sigmar
+  CardCode "core-067" -> 2 -- Banner of Avelorn
+  CardCode "core-098" -> 1 -- Eye of Tzeentch
+  CardCode "core-122" -> 2 -- Choppa
+  CardCode "core-149" -> 2 -- Whip of Agony
+  CardCode "core-150" -> 1 -- Druchii Banner
   _ -> 0
 
 -- | Per-attachment HP contribution.
 attachmentHPBonus :: UnitDetails -> SupportDetails -> Int
 attachmentHPBonus _host s = case s.cardDef.code of
   CardCode "the-warpstone-chronicles-095" -> 2 -- Daemonsword
+  _ -> 0
+
+-- | Continuous aura contributions to a unit's effective power, from
+-- other in-play cards (units, supports). Read by 'recomputeUnitStats'
+-- so the bonus shows up in every zone-dependent calculation
+-- (resources, quest draw, combat).
+auraPowerBonus :: Game -> UnitDetails -> Int
+auraPowerBonus g u = sum
+  [ karlFranzAura
+  , templarOfSigmarAura
+  , ironTowerAura
+  , cauldronOfBloodAura
+  , daBadMoonStaticAura
+  ]
+  where
+    isFriendly v = v.controller == u.controller
+    differentUnit v = v.key /= u.key
+    hasCode code v = v.cardDef.code == CardCode code
+    hasSupport code = any (\s -> isFriendlySupport s && hasCodeS s code) g.supports
+    isFriendlySupport s = s.controller == u.controller
+    hasCodeS s code = s.cardDef.code == CardCode code
+
+    -- Karl Franz: your other Empire units gain {power}.
+    karlFranzAura
+      | Empire `elem` u.cardDef.races
+      , any (\v -> isFriendly v && differentUnit v && hasCode "core-035" v) g.units = 1
+      | otherwise = 0
+
+    -- Templar of Sigmar: your other Warrior units in this zone gain
+    -- {power} while the Templar is here.
+    templarOfSigmarAura
+      | Warrior `elem` u.cardDef.traits
+      , any
+          ( \v ->
+              isFriendly v
+                && differentUnit v
+                && hasCode "core-028" v
+                && v.zone == u.zone
+          )
+          g.units = 1
+      | otherwise = 0
+
+    -- Iron Tower: your Chaos units in the battlefield gain {power}.
+    ironTowerAura
+      | Chaos `elem` u.cardDef.races
+      , u.zone == BattlefieldZone
+      , hasSupport "core-099" = 1
+      | otherwise = 0
+
+    -- Cauldron of Blood: your Witch Elf units gain {power}.
+    cauldronOfBloodAura
+      | u.cardDef.code == CardCode "core-135"
+      , hasSupport "core-147" = 1
+      | otherwise = 0
+
+    -- Da Bad Moon: your other Orc units gain {power} while attacking.
+    -- The "while attacking" part is handled in 'combatDamageOf'; here
+    -- we only credit the always-on slice when the moon's a unit on the
+    -- field (it's a support, so this is currently dead code — kept to
+    -- mirror the symmetry with Iron Tower).
+    daBadMoonStaticAura = 0
+
+-- | Self-scaling power based on what else is in play. Read by
+-- 'recomputeUnitStats' alongside 'auraPowerBonus' and
+-- 'experiencePowerBonus'.
+selfScalingPowerBonus :: Game -> UnitDetails -> Int
+selfScalingPowerBonus g u = case u.cardDef.code of
+  -- Korhil: gains {power} per other White Lion unit you control.
+  CardCode "core-061" ->
+    length
+      [ ()
+      | v <- g.units
+      , v.controller == u.controller
+      , v.key /= u.key
+      , v.cardDef.code == CardCode "core-052"
+      ]
+  -- Crone Hellebron: gains {power} per Witch Elf unit you control.
+  CardCode "core-133" ->
+    length
+      [ ()
+      | v <- g.units
+      , v.controller == u.controller
+      , v.cardDef.code == CardCode "core-135"
+      ]
+  -- Mountain Brigade is just a body of stats (no scaling). Defender of
+  -- the Hold likewise.
   _ -> 0
 
 -- | Power gained from experience markers. Only Skulltaker reads them

@@ -212,6 +212,10 @@ data Game = Game
   , limitedPlayedThisTurn :: Bool
     -- ^ One Limited tactic per turn. Set on 'PlayTactic' when the
     -- card carries the 'Limited' keyword; cleared on 'BeginTurn'.
+  , unitsDiscardedThisTurn :: Int
+    -- ^ Count of units that have entered a discard pile (destroyed,
+    -- sacrificed, etc.) during the current turn. Reset on 'BeginTurn'.
+    -- Read by 'Burying the Grudge' (core-019).
   }
   deriving stock Show
 
