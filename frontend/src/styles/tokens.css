@@ -58,6 +58,15 @@
   --radius-pill: 999px;
   --radius-circle: 50%;
 
+  /*
+   * Card corner radius — single source of truth for the rounded
+   * corners on every rendered playing-card visual (in-game SVG card,
+   * hover preview, deckbuilder tiles, cards browser). Tuned to look
+   * right at --card-w; if you change card sizes substantially,
+   * revisit this so the radius stays proportional.
+   */
+  --card-radius: 5px;
+
   /* Mobile tap target floor — see frontend/CLAUDE.md */
   --tap-target: 44px;
 
@@ -89,6 +98,7 @@
 
   /* Elevation */
   --shadow-drawer: 0 10px 30px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.75);
 }
 
 @media (prefers-color-scheme: light) {
@@ -102,5 +112,6 @@
     --border: rgba(0, 0, 0, 0.12);
     --accent: #a44229;
     --accent-strong: #8b3621;
+    --shadow-card: 0 3px 10px rgba(0, 0, 0, 0.22);
   }
 }

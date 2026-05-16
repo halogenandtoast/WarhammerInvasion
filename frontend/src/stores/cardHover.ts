@@ -15,6 +15,10 @@ export interface CardHoverState {
   src: string
   alt: string
   anchor: CardHoverAnchor
+  // width / height of the source image (natural pixels). Null until the
+  // image has been measured — the overlay falls back to the portrait
+  // card aspect in that case.
+  natural: { width: number; height: number } | null
 }
 
 const _hover = ref<CardHoverState | null>(null)

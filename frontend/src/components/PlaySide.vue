@@ -167,23 +167,9 @@ const pilesLayout = computed(() => {
   }
 })
 
-// Rotate a portrait card so it lands in the landscape bbox centered on
-// (boxX + PILE_W/2, boxY + PILE_H/2).
-function rotatedTransform(boxX: number, boxY: number): string {
-  const cx = boxX + PILE_W / 2
-  const cy = boxY + PILE_H / 2
-  return `rotate(90, ${cx}, ${cy})`
-}
-function rotatedCardX(boxX: number): number {
-  return boxX + (PILE_W - CARD_SM.w) / 2
-}
-function rotatedCardY(boxY: number): number {
-  return boxY + (PILE_H - CARD_SM.h) / 2
-}
-
-const topDiscard = computed<{ title?: string } | null>(() => {
+const topDiscard = computed<{ code?: string; title?: string } | null>(() => {
   const d = props.player.discard
-  return d.length ? (d[d.length - 1] as { title?: string }) : null
+  return d.length ? (d[d.length - 1] as { code?: string; title?: string }) : null
 })
 
 // ---- player chip + resources layout (inside the player column) ----
@@ -365,14 +351,19 @@ const raceText = computed(() => raceLabel(props.player.race))
       </text>
 
       <template v-if="zr.w > zr.h">
+        <!-- Landscape zone (battlefield). Portrait card height (CARD_SM.h
+             = 100) is taller than the zone (BATTLE_H = 90), so render
+             cards rotated to fit. (x, y, w, h) describe the landscape
+             rect on screen; SvgCard handles the inner rotation. -->
         <SvgCard
           v-for="(c, i) in zoneCards(zr.z)"
           :key="i"
-          :x="evenSpread(zoneCards(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.w)[i]"
-          :y="zr.y + (zr.h - CARD_SM.h) / 2"
+          :x="evenSpread(zoneCards(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.h)[i]"
+          :y="zr.y + (zr.h - CARD_SM.w) / 2"
           :card="c"
-          :width="CARD_SM.w"
-          :height="CARD_SM.h"
+          :width="CARD_SM.h"
+          :height="CARD_SM.w"
+          rotated
         />
       </template>
       <template v-else>
@@ -476,19 +467,20 @@ const raceText = computed(() => raceLabel(props.player.race))
         </text>
       </g>
 
-      <!-- Top pile (deck for self, discard for opponent) -->
+      <!-- Top pile (deck for self, discard for opponent). The cards land
+           in a landscape PILE_W × PILE_H rect at (xs.pilesX, topY); the
+           SvgCard rotation handles the inner art + hover anchor. -->
       <g class="pile" :class="`pile-${pilesLayout.topKind}`">
         <template v-if="pilesLayout.topKind === 'deck'">
-          <g :transform="rotatedTransform(xs.pilesX, pilesLayout.topY)">
-            <SvgCard
-              v-if="player.deck.length > 0"
-              :x="rotatedCardX(xs.pilesX)"
-              :y="rotatedCardY(pilesLayout.topY)"
-              :width="CARD_SM.w"
-              :height="CARD_SM.h"
-              face-down
-            />
-          </g>
+          <SvgCard
+            v-if="player.deck.length > 0"
+            :x="xs.pilesX"
+            :y="pilesLayout.topY"
+            :width="PILE_W"
+            :height="PILE_H"
+            face-down
+            rotated
+          />
           <rect
             v-if="player.deck.length === 0"
             :x="xs.pilesX"
@@ -508,16 +500,15 @@ const raceText = computed(() => raceLabel(props.player.race))
           </text>
         </template>
         <template v-else>
-          <g :transform="rotatedTransform(xs.pilesX, pilesLayout.topY)">
-            <SvgCard
-              v-if="topDiscard"
-              :x="rotatedCardX(xs.pilesX)"
-              :y="rotatedCardY(pilesLayout.topY)"
-              :width="CARD_SM.w"
-              :height="CARD_SM.h"
-              :card="topDiscard"
-            />
-          </g>
+          <SvgCard
+            v-if="topDiscard"
+            :x="xs.pilesX"
+            :y="pilesLayout.topY"
+            :width="PILE_W"
+            :height="PILE_H"
+            :card="topDiscard"
+            rotated
+          />
           <rect
             v-if="!topDiscard"
             :x="xs.pilesX"
@@ -541,16 +532,15 @@ const raceText = computed(() => raceLabel(props.player.race))
       <!-- Bottom pile (discard for self, deck for opponent) -->
       <g class="pile" :class="`pile-${pilesLayout.bottomKind}`">
         <template v-if="pilesLayout.bottomKind === 'deck'">
-          <g :transform="rotatedTransform(xs.pilesX, pilesLayout.bottomY)">
-            <SvgCard
-              v-if="player.deck.length > 0"
-              :x="rotatedCardX(xs.pilesX)"
-              :y="rotatedCardY(pilesLayout.bottomY)"
-              :width="CARD_SM.w"
-              :height="CARD_SM.h"
-              face-down
-            />
-          </g>
+          <SvgCard
+            v-if="player.deck.length > 0"
+            :x="xs.pilesX"
+            :y="pilesLayout.bottomY"
+            :width="PILE_W"
+            :height="PILE_H"
+            face-down
+            rotated
+          />
           <rect
             v-if="player.deck.length === 0"
             :x="xs.pilesX"
@@ -570,16 +560,15 @@ const raceText = computed(() => raceLabel(props.player.race))
           </text>
         </template>
         <template v-else>
-          <g :transform="rotatedTransform(xs.pilesX, pilesLayout.bottomY)">
-            <SvgCard
-              v-if="topDiscard"
-              :x="rotatedCardX(xs.pilesX)"
-              :y="rotatedCardY(pilesLayout.bottomY)"
-              :width="CARD_SM.w"
-              :height="CARD_SM.h"
-              :card="topDiscard"
-            />
-          </g>
+          <SvgCard
+            v-if="topDiscard"
+            :x="xs.pilesX"
+            :y="pilesLayout.bottomY"
+            :width="PILE_W"
+            :height="PILE_H"
+            :card="topDiscard"
+            rotated
+          />
           <rect
             v-if="!topDiscard"
             :x="xs.pilesX"

@@ -7,10 +7,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { cardHover } from '../stores/cardHover'
 import { CARD_W, CARD_H } from '../lib/cardSize'
 
-// Preferred display size in CSS pixels. Shrinks to fit if the viewport
-// is too small to hold the preferred size.
-const PREFERRED_H = 440
-const ASPECT = CARD_W / CARD_H
+// Preferred LONG-edge size in CSS pixels — the overlay's bigger
+// dimension targets this and the other one follows from the source's
+// natural aspect. Shrinks to fit if the viewport is too small.
+const PREFERRED_LONG = 440
+// Portrait fallback aspect (used until the image has been measured).
+const PORTRAIT_ASPECT = CARD_W / CARD_H
 const GAP = 14
 const MARGIN = 8
 
@@ -32,40 +34,82 @@ interface OverlayBox {
   height: number
 }
 
+type Side = 'right' | 'left' | 'below' | 'above'
+
 const placement = computed<OverlayBox | null>(() => {
   const s = cardHover.state.value
   if (!s) return null
 
-  // Fit the preferred size inside the viewport (with a small margin).
-  let height = Math.min(PREFERRED_H, vh.value - MARGIN * 2)
-  let width = height * ASPECT
+  // Source aspect: width / height. Default to portrait until the image
+  // has been measured. Quests / Fulcrums come back > 1 here, which
+  // makes the overlay land as a landscape card instead of being
+  // squashed into a portrait box.
+  const aspect = s.natural ? s.natural.width / s.natural.height : PORTRAIT_ASPECT
+
+  // Pick the long edge first, derive the short edge from the aspect.
+  let width: number
+  let height: number
+  if (aspect >= 1) {
+    width = PREFERRED_LONG
+    height = width / aspect
+  } else {
+    height = PREFERRED_LONG
+    width = height * aspect
+  }
+
+  // Clamp to viewport (with a margin) without distorting the aspect.
   const maxW = vw.value - MARGIN * 2
+  const maxH = vh.value - MARGIN * 2
   if (width > maxW) {
     width = maxW
-    height = width / ASPECT
+    height = width / aspect
+  }
+  if (height > maxH) {
+    height = maxH
+    width = height * aspect
   }
 
   const a = s.anchor
-  const rightSpace = vw.value - (a.x + a.width) - MARGIN
-  const leftSpace = a.x - MARGIN
+  // Sideways (rotated) cards land as landscape rects on screen — for
+  // those, prefer vertical placement (above/below) so the preview isn't
+  // squeezed into the narrow horizontal sliver next to the card.
+  const isLandscape = a.width > a.height
+  const order: Side[] = isLandscape
+    ? ['below', 'above', 'right', 'left']
+    : ['right', 'left', 'below', 'above']
+
+  const fits: Record<Side, boolean> = {
+    right: vw.value - (a.x + a.width) - MARGIN >= width + GAP,
+    left: a.x - MARGIN >= width + GAP,
+    below: vh.value - (a.y + a.height) - MARGIN >= height + GAP,
+    above: a.y - MARGIN >= height + GAP,
+  }
+
+  const chosen: Side = order.find((side) => fits[side]) ?? order[0]
 
   let left: number
-  if (rightSpace >= width + GAP) {
-    left = a.x + a.width + GAP
-  } else if (leftSpace >= width + GAP) {
-    left = a.x - GAP - width
-  } else {
-    // Neither side has room — pick the wider side and clamp; we
-    // accept that the preview may overlap the source card.
-    left =
-      rightSpace >= leftSpace
-        ? Math.min(vw.value - width - MARGIN, a.x + a.width + GAP)
-        : Math.max(MARGIN, a.x - GAP - width)
+  let top: number
+  switch (chosen) {
+    case 'right':
+      left = a.x + a.width + GAP
+      top = a.y + a.height / 2 - height / 2
+      break
+    case 'left':
+      left = a.x - GAP - width
+      top = a.y + a.height / 2 - height / 2
+      break
+    case 'below':
+      left = a.x + a.width / 2 - width / 2
+      top = a.y + a.height + GAP
+      break
+    case 'above':
+      left = a.x + a.width / 2 - width / 2
+      top = a.y - GAP - height
+      break
   }
-  left = Math.max(MARGIN, Math.min(left, vw.value - width - MARGIN))
 
-  // Vertical: center on the anchor, then clamp.
-  let top = a.y + a.height / 2 - height / 2
+  // Clamp to viewport — picks up the slack when no side had room.
+  left = Math.max(MARGIN, Math.min(left, vw.value - width - MARGIN))
   top = Math.max(MARGIN, Math.min(top, vh.value - height - MARGIN))
 
   return { left, top, width, height }
@@ -99,7 +143,7 @@ const placement = computed<OverlayBox | null>(() => {
   position: fixed;
   z-index: 1000;
   pointer-events: none;
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   overflow: hidden;
   background: rgba(10, 7, 4, 0.85);
   box-shadow:
