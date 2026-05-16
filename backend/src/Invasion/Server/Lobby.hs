@@ -48,6 +48,7 @@ module Invasion.Server.Lobby
   , freshConnId
   ) where
 
+import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM
 import Control.Monad (forM, unless, when)
 import Data.Aeson qualified as Aeson
@@ -64,6 +65,7 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime)
 import Data.UUID (UUID)
+import Invasion.Engine (EngineMail)
 import Invasion.Game (Game)
 import Invasion.Prelude
 import Invasion.Server.Protocol
@@ -123,8 +125,15 @@ data GameSlot = GameSlot
   , engine :: TVar (Maybe Game)
     -- ^ The authoritative engine state. 'Nothing' while the slot is in
     -- 'StatusWaiting'; 'Just' once 'GameStart' kicks off Setup +
-    -- BeginGame. Mutated by the WebSocket handler thread, never by the
-    -- engine itself (see ARCHITECTURE.md §3.3).
+    -- BeginGame. Mutated exclusively by the per-game engine worker
+    -- thread (see 'engineWorker'); the WebSocket handler thread only
+    -- posts to the worker's mailbox.
+  , engineMailbox :: TVar (Maybe (TQueue EngineMail))
+    -- ^ The mailbox the engine worker drains. Created at the same
+    -- time as the worker. WebSocket handlers atomically push to it
+    -- for both client messages and prompt answers.
+  , engineWorker :: TVar (Maybe ThreadId)
+    -- ^ The worker thread; killed when the slot tears down.
   }
 
 -- ----------------------------------------------------------------------------
@@ -214,6 +223,8 @@ createGame st gid name host vis pw allowSpec token = do
   connections <- newTVar Map.empty
   lastEmptyAt <- newTVar Nothing
   engine <- newTVar Nothing
+  engineMailbox <- newTVar Nothing
+  engineWorker <- newTVar Nothing
   let slot = GameSlot
         { gameId = gid
         , name
@@ -228,6 +239,8 @@ createGame st gid name host vis pw allowSpec token = do
         , connections
         , lastEmptyAt
         , engine
+        , engineMailbox
+        , engineWorker
         }
   modifyTVar' st.games (Map.insert gid slot)
   pure slot

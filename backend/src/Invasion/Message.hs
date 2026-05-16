@@ -237,6 +237,10 @@ data Message where
     -- ^ Credit N resources to the named player's pool. Used by tactic
     -- effects (Burying the Grudge, …) that bypass the kingdom-phase
     -- collection step.
+  SpendResources :: PlayerKey -> Int -> Message
+    -- ^ Debit N resources from the named player's pool (clamped to
+    -- 0). For action-ability costs that fall outside the normal
+    -- play-card pipeline (e.g. Skulltaker's experience attach).
   -- Combat sequence — implemented as a 5-step ladder with an action
   -- window after each step, matching the rulebook. Either client may
   -- act in each window; CloseActionWindow advances to the next step.

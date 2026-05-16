@@ -22,19 +22,47 @@ import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
+import Control.Concurrent.STM
 import Data.Maybe (fromMaybe, isJust)
 import Queue
 import System.Random.Shuffle
 
+-- | A single incoming item on a game's mailbox. Either a fresh
+-- 'Message' from a client (engine processes it like any queued msg)
+-- or a 'PromptResult' answering an outstanding 'askPrompt'.
+data EngineMail
+  = EngineMsg Message
+  | EnginePromptAnswer PromptResult
+  deriving stock Show
+
+-- | Per-game runtime context used when the engine runs as a long-lived
+-- worker thread. Carries the mailbox the worker drains, the published
+-- state TVar clients observe, and a broadcast hook the engine calls
+-- after every state publish so the WebSocket layer can push updates.
+data EngineCtx = EngineCtx
+  { mailbox :: TQueue EngineMail
+  , publishedState :: TVar Game
+  , broadcastUpdate :: STM ()
+  }
+
 data Env = Env
   { queue :: Queue Message
   , game :: Game
+  , ctx :: Maybe EngineCtx
+    -- ^ 'Nothing' for one-shot 'applyMessage' calls (tests, debug).
+    -- 'Just' once a 'GameWorker' is attached; receive bodies that
+    -- call 'askPrompt' will then actually publish + block.
   }
 
 newEnv :: Game -> IO Env
-newEnv game = do
-  queue <- newQueue
-  pure $ Env queue game
+newEnv g = do
+  q <- newQueue
+  pure $ Env q g Nothing
+
+newEnvWithCtx :: Game -> EngineCtx -> IO Env
+newEnvWithCtx g c = do
+  q <- newQueue
+  pure $ Env q g (Just c)
 
 newtype GameT a = GameT (StateT Env IO a)
   deriving newtype (Functor, Applicative, Monad, MonadIO, MonadRandom, MonadState Env)
@@ -44,6 +72,78 @@ instance HasQueue Message GameT where
 
 instance HasGame GameT where
   getGame = gets (.game)
+
+-- | Effect-typeclass for receive bodies that need to suspend until a
+-- player answers. Tests stub it with an auto-resolver; the worker
+-- thread runs the real blocking version.
+class Monad m => HasPromptIO m where
+  askPrompt :: Prompt -> m PromptResult
+
+instance HasPromptIO m => HasPromptIO (StateT s m) where
+  askPrompt = lift . askPrompt
+
+instance HasPromptIO GameT where
+  askPrompt p = do
+    env <- get
+    case env.ctx of
+      Nothing ->
+        -- Test / debug path: no worker is wired, so just decline.
+        -- Receive bodies see PickNone / PickBool False (depending on
+        -- prompt kind) and proceed as if the player skipped.
+        pure (autoResolve p)
+      Just c -> do
+        -- Stash the prompt on the in-memory state, sync to the
+        -- published TVar (so clients see it), then STM-retry-block
+        -- waiting for an answer in the mailbox.
+        modify \g -> g {game = g.game {pendingPrompt = Just p}}
+        publishCurrent c
+        answer <- liftIO (waitForPromptAnswer c.mailbox)
+        modify \g -> g {game = g.game {pendingPrompt = Nothing}}
+        publishCurrent c
+        pure answer
+
+-- | Default answer when no mailbox is attached. Most prompts in the
+-- core set treat skip / decline as a no-op for the source card, which
+-- keeps tests deterministic.
+autoResolve :: Prompt -> PromptResult
+autoResolve p = case p.kind of
+  ChooseYesNo {} -> PickBool False
+  _ -> PickNone
+
+-- | Mirror the working state into the published TVar, then fire the
+-- broadcast hook so clients re-render. Called whenever the engine
+-- suspends (pending prompt) so the wire sees the latest snapshot.
+publishCurrent :: EngineCtx -> GameT ()
+publishCurrent c = do
+  g <- gets (.game)
+  liftIO $ atomically do
+    writeTVar c.publishedState g
+    c.broadcastUpdate
+
+-- | STM-retry until a 'PromptResult' arrives in the mailbox. Any
+-- 'EngineMsg's drained while waiting get put back at the front so
+-- they process in arrival order after the prompt resolves.
+waitForPromptAnswer :: TQueue EngineMail -> IO PromptResult
+waitForPromptAnswer mb = atomically loop
+  where
+    loop = do
+      drained <- drainAll
+      case partitionAnswer [] drained of
+        Just (r, rest) -> do
+          traverse_ (writeTQueue mb) rest
+          pure r
+        Nothing -> do
+          traverse_ (writeTQueue mb) drained
+          retry
+    drainAll = do
+      ma <- tryReadTQueue mb
+      case ma of
+        Nothing -> pure []
+        Just a -> (a :) <$> drainAll
+    partitionAnswer _ [] = Nothing
+    partitionAnswer acc (EnginePromptAnswer r : xs) =
+      Just (r, reverse acc <> xs)
+    partitionAnswer acc (x : xs) = partitionAnswer (x : acc) xs
 
 data Deck = Deck
   { cards :: [CardCode]
@@ -91,6 +191,39 @@ loadDeck Deck {race, cards} = (race,) <$> for cards \c ->
 
 runGame :: GameT a -> Env -> IO a
 runGame (GameT inner) = evalStateT inner
+
+execGameT :: GameT a -> Env -> IO Env
+execGameT (GameT inner) = execStateT inner
+
+-- | Run a long-lived engine pump for one game. Owns the engine
+-- state; processes incoming 'EngineMail' items one at a time. Each
+-- 'EngineMsg' is fed into the queue and 'gameMain' drains it; any
+-- 'askPrompt' inside a receive body publishes intermediate state to
+-- 'publishedState' and blocks until the matching
+-- 'EnginePromptAnswer' arrives. Loops forever; kill the thread to
+-- stop. Stray 'EnginePromptAnswer's (no prompt outstanding) are
+-- silently dropped.
+runEngineWorker :: Game -> EngineCtx -> IO ()
+runEngineWorker initial ctx = do
+  env0 <- newEnvWithCtx initial ctx
+  atomically do
+    writeTVar ctx.publishedState initial
+    ctx.broadcastUpdate
+  let loop env = do
+        item <- atomically (readTQueue ctx.mailbox)
+        case item of
+          EngineMsg msg -> do
+            env' <- execGameT (send msg >> () <$ gameMain) env
+            atomically do
+              writeTVar ctx.publishedState env'.game
+              ctx.broadcastUpdate
+            loop env'
+          EnginePromptAnswer _ ->
+            -- Out-of-context prompt answer. Ignore and keep
+            -- listening — askPrompt has its own loop that uses STM
+            -- retry, so it won't miss a real answer.
+            loop env
+  loop env0
 
 overGame :: (Game -> GameT Game) -> GameT ()
 overGame f = do
@@ -1193,6 +1326,18 @@ instance Run Game where
         logIt LogSystem
           "log.resources.gained"
           [("player", playerParam pk), ("amount", T.pack (show amount))]
+    SpendResources pk raw -> do
+      let amount = max 0 raw
+      when (amount > 0) $ do
+        g <- get
+        let player = lookupPlayer pk g
+            Resources r = player.resources
+            spent = min amount r
+            player' = player {resources = Resources (r - spent)}
+        modify (setPlayer pk player')
+        logIt LogSystem
+          "log.resources.spent"
+          [("player", playerParam pk), ("amount", T.pack (show spent))]
     BeginCombat attacker zone attackerKeys -> do
       g <- get
       let defender = attacker.next

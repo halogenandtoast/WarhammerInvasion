@@ -11,6 +11,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Invasion.CardDef
 import Invasion.CardDef qualified as CardDef
+import {-# SOURCE #-} Invasion.Engine (HasPromptIO (..))
 import Invasion.Entity (LegendDetails (..), QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Capital
 import Invasion.Game
@@ -997,30 +998,34 @@ bloodthirster = unit "core-092" "Bloodthirster" do
     "Damage cannot be cancelled.\n\
     \Forced: After your turn begins, each player must sacrifice a unit in this corresponding zone."
   -- "Each player must sacrifice a unit in this corresponding zone"
-  -- — each player gets prompted to pick one of their own units in
-  -- the Bloodthirster's zone. If a player has no eligible unit, the
-  -- prompt resolves to PickNone (controller can post that
-  -- immediately on the wire). Prompts queue in player order; the
-  -- engine pauses at each.
+  -- — block on each player's prompt in sequence. The engine
+  -- suspends until each one answers; if a player has no eligible
+  -- unit, they reply PickNone (or the auto-resolver fires).
   onReceive $ Receive \msg _owner self -> case msg of
     BeginTurn turnOwner
       | turnOwner == self.controller -> do
-          let promptFor pk =
-                push
-                  ( RequestPrompt Prompt
-                      { player = pk
-                      , kind =
-                          ChooseSacrifice
-                            { zone = self.zone
-                            , optional = False
-                            , description =
-                                "Sacrifice one of your units in this zone."
-                            }
-                      , callback = CallbackBloodthirsterSacrifice pk self.key
-                      }
-                  )
-          promptFor Player1
-          promptFor Player2
+          let askSacrifice pk = do
+                answer <-
+                  askPrompt Prompt
+                    { player = pk
+                    , kind =
+                        ChooseSacrifice
+                          { zone = self.zone
+                          , optional = False
+                          , description =
+                              "Sacrifice one of your units in this zone."
+                          }
+                    , callback = CallbackBloodthirsterSacrifice pk self.key
+                    }
+                case answer of
+                  PickUnits (chosen : _) -> do
+                    g <- getGame
+                    case findUnit chosen g of
+                      Just u | u.controller == pk -> push (DestroyUnit u.key)
+                      _ -> pure ()
+                  _ -> pure ()
+          askSacrifice Player1
+          askSacrifice Player2
     _ -> pure ()
 
 bloodForTheBloodGod :: CardDef Tactic
@@ -1205,25 +1210,28 @@ skulltaker = unit "faith-and-steel-113" "Skulltaker" do
     \Action: When an opponent's unit leaves play, spend 1 resource to attach it facedown to this unit as an experience."
   -- When an opponent's unit leaves play, ask Skulltaker's controller
   -- whether to pay 1 resource to attach it as an experience. The
-  -- callback debits the resource and queues AttachExperience iff the
-  -- controller answers yes AND can still afford the cost when the
-  -- prompt resolves.
+  -- engine blocks until the controller answers; on yes (and still
+  -- affording the 1-resource cost) we debit and attach.
   onReceive $ Receive \msg owner self -> case msg of
     UnitLeftPlay leftBy _ukey _zone code
       | leftBy /= self.controller
-      , Resources r <- owner.resources
-      , r >= 1 ->
-          push
-            ( RequestPrompt Prompt
-                { player = self.controller
-                , kind =
-                    ChooseYesNo
-                      { description =
-                          "Spend 1 resource to attach the departing unit as an experience on Skulltaker?"
-                      }
-                , callback = CallbackSkulltakerPayToAttach self.key code
-                }
-            )
+      , Resources r0 <- owner.resources
+      , r0 >= 1 -> do
+          answer <-
+            askPrompt Prompt
+              { player = self.controller
+              , kind =
+                  ChooseYesNo
+                    { description =
+                        "Spend 1 resource to attach the departing unit as an experience on Skulltaker?"
+                    }
+              , callback = CallbackSkulltakerPayToAttach self.key code
+              }
+          case answer of
+            PickBool True -> do
+              push (SpendResources self.controller 1)
+              push (AttachExperience self.key code)
+            _ -> pure ()
     _ -> pure ()
 
 lordOfKhorne :: CardDef Unit
@@ -1368,26 +1376,57 @@ ironThroneroom = support "the-inevitable-city-013" "Iron Throneroom" do
       | turnOwner == self.controller && self.tokens > 0 -> do
           push (AdjustSupportTokens self.key (-1))
           -- On the transition to 0 tokens, prompt the controller for
-          -- up to 3 Chaos unit cards from hand or discard. The
-          -- engine's CallbackIronThroneroomPayoff handler routes
-          -- hand picks through PutUnitIntoPlay and discard picks
-          -- through PutUnitIntoPlayFromDiscard.
-          when (self.tokens == 1) $
-            push
-              ( RequestPrompt Prompt
-                  { player = self.controller
-                  , kind =
-                      ChooseUnits
-                        { filterSpec =
-                            OwnUnitsFromHandOrDiscardByRace Chaos
-                        , minPick = 0
-                        , maxPick = 3
-                        , description =
-                            "Choose up to 3 Chaos units from your hand or discard pile to put into play."
-                        }
-                  , callback = CallbackIronThroneroomPayoff self.key
-                  }
-              )
+          -- up to 3 Chaos unit cards from hand or discard, then
+          -- inline-route hand picks through PutUnitIntoPlay and
+          -- discard picks through PutUnitIntoPlayFromDiscard.
+          when (self.tokens == 1) $ do
+            answer <-
+              askPrompt Prompt
+                { player = self.controller
+                , kind =
+                    ChooseUnits
+                      { filterSpec =
+                          OwnUnitsFromHandOrDiscardByRace Chaos
+                      , minPick = 0
+                      , maxPick = 3
+                      , description =
+                          "Choose up to 3 Chaos units from your hand or discard pile to put into play."
+                      }
+                , callback = CallbackIronThroneroomPayoff self.key
+                }
+            case answer of
+              PickUnits chosen -> do
+                g <- getGame
+                let me = case self.controller of
+                      Player1 -> g.player1
+                      Player2 -> g.player2
+                    picks = take 3 chosen
+                    inHandChaos =
+                      [ c.key
+                      | c <- me.hand
+                      , UnitCardDef cd <- [c.def]
+                      , Chaos `elem` cd.races
+                      ]
+                    inDiscardChaos =
+                      [ c.key
+                      | c <- me.discard
+                      , UnitCardDef cd <- [c.def]
+                      , Chaos `elem` cd.races
+                      ]
+                    handPicks = [k | k <- picks, k `elem` inHandChaos]
+                    discardPicks =
+                      [ k
+                      | k <- picks
+                      , k `notElem` handPicks
+                      , k `elem` inDiscardChaos
+                      ]
+                traverse_
+                  (\k -> push (PutUnitIntoPlay self.controller k KingdomZone))
+                  handPicks
+                traverse_
+                  (\k -> push (PutUnitIntoPlayFromDiscard self.controller k KingdomZone))
+                  discardPicks
+              _ -> pure ()
     _ -> pure ()
 
 raidingCamps :: CardDef Quest
@@ -2308,25 +2347,45 @@ horrorOfTzeentch = unit "core-094" "Horror of Tzeentch" do
   hitPoints 2
   traits [Daemon]
   body "Forced: When this unit enters play, you may discard a card to deal 2 damage to a target unit."
-  -- Two-stage prompt: yes/no to commit to the discard; if yes, fire
-  -- a follow-up "choose target unit" prompt. The engine's
-  -- CallbackHorrorOfTzeentchDiscard handler chains them.
+  -- Inline two-stage prompt: yes/no to commit to the discard; if
+  -- yes, ask the controller for the damage target. The engine
+  -- blocks on each prompt independently, so the second is asked
+  -- only after the first resolves.
   onReceive $ Receive \msg owner self -> case msg of
     UnitEnteredPlay pk ukey
       | pk == self.controller
       , ukey == self.key
-      , not (null owner.hand) ->
-          push
-            ( RequestPrompt Prompt
-                { player = self.controller
-                , kind =
-                    ChooseYesNo
-                      { description =
-                          "Discard a card to deal 2 damage to a target unit?"
-                      }
-                , callback = CallbackHorrorOfTzeentchDiscard self.key
-                }
-            )
+      , not (null owner.hand) -> do
+          yes <-
+            askPrompt Prompt
+              { player = self.controller
+              , kind =
+                  ChooseYesNo
+                    { description =
+                        "Discard a card to deal 2 damage to a target unit?"
+                    }
+              , callback = CallbackHorrorOfTzeentchDiscard self.key
+              }
+          case yes of
+            PickBool True -> do
+              tgt <-
+                askPrompt Prompt
+                  { player = self.controller
+                  , kind =
+                      ChooseUnits
+                        { filterSpec = AnyOwnUnit
+                        , minPick = 1
+                        , maxPick = 1
+                        , description = "Choose a target unit to take 2 damage."
+                        }
+                  , callback = CallbackHorrorOfTzeentchTarget self.key
+                  }
+              case tgt of
+                PickUnits (k : _) -> do
+                  push (DiscardRandomFromHand self.controller)
+                  push (DealDamageToUnit k 2)
+                _ -> pure ()
+            _ -> pure ()
     _ -> pure ()
 
 daemonettesOfSlaanesh :: CardDef Unit

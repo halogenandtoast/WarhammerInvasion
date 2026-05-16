@@ -1,5 +1,7 @@
 module Invasion.Game
   ( Game
+  , Prompt
+  , PromptResult
   , HasGame (..)
   , getAllModifiers
   , getPlayer
@@ -25,6 +27,8 @@ class Monad m => HasGame m where
 instance HasGame m => HasGame (StateT s m)
 
 data Game
+data Prompt
+data PromptResult
 
 getAllModifiers :: HasGame m => m (Map (Ref Target) [Modifier])
 getPlayer :: HasGame m => PlayerKey -> m Player

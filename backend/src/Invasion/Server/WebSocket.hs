@@ -14,7 +14,7 @@ module Invasion.Server.WebSocket
   , idleSweeperLoop
   ) where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (race_)
 import Control.Concurrent.STM
 import Control.Exception (SomeException, try)
@@ -381,6 +381,47 @@ broadcastGameWithView slot _ = do
       v <- gameViewSTM slot c.user
       sendTo c.outbox GameUpdate {game = v}
 
+-- | Start the long-lived engine worker for this game. Seeds Setup +
+-- BeginGame, wires the broadcast hook so the engine publishes after
+-- every message (or askPrompt suspension), and stores the mailbox
+-- on the slot so WebSocket handlers can post to it.
+startEngineWorker :: GameSlot -> Game -> IO ()
+startEngineWorker slot initial = do
+  mb <- newTQueueIO
+  pubState <- newTVarIO initial
+  let hook = do
+        g <- readTVar pubState
+        writeTVar slot.engine (Just g)
+        conns <- readTVar slot.connections
+        traverse_ (publishForConn slot) (Map.elems conns)
+      ctx =
+        Engine.EngineCtx
+          { Engine.mailbox = mb
+          , Engine.publishedState = pubState
+          , Engine.broadcastUpdate = hook
+          }
+  atomically do
+    writeTQueue mb (Engine.EngineMsg Setup)
+    writeTQueue mb (Engine.EngineMsg BeginGame)
+    writeTVar slot.engineMailbox (Just mb)
+  tid <- forkIO (Engine.runEngineWorker initial ctx)
+  atomically (writeTVar slot.engineWorker (Just tid))
+  where
+    publishForConn s c = do
+      v <- gameViewSTM s c.user
+      sendTo c.outbox GameUpdate {game = v}
+
+-- | Post a single piece of engine mail to the slot's worker.
+-- Returns False if the worker hasn't been started yet.
+postToEngine :: GameSlot -> Engine.EngineMail -> IO Bool
+postToEngine slot mail = do
+  mmb <- readTVarIO slot.engineMailbox
+  case mmb of
+    Nothing -> pure False
+    Just mb -> do
+      atomically (writeTQueue mb mail)
+      pure True
+
 gameWriter :: WS.Connection -> TQueue GameOut -> IO ()
 gameWriter conn outbox = forever do
   msg <- atomically (readTQueue outbox)
@@ -474,31 +515,25 @@ handleGameIn env slot user = \case
                         (Right ed1, Right ed2) -> case newGame ed1 ed2 of
                           Left err -> sendGameError slot user (T.pack err)
                           Right g0 -> do
-                            g1 <- applyMessage g0 Setup
-                            g2 <- applyMessage g1 BeginGame
+                            -- Spin up the per-game engine worker. It
+                            -- owns the engine state from here on; the
+                            -- WebSocket handlers post to its mailbox
+                            -- via 'postToEngine'. Setup + BeginGame
+                            -- are seeded by 'startEngineWorker'.
+                            startEngineWorker slot g0
                             atomically do
-                              writeTVar slot.engine (Just g2)
                               trySetStatus slot StatusPlaying
-                              v <- gameViewSTM slot (Just user)
-                              broadcastGameWithView slot v
                               summaries <- summariesSTM env.lobby
                               broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
   GamePassPriority -> do
-    mGame <- readTVarIO slot.engine
-    case mGame of
-      Nothing -> sendGameError slot user "game_not_started"
-      Just g -> do
-        seatKey <- atomically do
-          sm <- readTVar slot.seats
-          pure $ findSeatFor user sm
-        case seatKey >>= seatKeyToPlayerKey of
-          Nothing -> sendGameError slot user "not_seated"
-          Just pk -> do
-            g' <- applyMessage g (PassPriority pk)
-            atomically do
-              writeTVar slot.engine (Just g')
-              v <- gameViewSTM slot (Just user)
-              broadcastGameWithView slot v
+    seatKey <- atomically do
+      sm <- readTVar slot.seats
+      pure $ findSeatFor user sm
+    case seatKey >>= seatKeyToPlayerKey of
+      Nothing -> sendGameError slot user "not_seated"
+      Just pk -> do
+        ok <- postToEngine slot (Engine.EngineMsg (PassPriority pk))
+        unless ok (sendGameError slot user "game_not_started")
   GamePlayCard {cardKey, zone, target} -> do
     mGame <- readTVarIO slot.engine
     case mGame of
@@ -514,32 +549,24 @@ handleGameIn env slot user = \case
             Just someCard -> case playMessageFor pk cardKey zone target someCard of
               Left code -> sendGameError slot user code
               Right msg -> do
-                g' <- applyMessage g msg
-                atomically do
-                  writeTVar slot.engine (Just g')
-                  v <- gameViewSTM slot (Just user)
-                  broadcastGameWithView slot v
+                ok <- postToEngine slot (Engine.EngineMsg msg)
+                unless ok (sendGameError slot user "game_not_started")
   GameTriggerAction {source, actionIndex, target, targetZone} -> do
-    mGame <- readTVarIO slot.engine
-    case mGame of
-      Nothing -> sendGameError slot user "game_not_started"
-      Just g -> do
-        seatKey <- atomically do
-          sm <- readTVar slot.seats
-          pure $ findSeatFor user sm
-        case seatKey >>= seatKeyToPlayerKey of
-          Nothing -> sendGameError slot user "not_seated"
-          Just pk -> do
-            let actionTarget = case (target, targetZone) of
-                  (Just u, _) -> CardDef.TargetUnit u
-                  (_, Just (Proto.ZoneTarget {player = zp, kind = zk})) ->
-                    CardDef.TargetZone zp zk
-                  _ -> CardDef.NoTarget
-            g' <- applyMessage g (TriggerCardAction pk source actionIndex actionTarget)
-            atomically do
-              writeTVar slot.engine (Just g')
-              v <- gameViewSTM slot (Just user)
-              broadcastGameWithView slot v
+    seatKey <- atomically do
+      sm <- readTVar slot.seats
+      pure $ findSeatFor user sm
+    case seatKey >>= seatKeyToPlayerKey of
+      Nothing -> sendGameError slot user "not_seated"
+      Just pk -> do
+        let actionTarget = case (target, targetZone) of
+              (Just u, _) -> CardDef.TargetUnit u
+              (_, Just (Proto.ZoneTarget {player = zp, kind = zk})) ->
+                CardDef.TargetZone zp zk
+              _ -> CardDef.NoTarget
+        ok <-
+          postToEngine slot
+            (Engine.EngineMsg (TriggerCardAction pk source actionIndex actionTarget))
+        unless ok (sendGameError slot user "game_not_started")
   GameResolvePrompt {result} -> do
     mGame <- readTVarIO slot.engine
     case mGame of
@@ -559,11 +586,8 @@ handleGameIn env slot user = \case
                         PromptUnitsWire {unitKeys = ks} -> PickUnits ks
                         PromptBoolWire {yes = b} -> PickBool b
                         PromptNoneWire -> PickNone
-                  g' <- applyMessage g (ResolvePrompt engineResult)
-                  atomically do
-                    writeTVar slot.engine (Just g')
-                    v <- gameViewSTM slot (Just user)
-                    broadcastGameWithView slot v
+                  ok <- postToEngine slot (Engine.EnginePromptAnswer engineResult)
+                  unless ok (sendGameError slot user "game_not_started")
   GameLeave -> do
     sts <- readTVarIO slot.status
     -- A "leave" while playing ends the game — but only if the leaver

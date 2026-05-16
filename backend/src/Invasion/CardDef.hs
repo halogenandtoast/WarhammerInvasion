@@ -13,6 +13,7 @@ import Invasion.Player (Player)
 import Invasion.Prelude
 import Invasion.Types
 import Queue (HasQueue)
+import {-# SOURCE #-} Invasion.Engine (HasPromptIO)
 import {-# SOURCE #-} Invasion.Game (HasGame)
 import {-# SOURCE #-} Invasion.Message (Message)
 
@@ -72,7 +73,7 @@ type family InPlay (k :: CardKind)
 newtype Receive k = Receive
   { unReceive
       :: forall m
-       . (HasGame m, MonadIO m, HasQueue Message m)
+       . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
       => Message -> Player -> InPlay k -> m ()
   }
 
@@ -118,7 +119,7 @@ mconcat
 newtype ActionEffect k = ActionEffect
   { unEffect
       :: forall m
-       . (HasGame m, MonadIO m, HasQueue Message m)
+       . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
       => PlayerKey -> InPlay k -> ActionTarget -> m ()
   }
 
