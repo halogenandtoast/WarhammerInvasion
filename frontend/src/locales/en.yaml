@@ -76,7 +76,7 @@ decks:
         2 Bloodletter
         1 Bloodthirster
         ...
-      paste_hint: One entry per line. Format "N Name". Capital is picked from the most-present race.
+      paste_hint: One entry per line. Format "N Name". Section headers like "Unit (12)" are ignored. Capital is picked from the most-present race.
       name_default: Imported deck
       submit: Import deck
       submitting: Importing…

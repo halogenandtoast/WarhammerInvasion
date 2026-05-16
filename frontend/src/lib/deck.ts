@@ -285,11 +285,16 @@ export function parseDeckList(text: string, cards: Card[]): ParsedDeckList {
 
   // `3 Foo`, `3x Foo`, `3 x Foo`, `3× Foo`.
   const lineRe = /^\s*(\d+)\s*[xX×]?\s+(.+?)\s*$/
+  // Section headers like `Unit (12)`, `Supports:`, `Tactic` — emitted by deck
+  // export tools that group entries by card type. Skip silently.
+  const sectionHeaderRe =
+    /^(units?|supports?|tactics?|quests?|legends?|fulcrums?)\s*(\(\s*\d+\s*\))?\s*:?\s*$/i
 
   for (const rawLine of text.split(/\r?\n/)) {
     const trimmed = rawLine.trim()
     if (!trimmed) continue
     if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue
+    if (sectionHeaderRe.test(trimmed)) continue
 
     const m = lineRe.exec(rawLine)
     if (!m) {
