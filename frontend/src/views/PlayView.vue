@@ -3,15 +3,13 @@
 // game store.
 //
 // Layout: the available vertical space is split exactly 50/50 between
-// the opponent (top) and self (bottom). The action window pill floats
-// over the seam between the two halves so it sits adjacent to both
-// players' battlefields without consuming layout space.
+// the opponent (top) and self (bottom). The action window pill lives
+// in the page's bottom phase bar (see Game.vue), not inside this view.
 
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { game } from '../stores/game'
 import type {
-  ActionWindowTrigger,
   EngineCardDef,
   EngineGame,
   EngineLegend,
@@ -59,22 +57,13 @@ function seatName(k: PlayerKey): string {
   return props.seats.find((s) => s.seat === k)?.user.displayName ?? k
 }
 
-const aw = computed(() => props.engine.actionWindow)
-const windowTriggerLabel = computed(() =>
-  aw.value ? t(`game.play.window.trigger.${aw.value.trigger satisfies ActionWindowTrigger}`) : null,
-)
-const priorityIsMe = computed(
-  () => aw.value != null && mySeatKey.value != null && priorityHolder(aw.value.awaiting) === mySeatKey.value,
-)
-const waitingMessage = computed(() => {
-  if (!aw.value) return null
-  if (priorityIsMe.value) return t('game.play.window.waiting_you')
-  return t('game.play.window.waiting_them', { name: seatName(priorityHolder(aw.value.awaiting)) })
+// Priority lookup is still needed for hand-card "playable" checks.
+// The visible action-window pill itself now lives in the bottom phase
+// bar (Game.vue), so this view doesn't render trigger/pass UI.
+const priorityIsMe = computed(() => {
+  const aw = props.engine.actionWindow
+  return aw != null && mySeatKey.value != null && priorityHolder(aw.awaiting) === mySeatKey.value
 })
-
-function pass() {
-  if (priorityIsMe.value) game.passPriority()
-}
 
 const finished = computed(() => {
   const lc = props.engine.lifecycle
@@ -270,24 +259,6 @@ const popoverStyle = computed<Record<string, string>>(() => {
       />
     </div>
 
-    <!-- Action window floats at the seam between the two halves so it
-         sits adjacent to both battlefields without eating layout. -->
-    <div v-if="aw" class="window-overlay">
-      <div class="window-pill" :class="{ mine: priorityIsMe }" role="status">
-        <span class="window-trigger">{{ windowTriggerLabel }}</span>
-        <span class="window-waiting">{{ waitingMessage }}</span>
-        <button
-          class="pass-btn"
-          type="button"
-          :disabled="!priorityIsMe"
-          :title="!priorityIsMe ? t('game.play.window.pass_disabled') : undefined"
-          @click="pass"
-        >
-          {{ t('game.play.window.pass') }}
-        </button>
-      </div>
-    </div>
-
     <!-- Hover-zoom preview for face-up cards. Teleports to <body> so
          the enlarged image isn't clipped by the play-table container. -->
     <CardOverlay />
@@ -377,8 +348,7 @@ const popoverStyle = computed<Record<string, string>>(() => {
   flex: 1;
   min-height: 0;
   display: grid;
-  /* Exact 50/50 split. The action window strip is overlaid so it
-     doesn't steal layout from either half. */
+  /* Exact 50/50 split. */
   grid-template-rows: 1fr 1fr;
   gap: 0;
   padding: 0.4rem 0.5rem;
@@ -395,72 +365,6 @@ const popoverStyle = computed<Record<string, string>>(() => {
 
 .half.top { align-items: flex-start; padding-bottom: 0.3rem; }
 .half.bottom { align-items: flex-end; padding-top: 0.3rem; }
-
-/* ───────── action window overlay ───────── */
-
-.window-overlay {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  transform: translateY(-50%);
-  display: flex;
-  justify-content: center;
-  pointer-events: none; /* let half-rows below take pointer events; pill re-enables */
-  z-index: 5;
-}
-
-.window-pill {
-  pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.85rem;
-  padding: 0.45rem 0.85rem;
-  background: rgba(20, 14, 8, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-pill);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.92);
-  max-width: 90%;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.window-pill.mine {
-  border-color: var(--accent);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(196, 99, 74, 0.22);
-}
-
-.window-trigger {
-  font-size: 0.7rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.window-waiting {
-  font-size: 0.88rem;
-  white-space: nowrap;
-}
-
-.pass-btn {
-  min-height: 32px;
-  padding: 0 0.95rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-pill);
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-.pass-btn:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-.pass-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* ───────── game-over overlay ───────── */
 

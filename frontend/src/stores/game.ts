@@ -33,14 +33,35 @@ function reset() {
   _closed.value = null
 }
 
+// View Transitions: when the engine snapshot changes, run the mutation
+// inside `document.startViewTransition` so the browser captures the
+// before/after DOM and morphs elements that share a
+// `view-transition-name` (see SvgCard's `transitionName` prop). Falls
+// back to a plain assignment on browsers without the API (Firefox).
+type ViewTransitionDoc = Document & {
+  startViewTransition?: (cb: () => void) => unknown
+}
+function withViewTransition(update: () => void) {
+  const d = document as ViewTransitionDoc
+  if (typeof d.startViewTransition === 'function') {
+    d.startViewTransition(update)
+  } else {
+    update()
+  }
+}
+
 function handle(msg: GameOut) {
   switch (msg.tag) {
     case 'GameWelcome':
       _you.value = msg.you
+      // First frame — no prior state to animate from, so skip the
+      // transition wrapper.
       _view.value = msg.game
       break
     case 'GameUpdate':
-      _view.value = msg.game
+      withViewTransition(() => {
+        _view.value = msg.game
+      })
       break
     case 'GameChatNew':
       if (_view.value) {

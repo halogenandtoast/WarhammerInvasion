@@ -39,6 +39,12 @@ const props = defineProps<{
   faceDown?: boolean
   rotated?: boolean
   clickable?: boolean
+  // Optional name for the CSS View Transitions API. When provided,
+  // the browser pairs the old/new element with the same name across
+  // a state update and animates the morph (position, size, rotation).
+  // Names must be unique per frame — pass stable engine keys (e.g.
+  // `unit-{key}`) so a card that hops zones is matched across frames.
+  transitionName?: string
 }>()
 
 const emit = defineEmits<{
@@ -188,6 +194,13 @@ onBeforeUnmount(() => {
   const src = imageSrc.value
   if (src) cardHover.hide(src)
 })
+
+// Inline style carrying the view-transition name. `view-transition-class`
+// is what global CSS hooks into to set the morph timing for every card.
+const transitionStyle = computed<string | undefined>(() => {
+  if (!props.transitionName) return undefined
+  return `view-transition-name: ${props.transitionName}; view-transition-class: card;`
+})
 </script>
 
 <template>
@@ -196,6 +209,7 @@ onBeforeUnmount(() => {
     class="svg-card"
     :class="{ clickable: clickable }"
     :clip-path="`url(#${clipId})`"
+    :style="transitionStyle"
     @mouseenter="onCardEnter"
     @mouseleave="onCardLeave"
     @click="onCardClick"

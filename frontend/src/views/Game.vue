@@ -5,7 +5,14 @@ import { auth } from '../stores/auth'
 import { game } from '../stores/game'
 import { listDecks, type DeckRecord } from '../api/decks'
 import { ApiError } from '../api/client'
-import type { LogEntry, Phase, PlayerKey, SeatView } from '../api/protocol'
+import type {
+  ActionWindowTrigger,
+  LogEntry,
+  Phase,
+  PlayerKey,
+  SeatView,
+} from '../api/protocol'
+import { priorityHolder } from '../api/protocol'
 import SeatBody from './SeatBody'
 import PlayView from './PlayView.vue'
 
@@ -108,6 +115,46 @@ const activeLabel = computed(() => {
 })
 
 const currentPhaseLabel = (p: Phase): string => t(`game.play.phase.${p.replace('Phase', '')}`)
+
+// ---- action window state (woven into the bottom phase-pip strip) ----
+
+const aw = computed(() => engine.value?.actionWindow ?? null)
+
+const windowTriggerLabel = computed(() =>
+  aw.value ? t(`game.play.window.trigger.${aw.value.trigger satisfies ActionWindowTrigger}`) : null,
+)
+
+// Which phase pip the open window belongs to. Every combat sub-step
+// trigger lives inside the Battlefield phase.
+const TRIGGER_TO_PHASE: Record<ActionWindowTrigger, Phase> = {
+  KingdomActionWindow: 'KingdomPhase',
+  QuestActionWindow: 'QuestPhase',
+  CapitalActionWindow: 'CapitalPhase',
+  BattlefieldActionWindow: 'BattlefieldPhase',
+  AfterDeclareCombatTarget: 'BattlefieldPhase',
+  AfterDeclareAttackers: 'BattlefieldPhase',
+  AfterDeclareDefenders: 'BattlefieldPhase',
+  AfterAssignCombatDamage: 'BattlefieldPhase',
+  AfterApplyCombatDamage: 'BattlefieldPhase',
+}
+const awPhase = computed<Phase | null>(() =>
+  aw.value ? TRIGGER_TO_PHASE[aw.value.trigger] : null,
+)
+
+const priorityIsMe = computed(
+  () => aw.value != null && mySeatKey.value != null && priorityHolder(aw.value.awaiting) === mySeatKey.value,
+)
+
+// Pip text: when the open window belongs to this pip, swap the phase
+// name for the more specific trigger label so combat sub-steps surface.
+function pipLabel(p: Phase): string {
+  if (awPhase.value === p && windowTriggerLabel.value) return windowTriggerLabel.value
+  return currentPhaseLabel(p)
+}
+
+function pass() {
+  if (priorityIsMe.value) game.passPriority()
+}
 
 // ---- lifecycle ----
 
@@ -499,7 +546,8 @@ function formatTime(at: string): string {
 
     <!-- ────────────────────────────────────────────────────────────
          Bottom phase bar (sticky, only while a game is running). Holds
-         the turn counter, whose turn it is, and the 4-phase tracker.
+         the turn counter, whose turn it is, the 4-phase tracker, and
+         the active action-window pill with the pass button.
          ──────────────────────────────────────────────────────────── -->
     <footer v-if="isPlaying && engine" class="phase-bar">
       <div class="phase-bar-left">
@@ -511,9 +559,23 @@ function formatTime(at: string): string {
           v-for="p in PHASES"
           :key="p"
           class="phase-pip"
-          :class="{ active: engine.phase === p }"
+          :class="{
+            active: engine.phase === p,
+            'window-open': awPhase === p,
+            mine: awPhase === p && priorityIsMe,
+          }"
         >
-          {{ currentPhaseLabel(p) }}
+          <span class="pip-label">{{ pipLabel(p) }}</span>
+          <button
+            v-if="awPhase === p"
+            class="pip-pass"
+            type="button"
+            :disabled="!priorityIsMe"
+            :title="!priorityIsMe ? t('game.play.window.pass_disabled') : undefined"
+            @click.stop="pass"
+          >
+            {{ t('game.play.window.pass') }}
+          </button>
         </li>
       </ol>
       <button class="leave-btn" type="button" @click="leave">
@@ -939,27 +1001,29 @@ function formatTime(at: string): string {
 .phase-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-  padding: 0.45rem 0.9rem;
+  /* Left-anchor the turn indicator + phase track; the leave button
+     pushes itself to the right edge via `margin-left: auto`. */
+  justify-content: flex-start;
+  gap: 0.6rem;
+  padding: 0.2rem 0.9rem;
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
-  min-height: 48px;
+  min-height: 34px;
   flex-wrap: wrap;
 }
 .phase-bar-left {
   display: flex;
   align-items: baseline;
-  gap: 0.65rem;
+  gap: 0.55rem;
 }
 .turn-label {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--fg-faint);
 }
 .active-label {
-  font-size: 0.95rem;
+  font-size: 0.86rem;
   font-weight: 600;
   color: var(--fg);
 }
@@ -972,26 +1036,81 @@ function formatTime(at: string): string {
   flex-wrap: wrap;
 }
 .phase-pip {
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.68rem;
   letter-spacing: 0.06em;
-  padding: 0.3rem 0.7rem;
+  padding: 0.18rem 0.6rem;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--fg-faint);
+  /* Smooth the expansion when an action window opens on this pip. */
+  transition:
+    padding 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
 }
 .phase-pip.active {
   color: var(--on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }
+.pip-label { white-space: nowrap; }
+
+/* When an action window is open on this pip, it expands and recolors
+   to read like the old standalone action-window pill. The "mine"
+   variant pulses to signal that the player holds priority. */
+.phase-pip.window-open {
+  padding: 0.18rem 0.35rem 0.18rem 0.75rem;
+  background: rgba(20, 14, 8, 0.92);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.92);
+  text-transform: uppercase;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+}
+.phase-pip.window-open.mine {
+  border-color: var(--accent);
+  animation: pip-pulse 1.6s ease-in-out infinite;
+}
+@keyframes pip-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(196, 99, 74, 0.35); }
+  50%      { box-shadow: 0 0 0 6px rgba(196, 99, 74, 0.10); }
+}
+
+.pip-pass {
+  min-height: 22px;
+  padding: 0 0.6rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.pip-pass:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+.pip-pass:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .leave-btn {
+  /* Pushes itself to the right edge of the phase bar. */
+  margin-left: auto;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg-dim);
-  padding: 0.35rem 0.7rem;
+  padding: 0.18rem 0.6rem;
   border-radius: var(--radius-md);
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   cursor: pointer;
 }
 .leave-btn:hover { color: var(--accent-strong); border-color: var(--accent-strong); }

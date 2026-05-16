@@ -70,7 +70,11 @@ const CAP_BOARD_W = 175
 // Combined-row pile dimensions.
 const PILE_W = CARD_SM.h // 100 — rotated card width
 const PILE_H = CARD_SM.w // 72 — rotated card height
-const PILE_VERT_GAP = 10
+// Enough room between piles to seat the lower label without colliding
+// with either card. Top label sits above the top pile; bottom label
+// sits in this gap above the bottom pile (rather than below it, which
+// would push past the SVG's viewBox on the self perspective).
+const PILE_VERT_GAP = 18
 
 // Width of the player-chip / resources column (the inner side of the
 // combined zone for each player).
@@ -410,6 +414,7 @@ const legendSlot = computed(() => {
         :width="legendSlot.w"
         :height="legendSlot.h"
         :card="{ code: legend.cardDef.code, title: legend.cardDef.title }"
+        :transition-name="`legend-${legend.key}`"
       />
       <rect
         v-else
@@ -465,6 +470,7 @@ const legendSlot = computed(() => {
             :card="{ code: att.cardDef.code, title: att.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
+            :transition-name="`att-${att.key}`"
           />
           <SvgCard
             :x="evenSpread(zoneUnits(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.w)[i]"
@@ -472,6 +478,7 @@ const legendSlot = computed(() => {
             :card="{ code: u.cardDef.code, title: u.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
+            :transition-name="`unit-${u.key}`"
           />
         </g>
       </template>
@@ -487,6 +494,7 @@ const legendSlot = computed(() => {
             :card="{ code: att.cardDef.code, title: att.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
+            :transition-name="`att-${att.key}`"
           />
           <SvgCard
             :x="tallStackX(zr.x, zr.w)"
@@ -494,6 +502,7 @@ const legendSlot = computed(() => {
             :card="{ code: u.cardDef.code, title: u.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
+            :transition-name="`unit-${u.key}`"
           />
         </g>
       </template>
@@ -674,7 +683,7 @@ const legendSlot = computed(() => {
           />
           <text
             :x="xs.pilesX + PILE_W / 2"
-            :y="pilesLayout.bottomY + PILE_H + 14"
+            :y="pilesLayout.bottomY - 4"
             text-anchor="middle"
             class="pile-label"
           >
@@ -702,7 +711,7 @@ const legendSlot = computed(() => {
           />
           <text
             :x="xs.pilesX + PILE_W / 2"
-            :y="pilesLayout.bottomY + PILE_H + 14"
+            :y="pilesLayout.bottomY - 4"
             text-anchor="middle"
             class="pile-label"
           >

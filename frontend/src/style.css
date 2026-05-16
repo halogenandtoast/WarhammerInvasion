@@ -57,3 +57,34 @@ kbd {
   padding: 0.08em 0.36em;
   border-radius: var(--radius-sm);
 }
+
+/* ───────── View Transitions ─────────
+ *
+ * The game store wraps each engine snapshot update in
+ * `document.startViewTransition`. Cards opted in via SvgCard's
+ * `transition-name` prop (units, attachments, legends) carry stable
+ * names across frames, so the browser pairs old/new snapshots and
+ * morphs them between zones. Everything else cross-fades.
+ *
+ * `.card` is the view-transition-class set on every named card so
+ * we can tune the morph timing in one place. Entering/leaving cards
+ * (a unit reaching the table or being destroyed) get a subtle fade
+ * instead of the snappy snap the default would give them.
+ */
+::view-transition-group(*) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+::view-transition-old(.card),
+::view-transition-new(.card) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0ms;
+  }
+}
