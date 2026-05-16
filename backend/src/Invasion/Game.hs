@@ -216,6 +216,10 @@ data Game = Game
     -- ^ Count of units that have entered a discard pile (destroyed,
     -- sacrificed, etc.) during the current turn. Reset on 'BeginTurn'.
     -- Read by 'Burying the Grudge' (core-019).
+  , damageTakenThisTurn :: Map UnitKey Int
+    -- ^ Damage successfully landed on each unit this turn. Reset on
+    -- 'BeginTurn'. Read by Daemonettes of Slaanesh and any future
+    -- per-turn cap mechanics.
   }
   deriving stock Show
 

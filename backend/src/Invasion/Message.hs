@@ -77,6 +77,11 @@ data Message where
   CleanseUnit :: UnitKey -> Message
     -- ^ Clear the corrupted flag (used by the kingdom-phase restoration
     -- step and by future cleanse effects).
+  RestoreOneCorruptCard :: PlayerKey -> Message
+    -- ^ Kingdom-phase restoration step: auto-cleanse one corrupt card
+    -- the named player controls (first found). The rules let the
+    -- player choose; until prompts exist, the engine just picks the
+    -- first.
   -- Attachments
   PlayAttachment :: PlayerKey -> UnitKey -> UnitKey -> Message
     -- ^ Play a Support card from hand as an attachment to a target

@@ -148,6 +148,12 @@ toughnessX = keyword (Toughness Variable)
 scout :: CardBuilder Unit ()
 scout = keyword Scout
 
+-- | Counterstrike N keyword: while declared as a defender, this unit
+-- immediately deals N uncancellable damage to one attacker of its
+-- choice before regular combat damage assigns.
+counterstrike :: Int -> CardBuilder Unit ()
+counterstrike n = keyword (Counterstrike n)
+
 -- | Builder setter for a card's bespoke 'Receive' handler. The default
 -- (set by 'emptyCardDef') is 'noReceive' — a no-op.
 onReceive :: Receive k -> CardBuilder k ()
@@ -1998,6 +2004,16 @@ bowOfAvelorn = support "core-068" "Bow of Avelorn" do
   loyalty 2
   traits [Attachment, Weapon]
   body "Attach to a target High Elf unit. Action: Sacrifice this card to deal 2 damage to target unit."
+  action ActionDef
+    { actionName = "Loose arrow (sacrifice)"
+    , actionCost = 0
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk self target -> case target of
+        TargetUnit k -> do
+          push (DealDamageToUnit k 2)
+          push (DestroySupport self.key)
+        _ -> pure ()
+    }
 
 hoethsWisdom :: CardDef Support
 hoethsWisdom = support "core-069" "Hoeth's Wisdom" do
@@ -3078,6 +3094,20 @@ witchbrew = support "core-151" "Witchbrew" do
   loyalty 1
   trait Attachment
   body "Attach to a target Dark Elf unit. Action: Sacrifice this card to give attached unit {power}{power}{power} until the end of the turn."
+  action ActionDef
+    { actionName = "Brew (sacrifice)"
+    , actionCost = 0
+    , actionTarget = NoTargetSchema
+    , actionEffect = ActionEffect \_pk self _tgt -> case self.attachedTo of
+        Just hostKey -> do
+          push
+            ( InstallModifier
+                (UnitRef hostKey)
+                (Modifier (GainPower 3) UntilEndOfTurn)
+            )
+          push (DestroySupport self.key)
+        Nothing -> pure ()
+    }
 
 slaughterAtLustria :: CardDef Quest
 slaughterAtLustria = quest "core-152" "Slaughter at Lustria" do

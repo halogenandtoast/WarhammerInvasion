@@ -75,3 +75,4 @@ mconcat
 
 instance ToJSONKey (Ref k)
 instance ToJSONKey ZoneKind
+instance ToJSONKey UnitKey

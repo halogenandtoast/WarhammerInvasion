@@ -22,6 +22,7 @@ data Keyword
   | Scout
   | Limited
   | DamageCannotBeCancelled
+  | Counterstrike Int
   deriving stock (Show, Eq)
 
 data Cost = PayResources Number | NoCost

@@ -14,6 +14,7 @@ module Invasion.Server.Lobby
   , GameSlot (..)
   , SeatRow (..)
   , GameConn (..)
+  , ConnKind (..)
   , ConnId
   , newLobbyState
     -- * Lobby ops
@@ -81,10 +82,17 @@ data LobbyConn = LobbyConn
   , outbox :: TQueue LobbyOut
   }
 
+-- | Whether a 'GameConn' belongs to a seated player or a spectator.
+-- The kind is fixed at attach time; if a user later takes a seat in the
+-- waiting room they would already have a seated connection.
+data ConnKind = ConnSeated | ConnSpectator
+  deriving stock (Show, Eq)
+
 data GameConn = GameConn
   { connId :: ConnId
   , user :: UserInfo
   , outbox :: TQueue GameOut
+  , kind :: ConnKind
   }
 
 -- ----------------------------------------------------------------------------
@@ -101,6 +109,7 @@ data GameSlot = GameSlot
   , host :: UserInfo
   , visibility :: Visibility
   , password :: Maybe Text
+  , allowSpectators :: Bool
   , inviteToken :: Text
   , seats :: TVar (Map Text SeatRow) -- key = "Player1" | "Player2"
   , chat :: TVar (Seq ChatLine)
@@ -186,9 +195,10 @@ createGame
   -> UserInfo
   -> Visibility
   -> Maybe Text
+  -> Bool
   -> Text
   -> STM GameSlot
-createGame st gid name host vis pw token = do
+createGame st gid name host vis pw allowSpec token = do
   seats <- newTVar Map.empty
   chat <- newTVar Seq.empty
   status <- newTVar StatusWaiting
@@ -201,6 +211,7 @@ createGame st gid name host vis pw token = do
         , host
         , visibility = vis
         , password = pw
+        , allowSpectators = allowSpec
         , inviteToken = token
         , seats
         , chat
@@ -221,6 +232,7 @@ summariesSTM st = do
   fmap (sortOn (.gameId)) $ forM (Map.elems slots) \s -> do
     sts <- readTVar s.status
     sm <- readTVar s.seats
+    spec <- countSpectatorsSTM s
     pure GameSummary
       { gameId = s.gameId
       , name = s.name
@@ -229,19 +241,31 @@ summariesSTM st = do
       , hasPassword = isNothing s.password == False
       , filledSeats = Map.size sm
       , status = sts
+      , allowSpectators = s.allowSpectators
+      , spectatorCount = spec
       }
+
+-- | Count unique spectator users currently connected to a slot. A user
+-- with multiple browser tabs spectating still counts once.
+countSpectatorsSTM :: GameSlot -> STM Int
+countSpectatorsSTM slot = do
+  conns <- readTVar slot.connections
+  let userIds =
+        Set.fromList
+          [c.user.userId | c <- Map.elems conns, c.kind == ConnSpectator]
+  pure (Set.size userIds)
 
 -- | Attach a fresh WS connection to a game slot. Bumps the slot out of
 -- "everybody left" idle countdown.
-attachGameConn :: GameSlot -> UserInfo -> TQueue GameOut -> STM ConnId
-attachGameConn slot user outbox = do
+attachGameConn :: GameSlot -> UserInfo -> TQueue GameOut -> ConnKind -> STM ConnId
+attachGameConn slot user outbox kind = do
   -- Use the slot's own connId space — we never collide with lobby ids
   -- because the conn id is only ever compared within a slot.
   cs <- readTVar slot.connections
   let cid = case Map.keys cs of
         [] -> 1
         ks -> maximum ks + 1
-  modifyTVar' slot.connections (Map.insert cid GameConn {connId = cid, user, outbox})
+  modifyTVar' slot.connections (Map.insert cid GameConn {connId = cid, user, outbox, kind})
   writeTVar slot.lastEmptyAt Nothing
   pure cid
 
@@ -306,6 +330,7 @@ gameViewSTM slot viewer = do
   sts <- readTVar slot.status
   chatLines <- foldr (:) [] <$> readTVar slot.chat
   mEngine <- readTVar slot.engine
+  spec <- countSpectatorsSTM slot
   let seatList =
         [ SeatView
             { seat = k
@@ -324,6 +349,8 @@ gameViewSTM slot viewer = do
     , host = slot.host
     , visibility = slot.visibility
     , hasPassword = case slot.password of Just _ -> True; Nothing -> False
+    , allowSpectators = slot.allowSpectators
+    , spectatorCount = spec
     , inviteToken = tokenForViewer
     , seats = seatList
     , status = sts

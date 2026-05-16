@@ -165,15 +165,13 @@ instance Run Player where
             send (Eliminate drawing.player DeckedOut)
     ReturnResources k -> onKey k $
       modify \p -> p {resources = Resources 0}
-    CollectResources k -> onKey k do
-      -- Base power of the kingdom zone, plus power icons on cards
-      -- placed there. No cards are implemented yet, so power icons
-      -- contribute nothing.
-      let Power n = basePower KingdomZone
-      modify \p -> p {resources = Resources n}
-    QuestDraw k -> onKey k do
-      let Power n = basePower QuestZone
-      replicateM_ n (send $ Draw $ Drawing StandardDraw k)
+    -- CollectResources and QuestDraw set the right values from
+    -- Game.receive once it can see all in-play unit/support power
+    -- icons across both sides. Player.receive deliberately doesn't
+    -- touch resources / draws for these messages — the engine-level
+    -- handler owns them.
+    CollectResources _k -> pure ()
+    QuestDraw _k -> pure ()
     Eliminate k reason -> onKey k $
       modify \p -> p {state = Eliminated reason}
     _ -> pure ()
@@ -213,6 +211,7 @@ instance Run Game where
           , turn = g.turn + Turn 1
           , limitedPlayedThisTurn = False
           , unitsDiscardedThisTurn = 0
+          , damageTakenThisTurn = mempty
           }
       t <- gets (.turn)
       logIt LogTurn
@@ -250,8 +249,7 @@ instance Run Game where
           case phase of
             KingdomPhase -> do
               send (ReturnResources active)
-              -- TODO restore one corrupt card the active player controls
-              -- (no corruption tokens yet).
+              send (RestoreOneCorruptCard active)
               send (CollectResources active)
               send (OpenActionWindow KingdomActionWindow)
             QuestPhase -> do
@@ -352,57 +350,63 @@ instance Run Game where
     ReturnResources k ->
       logIt LogSystem "log.resources.returned" [("player", playerParam k)]
     CollectResources k -> do
-      -- Player.receive ran first and set the new resource total; read
-      -- the updated value to include the count in the log line.
       g <- get
-      let Resources n = case k of
-            Player1 -> g.player1.resources
-            Player2 -> g.player2.resources
+      let n = zonePower g k KingdomZone
+          p = lookupPlayer k g
+          p' = p {resources = Resources n}
+      modify (setPlayer k p')
       logIt LogSystem
         "log.resources.collected"
         [("player", playerParam k), ("count", T.pack (show n))]
-    QuestDraw k ->
+    QuestDraw k -> do
+      g <- get
+      let n = zonePower g k QuestZone
       logIt LogSystem "log.quest.draw" [("player", playerParam k)]
+      replicateM_ n (send (Draw (Drawing StandardDraw k)))
     PlayUnit pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
       case takeUnitFromHand cardKey player of
         Nothing -> pure ()
-        Just (cardDef, playerWithoutCard) -> case cardDef.cost of
-          Variable -> pure ()
-          Fixed printed ->
-            let n = effectiveUnitCost g pk cardDef printed
-            in when (player.resources >= Resources n) $ do
-              -- Reuse the card's existing key as its in-play UnitKey.
-              -- This is what lets the frontend's view-transition map a
-              -- hand card to its zone landing spot.
-              let paidPlayer =
-                    playerWithoutCard
-                      {resources = player.resources - Resources n}
-                  unitDetails =
-                    UnitDetails
-                      { key = cardKey
-                      , controller = pk
-                      , zone
-                      , cardDef
-                      , damage = Damage 0
-                      , corrupted = False
-                      , attachments = []
-                      , experiences = []
-                      , effectivePower = cardDef.power
-                      , effectiveMaxHP = unitPrintedHPFromDef cardDef
+        Just (cardDef, playerWithoutCard)
+          | not (canPlayCard pk cardDef g) -> pure ()
+          | otherwise -> case cardDef.cost of
+              Variable -> pure ()
+              Fixed printed -> do
+                let n = effectiveUnitCost g pk cardDef printed
+                when (player.resources >= Resources n) $ do
+                  markPlayedLimited cardDef
+                  -- Reuse the card's existing key as its in-play
+                  -- UnitKey. This is what lets the frontend's
+                  -- view-transition map a hand card to its zone
+                  -- landing spot.
+                  let paidPlayer =
+                        playerWithoutCard
+                          {resources = player.resources - Resources n}
+                      unitDetails =
+                        UnitDetails
+                          { key = cardKey
+                          , controller = pk
+                          , zone
+                          , cardDef
+                          , damage = Damage 0
+                          , corrupted = False
+                          , attachments = []
+                          , experiences = []
+                          , effectivePower = cardDef.power
+                          , effectiveMaxHP = unitPrintedHPFromDef cardDef
+                          }
+                  modify \gx ->
+                    (setPlayer pk paidPlayer gx)
+                      { units = unitDetails : gx.units
                       }
-              modify \gx ->
-                (setPlayer pk paidPlayer gx)
-                  { units = unitDetails : gx.units
-                  }
-              logIt LogPlayerAction
-                "log.unit.played"
-                [ ("player", playerParam pk)
-                , ("card", T.pack cardDef.title)
-                , ("cost", T.pack (show n))
-                ]
-              send (UnitEnteredPlay pk cardKey)
+                  logIt LogPlayerAction
+                    "log.unit.played"
+                    [ ("player", playerParam pk)
+                    , ("card", T.pack cardDef.title)
+                    , ("cost", T.pack (show n))
+                    ]
+                  send (UnitEnteredPlay pk cardKey)
     PlayUnitOnQuest pk cardKey questKey -> do
       g <- get
       let player = lookupPlayer pk g
@@ -410,42 +414,44 @@ instance Run Game where
         (Just (cardDef, playerWithoutCard), Just q)
           | q.controller == pk
           , q.questingUnit == Nothing
-          , BattlefieldOnly `notElem` cardDef.keywords ->
+          , BattlefieldOnly `notElem` cardDef.keywords
+          , canPlayCard pk cardDef g ->
               case cardDef.cost of
                 Variable -> pure ()
-                Fixed printed ->
+                Fixed printed -> do
                   let n = effectiveUnitCost g pk cardDef printed
-                   in when (player.resources >= Resources n) $ do
-                        let paidPlayer =
-                              playerWithoutCard
-                                {resources = player.resources - Resources n}
-                            unitDetails =
-                              UnitDetails
-                                { key = cardKey
-                                , controller = pk
-                                , zone = QuestZone
-                                , cardDef
-                                , damage = Damage 0
-                                , corrupted = False
-                                , attachments = []
-                                , experiences = []
-                                , effectivePower = cardDef.power
-                                , effectiveMaxHP = unitPrintedHPFromDef cardDef
-                                }
-                            q' = (q {questingUnit = Just cardKey}) :: QuestDetails
-                        modify \gx ->
-                          (setPlayer pk paidPlayer gx)
-                            { units = unitDetails : gx.units
-                            , quests = replaceQuest q' gx.quests
+                  when (player.resources >= Resources n) $ do
+                    markPlayedLimited cardDef
+                    let paidPlayer =
+                          playerWithoutCard
+                            {resources = player.resources - Resources n}
+                        unitDetails =
+                          UnitDetails
+                            { key = cardKey
+                            , controller = pk
+                            , zone = QuestZone
+                            , cardDef
+                            , damage = Damage 0
+                            , corrupted = False
+                            , attachments = []
+                            , experiences = []
+                            , effectivePower = cardDef.power
+                            , effectiveMaxHP = unitPrintedHPFromDef cardDef
                             }
-                        logIt LogPlayerAction
-                          "log.unit.played_on_quest"
-                          [ ("player", playerParam pk)
-                          , ("card", T.pack cardDef.title)
-                          , ("quest", T.pack q.cardDef.title)
-                          , ("cost", T.pack (show n))
-                          ]
-                        send (UnitEnteredPlay pk cardKey)
+                        q' = (q {questingUnit = Just cardKey}) :: QuestDetails
+                    modify \gx ->
+                      (setPlayer pk paidPlayer gx)
+                        { units = unitDetails : gx.units
+                        , quests = replaceQuest q' gx.quests
+                        }
+                    logIt LogPlayerAction
+                      "log.unit.played_on_quest"
+                      [ ("player", playerParam pk)
+                      , ("card", T.pack cardDef.title)
+                      , ("quest", T.pack q.cardDef.title)
+                      , ("cost", T.pack (show n))
+                      ]
+                    send (UnitEnteredPlay pk cardKey)
         _ -> pure ()
     UnitEnteredPlay pk _key ->
       -- The card's own 'receive' fires via 'dispatchToInPlayUnits'.
@@ -474,14 +480,19 @@ instance Run Game where
         Nothing -> pure ()
         Just u -> do
           -- Passive multiplier (Bloodletter doubles all damage) applies
-          -- to the raw assignment; Toughness then cancels off the top.
+          -- to the raw assignment; Toughness then cancels off the top,
+          -- then per-turn caps (Daemonettes of Slaanesh) clip the
+          -- remainder.
           let inflated = applyDamageMultipliers g (max 0 amount)
               toughness = totalToughness g u
-              landing = max 0 (inflated - toughness)
+              afterToughness = max 0 (inflated - toughness)
+              already = Map.findWithDefault 0 ukey g.damageTakenThisTurn
+              capped = applyPerTurnCap u already afterToughness
+              landing = capped
               cancelled = inflated - landing
           when (cancelled > 0) $
             logIt LogSystem
-              "log.toughness.cancelled"
+              "log.damage.cancelled"
               [ ("card", T.pack u.cardDef.title)
               , ("amount", T.pack (show cancelled))
               ]
@@ -489,7 +500,12 @@ instance Run Game where
             let Damage existing = u.damage
                 newDmg = Damage (existing + landing)
                 u' = u {damage = newDmg} :: UnitDetails
-            modify \gx -> gx {units = replaceUnit u' gx.units}
+            modify \gx ->
+              gx
+                { units = replaceUnit u' gx.units
+                , damageTakenThisTurn =
+                    Map.insertWith (+) ukey landing gx.damageTakenThisTurn
+                }
             logIt LogSystem
               "log.unit.damaged"
               [ ("card", T.pack u.cardDef.title)
@@ -503,16 +519,25 @@ instance Run Game where
       case findUnit ukey g of
         Nothing -> pure ()
         Just u -> do
+          -- Uncancellable damage still respects per-turn caps
+          -- (Daemonettes) — the cap is independent of cancellation.
           let inflated = applyDamageMultipliers g (max 0 amount)
-          when (inflated > 0) $ do
+              already = Map.findWithDefault 0 ukey g.damageTakenThisTurn
+              landing = applyPerTurnCap u already inflated
+          when (landing > 0) $ do
             let Damage existing = u.damage
-                newDmg = Damage (existing + inflated)
+                newDmg = Damage (existing + landing)
                 u' = u {damage = newDmg} :: UnitDetails
-            modify \gx -> gx {units = replaceUnit u' gx.units}
+            modify \gx ->
+              gx
+                { units = replaceUnit u' gx.units
+                , damageTakenThisTurn =
+                    Map.insertWith (+) ukey landing gx.damageTakenThisTurn
+                }
             logIt LogSystem
               "log.unit.damaged"
               [ ("card", T.pack u.cardDef.title)
-              , ("amount", T.pack (show inflated))
+              , ("amount", T.pack (show landing))
               ]
             let Damage total = newDmg
             when (total >= u.effectiveMaxHP) $
@@ -612,14 +637,28 @@ instance Run Game where
             "log.unit.cleansed"
             [("card", T.pack u.cardDef.title)]
         _ -> pure ()
+    RestoreOneCorruptCard pk -> do
+      g <- get
+      case
+        [ u
+        | u <- g.units
+        , u.controller == pk
+        , u.corrupted
+        ]
+        of
+          (u : _) -> send (CleanseUnit u.key)
+          [] -> pure ()
     PlayAttachment pk cardKey targetKey -> do
       g <- get
       let player = lookupPlayer pk g
       case (takeSupportFromHand cardKey player, findUnit targetKey g) of
-        (Just (cardDef, playerWithoutCard), Just host) -> case cardDef.cost of
+        (Just (cardDef, playerWithoutCard), Just host)
+          | not (canPlayCard pk cardDef g) -> pure ()
+          | otherwise -> case cardDef.cost of
           Variable -> pure ()
           Fixed n ->
             when (player.resources >= Resources n) $ do
+              markPlayedLimited cardDef
               let paidPlayer =
                     playerWithoutCard
                       {resources = player.resources - Resources n}
@@ -657,10 +696,13 @@ instance Run Game where
       let player = lookupPlayer pk g
       case takeSupportFromHand cardKey player of
         Nothing -> pure ()
-        Just (cardDef, playerWithoutCard) -> case cardDef.cost of
+        Just (cardDef, playerWithoutCard)
+          | not (canPlayCard pk cardDef g) -> pure ()
+          | otherwise -> case cardDef.cost of
           Variable -> pure ()
           Fixed n ->
             when (player.resources >= Resources n) $ do
+              markPlayedLimited cardDef
               let paidPlayer =
                     playerWithoutCard
                       {resources = player.resources - Resources n}
@@ -714,10 +756,13 @@ instance Run Game where
       let player = lookupPlayer pk g
       case takeQuestFromHand cardKey player of
         Nothing -> pure ()
-        Just (cardDef, playerWithoutCard) -> case cardDef.cost of
+        Just (cardDef, playerWithoutCard)
+          | not (canPlayCard pk cardDef g) -> pure ()
+          | otherwise -> case cardDef.cost of
           Variable -> pure ()
           Fixed n ->
             when (player.resources >= Resources n) $ do
+              markPlayedLimited cardDef
               let paidPlayer =
                     playerWithoutCard
                       {resources = player.resources - Resources n}
@@ -810,9 +855,9 @@ instance Run Game where
       case takeTacticFromHand cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard)
-          | Limited `elem` cardDef.keywords && g.limitedPlayedThisTurn ->
-              -- A Limited card has already been played this turn;
-              -- silently refuse.
+          | not (canPlayCard pk cardDef g) ->
+              -- Limited already played this turn (tactics never trip
+              -- the uniqueness check because they don't persist).
               pure ()
           | not (validateTarget pk (tacticTargetSchema cardDef) target g) ->
               pure ()
@@ -820,8 +865,8 @@ instance Run Game where
               Variable -> pure ()
               Fixed n ->
                 when (player.resources >= Resources n) $ do
-                  let isLimited = Limited `elem` cardDef.keywords
-                      paidPlayer =
+                  markPlayedLimited cardDef
+                  let paidPlayer =
                         playerWithoutCard
                           { resources = player.resources - Resources n
                           , discard =
@@ -829,8 +874,6 @@ instance Run Game where
                                 : playerWithoutCard.discard
                           }
                   modify (setPlayer pk paidPlayer)
-                  when isLimited $
-                    modify \gx -> gx {limitedPlayedThisTurn = True}
                   logIt LogPlayerAction
                     "log.tactic.played"
                     [ ("player", playerParam pk)
@@ -1088,6 +1131,30 @@ instance Run Game where
       modify \gx -> case gx.combat of
         Just cs -> gx {combat = Just (cs {defenders = defs} :: CombatState)}
         Nothing -> gx
+      -- Fire Counterstrike: each defending unit with Counterstrike N
+      -- immediately deals N uncancellable damage to one attacker of
+      -- the defender's choice (auto-pick the first attacker still in
+      -- play). Triggers before regular combat damage.
+      g <- get
+      case g.combat of
+        Just cs -> do
+          let defenderUnits =
+                [ u
+                | k <- defs
+                , Just u <- [findUnit k g]
+                ]
+              attackerKeys = cs.attackers
+          traverse_
+            ( \def ->
+                let cs_total = sum [n | Counterstrike n <- def.cardDef.keywords]
+                 in when (cs_total > 0) $
+                      case attackerKeys of
+                        (aKey : _) ->
+                          send (DealDamageToUnitUncancellable aKey cs_total)
+                        [] -> pure ()
+            )
+            defenderUnits
+        Nothing -> pure ()
       send ResolveCombat
     ResolveCombat -> do
       g <- get
@@ -1128,6 +1195,24 @@ instance Run Game where
             [ ("attacker_damage", T.pack (show (attackerCanc + attackerUncanc)))
             , ("defender_damage", T.pack (show (defenderCanc + defenderUncanc)))
             ]
+          -- Scout: after damage is applied, every surviving Scout
+          -- participant forces the opposite side to discard one card
+          -- at random. Re-read units to see who's still in play.
+          gAfter <- get
+          let survivors keys =
+                [ u
+                | k <- keys
+                , Just u <- [findUnit k gAfter]
+                ]
+              scoutOf u = Scout `elem` u.cardDef.keywords
+              attackerScouts = filter scoutOf (survivors cs.attackers)
+              defenderScouts = filter scoutOf (survivors cs.defenders)
+          traverse_
+            (\_ -> send (DiscardRandomFromHand cs.defendingPlayer))
+            attackerScouts
+          traverse_
+            (\_ -> send (DiscardRandomFromHand cs.attackingPlayer))
+            defenderScouts
           send EndCombat
     EndCombat -> do
       modify \gx -> gx {combat = Nothing}
@@ -1263,32 +1348,35 @@ instance Run Game where
           let player = lookupPlayer pk g
           case takeLegendFromHand cardKey player of
             Nothing -> pure ()
-            Just (cardDef, playerWithoutCard) -> case cardDef.cost of
-              Variable -> pure ()
-              Fixed n ->
-                when (player.resources >= Resources n) $ do
-                  let paidPlayer =
-                        playerWithoutCard
-                          {resources = player.resources - Resources n}
-                      legendDetails =
-                        LegendDetails
-                          { key = cardKey
-                          , controller = pk
-                          , zone = BattlefieldZone
-                          , cardDef
-                          , damage = Damage 0
+            Just (cardDef, playerWithoutCard)
+              | not (canPlayCard pk cardDef g) -> pure ()
+              | otherwise -> case cardDef.cost of
+                  Variable -> pure ()
+                  Fixed n ->
+                    when (player.resources >= Resources n) $ do
+                      markPlayedLimited cardDef
+                      let paidPlayer =
+                            playerWithoutCard
+                              {resources = player.resources - Resources n}
+                          legendDetails =
+                            LegendDetails
+                              { key = cardKey
+                              , controller = pk
+                              , zone = BattlefieldZone
+                              , cardDef
+                              , damage = Damage 0
+                              }
+                      modify \gx ->
+                        (setPlayer pk paidPlayer gx)
+                          { legends = legendDetails : gx.legends
                           }
-                  modify \gx ->
-                    (setPlayer pk paidPlayer gx)
-                      { legends = legendDetails : gx.legends
-                      }
-                  logIt LogPlayerAction
-                    "log.legend.played"
-                    [ ("player", playerParam pk)
-                    , ("card", T.pack cardDef.title)
-                    , ("cost", T.pack (show n))
-                    ]
-                  send (LegendEnteredPlay pk cardKey)
+                      logIt LogPlayerAction
+                        "log.legend.played"
+                        [ ("player", playerParam pk)
+                        , ("card", T.pack cardDef.title)
+                        , ("cost", T.pack (show n))
+                        ]
+                      send (LegendEnteredPlay pk cardKey)
     LegendEnteredPlay pk _key ->
       logIt LogSystem "log.legend.entered_play" [("player", playerParam pk)]
     DealDamageToLegend lkey amount -> do
@@ -1396,6 +1484,7 @@ newGame deck1 deck2 = do
       , pendingEndOfPhase = []
       , limitedPlayedThisTurn = False
       , unitsDiscardedThisTurn = 0
+      , damageTakenThisTurn = mempty
       }
 
 -- | Look up a player record by key.
@@ -1786,6 +1875,111 @@ validateTarget pk schema tgt g = case (schema, tgt) of
     Nothing -> False
   _ -> False
 
+-- | Total power available to the named player in the named zone:
+-- base power printed on the capital board, plus the power icons on
+-- every unit/support/legend currently in the zone, plus any
+-- zone-targeting aura bonuses (e.g. Lighthouse of Lothern).
+zonePower :: Game -> PlayerKey -> ZoneKind -> Int
+zonePower g pk zone =
+  let Power base = basePower zone
+      unitsHere =
+        [ u
+        | u <- g.units
+        , u.controller == pk
+        , u.zone == zone
+        , not u.corrupted
+        ]
+      supportsHere =
+        [ s
+        | s <- g.supports
+        , s.controller == pk
+        , s.zone == zone
+        ]
+      legendsHere =
+        [ l
+        | l <- g.legends
+        , l.controller == pk
+        , l.zone == zone
+        ]
+      unitPow = sum (map (.effectivePower) unitsHere)
+      supportPow = sum (map (.cardDef.power) supportsHere)
+      legendPow = sum (map (.cardDef.power) legendsHere)
+      auraBonus = zoneAuraBonus g pk zone
+   in base + unitPow + supportPow + legendPow + auraBonus
+
+-- | Extra power a player's zone gets from in-play cards that grant a
+-- zone-wide bonus (Lighthouse of Lothern, Rift of Chaos, …).
+zoneAuraBonus :: Game -> PlayerKey -> ZoneKind -> Int
+zoneAuraBonus g pk zone =
+  lighthouseOfLothernBonus + riftOfChaosBonus
+  where
+    -- Lighthouse of Lothern (core-066): your quest zone gains +1
+    -- power while the Lighthouse itself is in the quest zone (the
+    -- "Quest." prefix scopes the effect to that zone).
+    lighthouseOfLothernBonus
+      | zone == QuestZone
+      , any
+          ( \s ->
+              s.controller == pk
+                && s.cardDef.code == CardCode "core-066"
+                && s.zone == QuestZone
+          )
+          g.supports = 1
+      | otherwise = 0
+    -- Rift of Chaos (cataclysm-037): +1 to its own zone per burning
+    -- zone on either capital. Applies wherever the rift sits.
+    riftOfChaosBonus =
+      sum
+        [ burningZoneCount g
+        | s <- g.supports
+        , s.controller == pk
+        , s.cardDef.code == CardCode "cataclysm-037"
+        , s.zone == zone
+        ]
+
+-- | Per-turn damage caps that some cards impose on themselves —
+-- e.g. Daemonettes of Slaanesh "cannot be assigned more than 1
+-- damage per turn". Given how much damage has already landed on the
+-- unit this turn and how much is incoming, returns the amount that
+-- actually lands.
+applyPerTurnCap :: UnitDetails -> Int -> Int -> Int
+applyPerTurnCap u already incoming = case perTurnCap u of
+  Nothing -> incoming
+  Just cap -> max 0 (min incoming (cap - already))
+
+-- | The per-turn damage cap for a unit, if any.
+perTurnCap :: UnitDetails -> Maybe Int
+perTurnCap u = case u.cardDef.code of
+  CardCode "core-095" -> Just 1 -- Daemonettes of Slaanesh
+  _ -> Nothing
+
+-- | True iff the card carries the 'Limited' keyword.
+isLimitedCard :: CardDef k -> Bool
+isLimitedCard cd = Limited `elem` cd.keywords
+
+-- | True iff the named player already controls a copy of this card
+-- code in play (units, supports, quests, or legends). Discard / hand
+-- copies do not count.
+controlsCopyInPlay :: PlayerKey -> CardCode -> Game -> Bool
+controlsCopyInPlay pk code g =
+  any (\u -> u.controller == pk && u.cardDef.code == code) g.units
+    || any (\s -> s.controller == pk && s.cardDef.code == code) g.supports
+    || any (\q -> q.controller == pk && q.cardDef.code == code) g.quests
+    || any (\l -> l.controller == pk && l.cardDef.code == code) g.legends
+
+-- | Refuse if a unique card already has a copy under the player's
+-- control, or if a Limited card has already been played this turn.
+canPlayCard :: PlayerKey -> CardDef k -> Game -> Bool
+canPlayCard pk cd g =
+  (not cd.unique || not (controlsCopyInPlay pk cd.code g))
+    && (not (isLimitedCard cd) || not g.limitedPlayedThisTurn)
+
+-- | Set the limited-played-this-turn flag if appropriate.
+markPlayedLimited :: CardDef k -> StateT Game GameT ()
+markPlayedLimited cd =
+  when (isLimitedCard cd) $
+    modify \gx -> gx {limitedPlayedThisTurn = True}
+
 -- | Sum of all Toughness contributions on a unit. Fixed values come
 -- straight from the keyword; 'Toughness Variable' (Ironbreakers of
 -- Ankhor) scales with the number of developments in the unit's zone.
@@ -1965,6 +2159,18 @@ auraPowerBonus g u = sum
 -- 'experiencePowerBonus'.
 selfScalingPowerBonus :: Game -> UnitDetails -> Int
 selfScalingPowerBonus g u = case u.cardDef.code of
+  -- Troll Slayers (core-004): +2 power while you have at least 2
+  -- developments in this zone.
+  CardCode "core-004" | devsInZone g u >= 2 -> 2
+  -- Durgnar the Bold (core-006): +2 power while one section of your
+  -- capital is burning.
+  CardCode "core-006" | controllerBurning -> 2
+    where
+      controllerBurning =
+        let p = case u.controller of
+              Player1 -> g.player1
+              Player2 -> g.player2
+         in any (.burning) p.capital.zones
   -- Korhil: gains {power} per other White Lion unit you control.
   CardCode "core-061" ->
     length
@@ -1982,8 +2188,6 @@ selfScalingPowerBonus g u = case u.cardDef.code of
       , v.controller == u.controller
       , v.cardDef.code == CardCode "core-135"
       ]
-  -- Mountain Brigade is just a body of stats (no scaling). Defender of
-  -- the Hold likewise.
   _ -> 0
 
 -- | Power gained from experience markers. Only Skulltaker reads them

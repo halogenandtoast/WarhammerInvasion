@@ -198,7 +198,7 @@ handleLobbyIn env user = \case
         atomically do
           pushLobbyChat env.lobby line
           broadcastLobby env.lobby LobbyChatNew {line}
-  LobbyCreateGame {name = gname, visibility, password} -> do
+  LobbyCreateGame {name = gname, visibility, password, allowSpectators = mAllow} -> do
     let trimmedName = T.strip gname
     case validateGameName trimmedName of
       Just code -> notifyError env user code
@@ -207,8 +207,14 @@ handleLobbyIn env user = \case
         _ -> do
           gid <- nextRandom
           token <- randomTokenText 12
+          -- Default: public games allow spectators, private games don't.
+          let allowSpec = case mAllow of
+                Just b -> b
+                Nothing -> case visibility of
+                  Public -> True
+                  Private -> False
           slot <- atomically do
-            slot <- createGame env.lobby gid trimmedName user visibility password token
+            slot <- createGame env.lobby gid trimmedName user visibility password allowSpec token
             sm <- summariesSTM env.lobby
             broadcastLobby env.lobby LobbyGamesUpdate {games = sm}
             pure slot
@@ -222,12 +228,7 @@ handleLobbyIn env user = \case
       Just slot -> case slot.visibility of
         Private -> notifyError env user "game_is_private"
         Public -> do
-          ok <- atomically do
-            sm <- readTVar slot.seats
-            let alreadySeated = any (\r -> r.user.userId == user.userId) (Map.elems sm)
-            if alreadySeated || Map.size sm < 2
-              then pure True
-              else pure False
+          ok <- atomically (canJoinAsAnything slot user)
           if ok
             then notifyMe env user LobbyGameJoinOk {gameId = gid, inviteToken = Nothing}
             else notifyError env user "game_full"
@@ -237,12 +238,7 @@ handleLobbyIn env user = \case
       Nothing -> notifyError env user "game_not_found"
       Just slot -> case (slot.password, mpw) of
         (Just expected, Just pw) | expected == pw -> do
-          ok <- atomically do
-            sm <- readTVar slot.seats
-            let alreadySeated = any (\r -> r.user.userId == user.userId) (Map.elems sm)
-            if alreadySeated || Map.size sm < 2
-              then pure True
-              else pure False
+          ok <- atomically (canJoinAsAnything slot user)
           if ok
             then notifyMe env user LobbyGameJoinOk {gameId = gid, inviteToken = Nothing}
             else notifyError env user "game_full"
@@ -294,29 +290,47 @@ canEnter slot user mPw mInvite = atomically do
   let alreadySeated = any (\r -> r.user.userId == user.userId) (Map.elems sm)
       isHost = user.userId == slot.host.userId
       hasSlot = Map.size sm < 2
+      -- A user who isn't seated and isn't the host may still enter as a
+      -- spectator if the game allows it.
+      canBeHere = hasSlot || slot.allowSpectators
   if alreadySeated || isHost
     then pure True
     else case slot.visibility of
-      Public -> pure hasSlot
+      Public -> pure canBeHere
       Private -> case (mInvite, mPw, slot.password) of
-        (Just t, _, _) | t == slot.inviteToken -> pure hasSlot
-        (_, Just pw, Just expected) | pw == expected -> pure hasSlot
+        (Just t, _, _) | t == slot.inviteToken -> pure canBeHere
+        (_, Just pw, Just expected) | pw == expected -> pure canBeHere
         _ -> pure False
+
+-- | Lobby-side check used by 'LobbyJoinPublic' / 'LobbyJoinWithPassword'
+-- after the visibility/password gate has passed. A user can enter the
+-- slot if they already have a seat, if a seat is available, or if the
+-- game permits spectators.
+canJoinAsAnything :: GameSlot -> UserInfo -> STM Bool
+canJoinAsAnything slot user = do
+  sm <- readTVar slot.seats
+  let alreadySeated = any (\r -> r.user.userId == user.userId) (Map.elems sm)
+      hasSlot = Map.size sm < 2
+  pure (alreadySeated || hasSlot || slot.allowSpectators)
 
 runGameConn :: WsEnv -> GameSlot -> UserInfo -> WS.Connection -> IO ()
 runGameConn env slot user conn = do
   outbox <- atomically newTQueue
-  -- Reserve a seat (or reclaim existing one). Refuse if both seats taken.
+  -- Try to reserve a seat (or reclaim existing one). If both seats are
+  -- taken and the slot allows spectators, attach as a spectator instead.
   mSeat <- atomically (reserveSeat slot user)
-  case mSeat of
-    Nothing -> do
+  let kind = case mSeat of
+        Just _ -> ConnSeated
+        Nothing -> ConnSpectator
+  case (mSeat, slot.allowSpectators) of
+    (Nothing, False) -> do
       WS.sendTextData conn (Aeson.encode GameError {code = "no_seat"})
       WS.sendClose conn ("full" :: ByteString)
-    Just _seatKey -> do
-      cid <- atomically (attachGameConn slot user outbox)
+    _ -> do
+      cid <- atomically (attachGameConn slot user outbox kind)
       welcomeView <- atomically (gameViewSTM slot user)
       atomically (sendTo outbox GameWelcome {you = user, game = welcomeView})
-      -- Inform other connections + lobby listings about the new seat.
+      -- Inform other connections + lobby listings about the new viewer.
       atomically do
         v <- gameViewSTM slot user
         broadcastGameWithView slot v
@@ -504,10 +518,12 @@ handleGameIn env slot user = \case
               broadcastGameWithView slot v
   GameLeave -> do
     sts <- readTVarIO slot.status
-    -- A "leave" while playing ends the game.
+    -- A "leave" while playing ends the game — but only if the leaver
+    -- was actually seated. Spectators dropping out just close their own
+    -- connection.
     atomically do
-      _ <- removeSeat slot user.userId
-      when (sts == StatusPlaying) (trySetStatus slot StatusEnded)
+      wasSeated <- removeSeat slot user.userId
+      when (wasSeated && sts == StatusPlaying) (trySetStatus slot StatusEnded)
       v <- gameViewSTM slot user
       broadcastGameWithView slot v
       summaries <- summariesSTM env.lobby

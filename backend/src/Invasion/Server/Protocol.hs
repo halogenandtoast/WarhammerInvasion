@@ -88,6 +88,8 @@ data GameSummary = GameSummary
   , hasPassword :: Bool
   , filledSeats :: Int -- 0..2
   , status :: GameStatus
+  , allowSpectators :: Bool
+  , spectatorCount :: Int
   }
   deriving stock (Show, Generic)
 
@@ -99,6 +101,8 @@ data GameView = GameView
   , host :: UserInfo
   , visibility :: Visibility
   , hasPassword :: Bool
+  , allowSpectators :: Bool
+  , spectatorCount :: Int
   , inviteToken :: Maybe Text
   , seats :: [SeatView]
   , status :: GameStatus
@@ -119,10 +123,13 @@ data LobbyIn
   = -- | Send a chat line to the global lobby.
     LobbyChatSend { text :: Text }
   | -- | Create a new game slot. Server replies with 'LobbyGameCreated'.
+    -- 'allowSpectators' is optional: if absent, the server defaults to
+    -- True for public games and False for private ones.
     LobbyCreateGame
       { name :: Text
       , visibility :: Visibility
       , password :: Maybe Text
+      , allowSpectators :: Maybe Bool
       }
   | -- | Join a public game (no password needed). Reply: 'LobbyGameJoinOk'.
     LobbyJoinPublic { gameId :: UUID }
