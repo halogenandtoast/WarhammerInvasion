@@ -158,7 +158,6 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
   <main class="decks-page">
     <header class="page-head">
       <div>
-        <p class="eyebrow">{{ t('decks.list.eyebrow') }}</p>
         <h1>{{ t('decks.list.heading') }}</h1>
         <p class="lead">{{ t('decks.list.lead') }}</p>
       </div>
