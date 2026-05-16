@@ -11,6 +11,7 @@ import type {
   LogEntry,
   Phase,
   PlayerKey,
+  Race,
   SeatView,
 } from '../api/protocol'
 import { priorityHolder } from '../api/protocol'
@@ -274,6 +275,25 @@ function seatOf(userId: string): PlayerKey | null {
   const seat = view.value?.seats.find((s) => s.user.userId === userId)
   if (!seat) return null
   return seat.seat === 'Player1' ? 'Player1' : 'Player2'
+}
+
+const RACE_SLUG: Record<Race, string> = {
+  Empire: 'empire',
+  Dwarf: 'dwarf',
+  HighElf: 'high-elf',
+  Chaos: 'chaos',
+  Orc: 'orc',
+  DarkElf: 'dark-elf',
+}
+
+// CSS class for chat/seat tinting derived from the player's actual
+// race. Null when the speaker isn't a seated player or the engine
+// hasn't sent a snapshot yet — caller falls back to neutral styling.
+function raceClassOf(userId: string): string | null {
+  const seat = seatOf(userId)
+  if (!seat || !engine.value) return null
+  const player = seat === 'Player1' ? engine.value.player1 : engine.value.player2
+  return `race-${RACE_SLUG[player.race]}`
 }
 
 // Resolve a player key in a log param to that player's display name,
@@ -564,11 +584,7 @@ function formatTime(at: string): string {
                 <li
                   v-else
                   class="chat-line"
-                  :class="seatOf(msg.line.from.userId) === 'Player1'
-                    ? 'seat-player1'
-                    : seatOf(msg.line.from.userId) === 'Player2'
-                      ? 'seat-player2'
-                      : null"
+                  :class="raceClassOf(msg.line.from.userId)"
                 >
                   <div class="chat-meta">
                     <span class="chat-author">{{ msg.line.from.displayName }}</span>
@@ -1067,10 +1083,12 @@ function formatTime(at: string): string {
 /* Player chat needs to read as "someone is talking" against the
    engine's terse transcript, so it gets its own card-style block with
    a tinted background, accent rule, and slightly larger body text.
-   Each seat gets its own hue (overrides below) so the two players are
-   visually separable at a glance. */
+   The race-* overrides below paint the line in the speaker's faction
+   palette — hue + tint + ring + a brighter author shade — so the two
+   players are visually separable at a glance and tied to their race. */
 .chat-line {
   --chat-hue: var(--accent);
+  --chat-author: var(--accent-strong);
   --chat-bg: rgba(196, 99, 74, 0.10);
   --chat-ring: rgba(196, 99, 74, 0.18);
   display: flex;
@@ -1083,18 +1101,43 @@ function formatTime(at: string): string {
   border-radius: var(--radius-sm);
   box-shadow: 0 0 0 1px var(--chat-ring);
 }
-.chat-line.seat-player1 {
+.chat-line.race-empire {
   --chat-hue: var(--race-empire);
-  --chat-bg: rgba(212, 179, 87, 0.12);
-  --chat-ring: rgba(212, 179, 87, 0.22);
+  --chat-author: var(--race-empire-strong);
+  --chat-bg: var(--race-empire-tint);
+  --chat-ring: var(--race-empire-ring);
 }
-.chat-line.seat-player2 {
+.chat-line.race-dwarf {
+  --chat-hue: var(--race-dwarf);
+  --chat-author: var(--race-dwarf-strong);
+  --chat-bg: var(--race-dwarf-tint);
+  --chat-ring: var(--race-dwarf-ring);
+}
+.chat-line.race-high-elf {
   --chat-hue: var(--race-high-elf);
-  --chat-bg: rgba(95, 160, 214, 0.12);
-  --chat-ring: rgba(95, 160, 214, 0.22);
+  --chat-author: var(--race-high-elf-strong);
+  --chat-bg: var(--race-high-elf-tint);
+  --chat-ring: var(--race-high-elf-ring);
 }
-.chat-line.seat-player1 .chat-author { color: var(--race-empire); }
-.chat-line.seat-player2 .chat-author { color: var(--race-high-elf); }
+.chat-line.race-chaos {
+  --chat-hue: var(--race-chaos);
+  --chat-author: var(--race-chaos-strong);
+  --chat-bg: var(--race-chaos-tint);
+  --chat-ring: var(--race-chaos-ring);
+}
+.chat-line.race-orc {
+  --chat-hue: var(--race-orc);
+  --chat-author: var(--race-orc-strong);
+  --chat-bg: var(--race-orc-tint);
+  --chat-ring: var(--race-orc-ring);
+}
+.chat-line.race-dark-elf {
+  --chat-hue: var(--race-dark-elf);
+  --chat-author: var(--race-dark-elf-strong);
+  --chat-bg: var(--race-dark-elf-tint);
+  --chat-ring: var(--race-dark-elf-ring);
+}
+.chat-line .chat-author { color: var(--chat-author); }
 .chat-meta { display: flex; align-items: baseline; gap: 0.4rem; }
 .chat-author {
   font-weight: 600;

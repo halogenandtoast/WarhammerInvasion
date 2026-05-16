@@ -40,13 +40,46 @@
   --faction-order: #6e9bd1;
   --faction-destruction: var(--accent);
 
-  /* Races */
+  /*
+   * Races — each race gets a four-tone palette used to colour anything
+   * tied to a specific player (chat hue, capital trim, seat accents):
+   *   base    — the canonical hue (text accents, borders, fills)
+   *   strong  — brighter shade for emphasis (author names, hover)
+   *   tint    — low-alpha fill for backgrounds
+   *   ring    — low-alpha border companion to `tint`
+   * The base value is the historical race colour; component CSS that
+   * already reads `--race-X` keeps working.
+   */
   --race-empire: #d4b357;
+  --race-empire-strong: #efce72;
+  --race-empire-tint: rgba(212, 179, 87, 0.13);
+  --race-empire-ring: rgba(212, 179, 87, 0.32);
+
   --race-dwarf: #c47d3a;
+  --race-dwarf-strong: #e09454;
+  --race-dwarf-tint: rgba(196, 125, 58, 0.14);
+  --race-dwarf-ring: rgba(196, 125, 58, 0.34);
+
   --race-high-elf: #5fa0d6;
+  --race-high-elf-strong: #82bbe9;
+  --race-high-elf-tint: rgba(95, 160, 214, 0.13);
+  --race-high-elf-ring: rgba(95, 160, 214, 0.32);
+
   --race-chaos: #8a2c4f;
+  --race-chaos-strong: #c44671;
+  --race-chaos-tint: rgba(138, 44, 79, 0.20);
+  --race-chaos-ring: rgba(138, 44, 79, 0.44);
+
   --race-orc: #5c923f;
+  --race-orc-strong: #7fb95e;
+  --race-orc-tint: rgba(92, 146, 63, 0.14);
+  --race-orc-ring: rgba(92, 146, 63, 0.34);
+
   --race-dark-elf: #6e3f93;
+  --race-dark-elf-strong: #9c6cc3;
+  --race-dark-elf-tint: rgba(110, 63, 147, 0.18);
+  --race-dark-elf-ring: rgba(110, 63, 147, 0.40);
+
   --race-neutral: #777777;
 
   /* Radii */
