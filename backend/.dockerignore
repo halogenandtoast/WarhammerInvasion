@@ -1,0 +1,6 @@
+.stack-work/
+.git/
+.DS_Store
+*~
+*.local
+dist-newstyle/

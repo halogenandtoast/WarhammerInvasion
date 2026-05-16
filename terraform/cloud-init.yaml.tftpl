@@ -1,0 +1,54 @@
+#cloud-config
+# Bootstraps a DigitalOcean "Docker on Ubuntu" droplet to run the
+# Warhammer: Invasion docker-compose stack. The marketplace image already
+# has docker + the compose plugin installed; we just need git, swap, and
+# a systemd unit that runs `docker compose up`.
+
+package_update: true
+package_upgrade: false
+packages:
+  - git
+
+write_files:
+  - path: /etc/systemd/system/whi.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Warhammer Invasion (docker compose)
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/whi
+      EnvironmentFile=/etc/whi.env
+      ExecStart=/usr/bin/docker compose up -d --build
+      ExecStop=/usr/bin/docker compose down
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/whi.env
+    permissions: "0644"
+    content: |
+      WHI_IDLE_TTL_SECONDS=${whi_idle_ttl_seconds}
+      WHI_DEBUG=${whi_debug}
+
+runcmd:
+  # Swap — Haskell compilation OOMs on small droplets.
+  - |
+    if [ ! -f /swapfile ]; then
+      fallocate -l ${swap_size_gb}G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$((${swap_size_gb} * 1024))
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+  # Clone source.
+  - install -d -m 0755 /opt/whi
+  - git clone --depth 1 --branch ${repo_branch} ${repo_url} /opt/whi
+  # Build + run via systemd. The first build is slow (Haskell deps).
+  - systemctl daemon-reload
+  - systemctl enable --now whi.service

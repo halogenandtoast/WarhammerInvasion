@@ -150,8 +150,10 @@ function unique<T>(xs: T[]): T[] {
   return Array.from(new Set(xs))
 }
 
+const assetsBaseUrl = import.meta.env.VITE_ASSETS_BASE_URL ?? ''
+
 function imageUrl(c: Card): string | null {
-  return c.image ? `/cards/${c.image}` : null
+  return c.image ? `${assetsBaseUrl}/cards/${c.image}` : null
 }
 
 function raceClass(race: Race | null): string {

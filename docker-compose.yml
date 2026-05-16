@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    image: whi-backend:latest
+    container_name: whi-backend
+    environment:
+      PORT: "3000"
+      WHI_IDLE_TTL_SECONDS: "${WHI_IDLE_TTL_SECONDS:-300}"
+      WHI_DEBUG: "${WHI_DEBUG:-0}"
+      WHI_ALLOW_OVERWRITE: "${WHI_ALLOW_OVERWRITE:-0}"
+    restart: unless-stopped
+    expose:
+      - "3000"
+
+  frontend:
+    build:
+      context: ./frontend
+    image: whi-frontend:latest
+    container_name: whi-frontend
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    restart: unless-stopped

@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars and edit. Do NOT commit terraform.tfvars.
+
+# DigitalOcean API token. Prefer `export DIGITALOCEAN_TOKEN=...` and omit this.
+do_token = "dop_v1_..."
+
+# Public key to authorize on the droplet.
+ssh_public_key = "ssh-ed25519 AAAA... you@host"
+
+# Git URL the droplet clones on first boot. Public repo or a URL that embeds
+# a deploy token — there is no SSH agent forwarding into the droplet.
+repo_url    = "https://github.com/youruser/WarhammerInvasion.git"
+repo_branch = "main"
+
+# Optional tweaks.
+# region            = "nyc3"
+# droplet_size      = "s-2vcpu-2gb"
+# ssh_allowed_cidrs = ["203.0.113.4/32"]
+# whi_debug         = "0"
+
+# --- AWS (card-asset CDN) ----------------------------------------------------
+# AWS credentials are read from the standard provider chain (env vars, shared
+# config, instance profile) — don't set them here.
+# aws_region         = "us-east-1"
+# assets_bucket_name = "warhammer-invasion-assets"
