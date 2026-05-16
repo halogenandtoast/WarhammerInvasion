@@ -140,6 +140,15 @@ watch(
     if (!v) {
       game.disconnect()
       emit('navigate', '#/login')
+    } else {
+      // Auth bootstrap completed after this view mounted (refresh on a
+      // game URL). The initial connect call bailed because the access
+      // token wasn't ready yet — try again now.
+      game.connect({
+        gameId: props.gameId,
+        inviteToken: props.inviteToken,
+        password: props.password,
+      })
     }
   },
 )
