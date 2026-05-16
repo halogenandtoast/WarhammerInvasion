@@ -1,0 +1,605 @@
+app:
+  brand: "Warhammer: Invasion"
+  nav:
+    primary_label: Primary
+    rules: Rules
+    cards: Cards
+
+rules:
+  page_title: Rules
+  page_title_full: "Warhammer: Invasion — Rules"
+  toc_label: Table of contents
+  toc_mobile_summary: Table of contents
+  lead: >
+    A two-player duelling game where you raise armies, send heroes on
+    quests, and burn the sections of your opponent's capital. First
+    player to set fire to two of the three sections of their opponent's
+    capital wins.
+
+  sections:
+    overview: Overview
+    structure: Game structure
+    setup: Setup
+    deckbuilding: Deckbuilding
+    cards: Cards
+    turn: Turn sequence
+    combat: Combat
+    effects: Effects
+    keywords: Keywords
+    corruption: Corruption & sacrifice
+    control: Control & ownership
+    draft: Draft variant
+    glossary: Glossary
+
+  overview:
+    heading: 1. Overview
+    intro: >
+      Each player commands a <strong>capital</strong> divided into three
+      zones — the <em>kingdom</em>, the <em>quest zone</em>, and the
+      <em>battlefield</em>. Cards from the Old World are played into
+      these zones to gather resources, draw more cards, and march on the
+      enemy.
+    winning_heading: Winning
+    winning_burn: "Burn <strong>two of the three</strong> sections of your opponent's capital, or"
+    winning_decking: force your opponent to run out of cards in their deck (immediate elimination).
+    golden_heading: The Golden Rule
+    golden_text: >
+      If the rules text of a card contradicts the text of this rulebook,
+      the rules on the card take precedence.
+
+  structure:
+    heading: 2. Game structure
+    zones_heading: Zones
+    zones_intro: >
+      Each player has three zones. Each zone starts at
+      <strong>8 hit points</strong> (raised by <em>developments</em>, see
+      Cards).
+    zone_table:
+      col_zone: Zone
+      col_base_power: Base power
+      col_role: Role
+      kingdom: Kingdom
+      kingdom_power: "3"
+      kingdom_role: Produces resources during the Kingdom phase.
+      quest: Quest zone
+      quest_power: "1"
+      quest_role: Draws cards during the Quest phase. Quests live here.
+      battlefield: Battlefield
+      battlefield_power: "—"
+      battlefield_role: Units stationed here attack the opponent during the Battlefield phase.
+    power_intro: >
+      In the Kingdom and Quest phases, the active player counts the
+      total <strong>power</strong> in the relevant zone — the capital's
+      base power plus the power icons on cards in that zone — and
+      collects that many resources or draws that many cards. Battlefield
+      damage is counted differently: only units that actually
+      participate in an attack contribute their power icons (see
+      <a href="#combat" data-jump="combat">Combat</a>).
+    races_heading: Races and factions
+    races_intro: Six races, split into two factions. Cards from different factions cannot share a deck.
+    order: Order
+    destruction: Destruction
+    race_empire: Empire
+    race_dwarf: Dwarf
+    race_high_elf: High Elf
+    race_chaos: Chaos
+    race_orc: Orc
+    race_dark_elf: Dark Elf
+    neutral: >
+      <strong>Neutral</strong> cards (grey border, no race symbol) can be
+      used in either faction unless their text says otherwise.
+
+  setup:
+    heading: 3. Setup
+    shuffle: "<strong>Shuffle decks.</strong> Either player may cut or shuffle the opponent's deck."
+    capital_boards: "<strong>Place capital boards</strong> in front of each player."
+    pool_tokens: "<strong>Pool tokens</strong> (resource, damage, burn) in the centre of the play area."
+    first_player: "<strong>Determine first player</strong> randomly (coin flip or similar)."
+    draw_seven: >
+      <strong>Draw 7 cards</strong> as your starting hand. Either player
+      may take one <em>mulligan</em>: shuffle those 7 back in and redraw
+      a new hand of 7. The second hand is final.
+
+  deckbuilding:
+    heading: 4. Deckbuilding
+    min_max: "Minimum <strong>50 cards</strong>, maximum <strong>100 cards</strong>."
+    max_copies: "No more than <strong>3 copies</strong> of any card by title."
+    no_mixing: Order and Destruction cards cannot share a deck.
+    races_within: You may mix races within a faction; doing so makes loyalty management harder.
+    race_flavours_heading: Race flavours
+    race_dwarf: Dwarf
+    race_dwarf_desc: Tough and resilient, with strong armour and a lot of hit points. Builders — perform best when their zones are well developed.
+    race_empire: Empire
+    race_empire_desc: Strong tacticians who rely on mobility and being in the right place at the right time to defeat their enemies.
+    race_high_elf: High Elf
+    race_high_elf_desc: Order race included in the core set; released in force in later expansions.
+    race_orc: Orc
+    race_orc_desc: Best when they can outswarm an enemy. Simple strategy — destroy everything in their path (sometimes including their own units). More likely to destroy opponents' developments than to develop their own zones.
+    race_chaos: Chaos
+    race_chaos_desc: Well-rounded faction that takes pleasure in killing its enemies. Corrupting enemy units, then overrunning those zones with a fierce assault, is a favourite Chaos tactic.
+    race_dark_elf: Dark Elf
+    race_dark_elf_desc: Destruction race included in the core set; released in force in later expansions.
+    loyalty_heading: Loyalty
+    loyalty_text: >
+      A card's <em>loyalty cost</em> is the number of loyalty icons
+      under its printed cost. It is reduced (to a floor of zero) by the
+      number of matching race symbols you control in play. Each capital
+      board provides one race symbol for its faction.
+    loyalty_formula: "total_cost = printed_cost + max(0, loyalty_icons - matching_race_symbols)"
+    loyalty_example: >
+      <strong>Example.</strong> Thyrus Gorman has a printed cost of 3
+      and 3 Empire loyalty icons. If Kris controls 2 Empire race symbols
+      in play, the card's loyalty cost is
+      <code>max(0, 3 − 2) = 1</code>, so the total cost is
+      <code>3 + 1 = 4</code> resources.
+
+  cards:
+    heading: 5. Cards
+    types_heading: The five card types
+    type_table:
+      col_type: Type
+      col_persistent: Persistent?
+      col_notes: Notes
+      yes: "Yes"
+      no: "No"
+      na: n/a
+      unit: Unit
+      unit_notes: Attack, defend, quest, or produce resources.
+      support: Support
+      support_notes: Buildings, weapons, attachments. Stay in play until destroyed.
+      tactic: Tactic
+      tactic_notes: Single-shot. Played from hand, resolves, discarded.
+      quest: Quest
+      quest_notes: Lives in the quest zone; a unit may be sent on it.
+      draft: Draft format
+      draft_notes: Used only during the draft variant; never enters a deck.
+    attachments_note: "<strong>Attachments:</strong> a support card attached to another card is sacrificed when its host leaves play."
+    anatomy_heading: Anatomy of a card
+    anatomy:
+      title: "<strong>Title.</strong> A banner before the title marks the card as <em>unique</em>."
+      cost: "<strong>Cost.</strong> Printed resource cost (upper left)."
+      race: "<strong>Race symbol.</strong>"
+      loyalty: "<strong>Loyalty icons.</strong> Additional variable cost, reduced by matching race symbols you control."
+      power: "<strong>Power icons.</strong> Resources in kingdom, cards drawn in quest, damage in battlefield."
+      card_type: "<strong>Card type.</strong>"
+      hp: "<strong>Hit points</strong> (units only)."
+      traits: "<strong>Traits.</strong> Flavor tags with no inherent rules (e.g. Warrior, Spell, Building)."
+      text: "<strong>Card text.</strong> The card's unique effects."
+      collector: "<strong>Collector info.</strong>"
+    unique_heading: Unique cards
+    unique_text: >
+      If a player has a copy of a unique card in play, they cannot
+      <strong>play, take control of, or put into play (via a card
+      effect)</strong> another copy of that card. It is possible,
+      however, for both players to each have their own copy of the same
+      unique card in play at the same time. A unique card in a player's
+      discard pile does not prevent that player from playing another
+      copy under the normal rules.
+    developments_heading: Developments
+    developments_text: >
+      During the Capital phase, the active player may play
+      <strong>one</strong> card from hand face-down as a
+      <em>development</em> into any of their three zones. Each
+      development adds <strong>+1 HP</strong> to that zone. You may
+      inspect your own developments at any time, but not your
+      opponent's.
+    quest_heading: Sending a unit on a quest
+    quest_text_1: >
+      Quest cards are played from your hand into your quest zone in the
+      same manner as unit and support cards. Once a quest is in play,
+      its controller may send units on it: when you play a unit during
+      the Capital phase, you may play it directly on top of a quest
+      card already in your quest zone. The questing unit is still
+      considered part of your quest zone — it contributes power and can
+      defend that zone — but it is also <em>questing</em> on the quest
+      it was played onto.
+    quest_text_2: >
+      A questing unit allows resource tokens to accumulate on the
+      quest. Once the specified number of resources has accumulated,
+      the quest's effect can be used by its controller. These tokens
+      come from the central pool, and are not subtracted from the
+      resources collected during the Kingdom phase. <strong>Resource
+      tokens on a quest card cannot be used for anything other than the
+      effects of that quest card.</strong>
+    quest_text_3: >
+      Only one unit can be questing on any given quest card at a time.
+      If the questing unit leaves play for any reason, the quest card
+      remains in play but all resource tokens accumulated on it are
+      discarded and returned to the central pool.
+
+  turn:
+    heading: 6. Turn sequence
+    intro: >
+      The active player completes all four phases in order before
+      passing the turn. Every phase has one or more <em>action
+      windows</em> where both players may take actions; the engine
+      advances only after both players pass consecutively.
+    kingdom_heading: Kingdom
+    kingdom_text: >
+      Active player returns all unspent resources to the pool, may
+      <strong>restore one</strong> corrupt card they control, then
+      collects resources equal to the total power in their kingdom
+      (base 3 + power icons in that zone).
+    quest_heading: Quest
+    quest_text: >
+      Active player draws cards equal to the total power in their quest
+      zone (base 1 + power icons there).
+    capital_heading: Capital
+    capital_text: >
+      The only phase in which the active player may play unit, support,
+      and quest cards from their hand. They may also play one card
+      face-down as a development. <strong>Playing a unit, support, or
+      quest card from hand — or playing a development — is itself
+      considered taking an action</strong> for the action-window pass
+      count. The non-active player may still play tactics and trigger
+      card abilities. The phase ends when both players consecutively
+      pass.
+    battlefield_heading: Battlefield
+    battlefield_text: >
+      The active player may attack one of the opponent's three zones.
+      See <a href="#combat" data-jump="combat">Combat</a> for the
+      five-step procedure.
+    first_player_penalty: >
+      <strong>First player penalty.</strong> On the <em>very first</em>
+      turn of the game, the starting player skips Quest and Battlefield
+      entirely. This applies only to turn 1, only to player 1.
+
+  combat:
+    heading: 7. Combat
+    intro: >
+      The Battlefield phase is a five-step procedure. <strong>Each step
+      is followed by an action window</strong>; the engine advances
+      only after both players pass.
+    declare_target_heading: Declare target of attack
+    declare_target_text: The active player picks one of the opponent's three zones to attack.
+    declare_attackers_heading: Declare attackers
+    declare_attackers_text: >
+      The active player chooses any subset of units in their own
+      battlefield to attack. Only battlefield units may attack. Corrupt
+      units cannot attack.
+    declare_defenders_heading: Declare defenders
+    declare_defenders_text: >
+      The defending player chooses any subset of their units in the
+      attacked zone to defend. Combat is not per-unit pairing — all
+      attackers attack together, all defenders defend together. Corrupt
+      units cannot defend.
+    assign_damage_heading: Assign damage
+    assign_damage_text: >
+      Each side's inflicted damage equals the total power of its
+      participating units. The attacker assigns first and must cover
+      defending units' remaining HP before damage can spill over onto
+      the capital. The defender assigns next, only to attacking units —
+      defenders <strong>cannot damage the attacker's capital</strong>.
+      Either side may over-assign damage to a single unit in
+      anticipation of Toughness or cancellation.
+    assign_damage_hint: >
+      Damage at this step is <em>assigned</em>, not yet committed.
+      Tokens are placed near their targets and can still be cancelled.
+    apply_damage_heading: Apply damage
+    apply_damage_text: >
+      Both sides commit assigned damage simultaneously to all units and
+      capitals. Toughness and other cancellation effects fire here; any
+      damage tokens they cancel are returned to the central pool before
+      damage lands. Units at or over their HP are destroyed and placed
+      in their owner's discard pile. A capital section reaching zero
+      remaining HP <strong>burns</strong>: all damage tokens are
+      removed from that section, a burn token is placed, and that
+      section is overrun. A player wins immediately as soon as two of
+      their opponent's three sections are burning.
+    counterstrike_callout: >
+      <strong>Counterstrike is the exception.</strong> A unit with
+      <code>Counterstrike N</code> deals N <em>uncancellable</em>
+      damage to a single attacker the instant it is declared as a
+      defender (in step 3), before regular damage is assigned. It still
+      also fights normally in steps 4 and 5.
+    non_combat_heading: Non-combat damage
+    non_combat_text: >
+      Some card effects deal damage to units or to a player's capital
+      <em>outside</em> of combat. When these effects resolve, that
+      damage is first <em>assigned</em> and then <em>applied</em>, in
+      the same two-step manner as combat damage — so Toughness and
+      other cancellation effects still get a chance to fire before it
+      lands. The one exception is <code>Counterstrike</code>:
+      counterstrike damage is always applied as soon as it is assigned.
+
+  effects:
+    heading: 8. Effects
+    intro: Card effects come in four shapes. The first three are described here; keywords are in the next section.
+    action_heading: Action
+    action_text: >
+      Marked <code>Action:</code> on a card. Optional. Triggerable by
+      either player during any action window. Tactic cards are
+      themselves actions — played from hand into the discard pile.
+    forced_heading: Forced
+    forced_text: >
+      Marked <code>Forced:</code>. Triggers automatically when its
+      condition is met. Cannot be cancelled or interrupted, and
+      resolves immediately.
+    constant_heading: Constant
+    constant_text: >
+      Card text without a bold trigger. Continuously affects the game
+      state while the card is in play and any stated condition holds.
+    response_heading: Playing an action "in response"
+    response_text: >
+      Actions can be triggered in response to other actions. They
+      resolve <strong>last-in, first-out</strong>: the most recent
+      response resolves first, and players then work back through the
+      chain to the original action. All costs are paid and targets
+      chosen at the time the action is triggered, regardless of when it
+      actually resolves. Once an effect is in the chain it resolves
+      even if its source leaves play — the only way to avoid it is to
+      remove the effect's <em>target</em> from play, or to cancel the
+      effect with another action.
+    response_example: >
+      <strong>Example.</strong> Tom plays the tactic <em>Pillage</em>
+      (<code>Action: Destroy one target support card.</code>) from his
+      hand, targeting Kris's Grudge Thrower. Kris triggers the Grudge
+      Thrower's own action ability "in response." The Grudge Thrower's
+      ability resolves first; <em>then</em> Pillage resolves — even
+      though Pillage was the original action.
+
+  keywords:
+    heading: 9. Keywords
+    counterstrike_term: Counterstrike N
+    counterstrike_def: >
+      On being declared a defender, deal N uncancellable damage to one
+      attacker of the defender's choice. Applied immediately, before
+      regular damage. Does not consume the unit's normal combat damage.
+    toughness_term: Toughness N
+    toughness_def: >
+      Cancel N damage assigned to this unit before it is applied.
+      Stacks additively across sources. Does not affect damage tagged
+      <em>uncancellable</em>.
+    scout_term: Scout
+    scout_def: >
+      After combat damage is applied, each surviving participating
+      Scout unit forces the opponent to discard one random card from
+      hand.
+    zone_only_term: Kingdom / Quest / Battlefield only
+    zone_only_def: >
+      Restricts the zone the card may enter play in. Once in play, card
+      effects can still move it to another zone.
+    zone_prefixed_term: Zone-prefixed effects
+    zone_prefixed_def: >
+      An effect prefixed with an italicised zone name
+      (<em>Kingdom.</em>, <em>Quest.</em>, <em>Battlefield.</em>) is
+      active only while the card is in that zone.
+    limited_term: Limited
+    limited_def: You may play at most one card with the Limited keyword per turn.
+    order_destruction_term: Order Only / Destruction Only
+    order_destruction_def: Restricts an otherwise-neutral card to a single faction.
+
+  corruption:
+    heading: 10. Corruption & sacrifice
+    corruption_heading: Corruption
+    corruption_text: >
+      Some effects <em>corrupt</em> a card — physically, you turn it 90
+      degrees. A corrupt card cannot be declared as an attacker or
+      defender. At the start of their Kingdom phase, before any
+      actions, the active player may <strong>restore one</strong> of
+      their corrupt cards by turning it back upright. One restoration
+      per turn.
+    sacrifice_heading: Sacrifice
+    sacrifice_text: >
+      When a player is instructed to sacrifice a card, it goes to its
+      <em>owner's</em> discard pile. Sacrifice is
+      <strong>absolute</strong>; it cannot be cancelled by any other
+      effect. Attachments are automatically sacrificed when their host
+      card leaves play.
+    cannot_heading: "\"Cannot\" is absolute"
+    cannot_text: >
+      If an effect says <code>cannot</code>, it overrides anything that
+      says otherwise. <em>Attached unit cannot be corrupted</em> beats
+      <em>Action: Corrupt one target unit</em>.
+
+  control:
+    heading: 11. Control & ownership
+    text: >
+      The <strong>owner</strong> of a card is the player whose deck it
+      began in. The <strong>controller</strong> is whoever currently
+      controls it — usually the owner, unless an effect has stolen
+      control. When a card leaves play, it returns to its
+      <em>owner's</em> hand, deck, or discard pile as the effect
+      dictates.
+    corresponding_heading: Corresponding zones
+    corresponding_text: >
+      When a card refers to an opponent's "corresponding zone," it
+      means the opponent's zone of the same name as the one the card
+      currently occupies. A Battlefield unit referring to "the
+      opponent's corresponding zone" means the opponent's battlefield.
+    decking_heading: Running out of cards
+    decking_text: >
+      If at any time a player has no cards in their deck, that player
+      is <strong>immediately eliminated</strong> from the game.
+
+  draft:
+    heading: 12. Draft variant
+    intro: >
+      Draft is an alternative 2-player play variant. Players draft
+      their decks from randomly assembled packs of cards while trying
+      to thwart their opponent's deckbuilding plans.
+    setup_heading: Setting up the draft
+    setup_1: >
+      Build two <strong>draft piles</strong>: one containing all Dwarf,
+      Empire, and High Elf cards plus the three Order treaties; the
+      other containing all Orc, Chaos, and Dark Elf cards plus the
+      three Destruction treaties.
+    setup_2: Shuffle the neutral cards and deal 10 into each draft pile.
+    setup_3: >
+      Each player takes one set of 10 <em>draft format</em> cards and
+      adds them to the draft pile of the side they will play.
+    setup_4: >
+      Decide who plays which side (Order or Destruction); either by
+      agreement or randomly. Each player thoroughly shuffles their
+      draft pile.
+    pack_heading: How a draft pack works
+    pack_intro: >
+      Each round, each player takes the top <strong>15 cards</strong>
+      of their draft pile to form a <em>draft pack</em>. From a pack:
+    pack_1: >
+      Looking at the cards in their own pack, each player picks
+      <strong>2 cards</strong> face-down in front of themselves. These
+      two cards form the start of their deck. If any draft format cards
+      were selected, they are revealed now and their effects resolve.
+    pack_2: >
+      The packs are <strong>traded</strong>. Each player
+      <em>counterdrafts</em> 1 card from the opponent's pack — that
+      card is revealed and placed in a discard pile, denying it to the
+      opponent. (Counterdrafted draft format cards take effect now.)
+    pack_3: Packs are traded back to their owners. Each player picks 2 more cards from their own pack.
+    pack_4: >
+      Steps 2 and 3 repeat. In total, a player picks 2 cards from their
+      own pack <strong>four times</strong> and counterdrafts one card
+      from the opponent's pack <strong>three times</strong>. The cards
+      remaining in each pack are then discarded.
+    pack_outro: >
+      Each player drafts <strong>five packs</strong> in this manner,
+      ending with a deck of roughly 40 cards. The decks are then used
+      to play a normal game with the standard rules.
+    short_pack: >
+      <strong>Short pack.</strong> If a pack runs out of cards before a
+      player has picked 8 from it, that pack is simply complete. The
+      player resumes adding cards to their deck when the next set of
+      draft packs is created.
+    format_heading: Draft format cards
+    format_intro: >
+      Draft format cards never enter a player's deck. They provide
+      effects that resolve completely while the players are drafting,
+      and they take effect when picked from a player's draft pack or
+      when counterdrafted from the opponent's pack. The Core Set
+      contains two identical sets of draft format cards (numbered
+      128–131).
+    cut_supply_term: Cut Supply Lines (×3 per set)
+    cut_supply_def: >
+      When picked or counterdrafted, the selecting player places this
+      card next to the opponent's draft pile. For the remainder of the
+      game, that opponent draws <strong>1 fewer card</strong> each time
+      they create a new draft pack.
+    reinforcements_term: Reinforcements (×3 per set)
+    reinforcements_def: >
+      When picked or counterdrafted, the selecting player sacrifices
+      this card and looks at the top 5 cards of their draft pile. They
+      add one of those cards to their deck and place the other four at
+      the bottom of their draft pile.
+    sabotage_term: Sabotage (×3 per set)
+    sabotage_def: >
+      When picked or counterdrafted, the selecting player places this
+      card face-up next to their deck. Any time that player is
+      counterdrafting a card from the opponent's pack, they may
+      <strong>sacrifice Sabotage to counterdraft an additional
+      card</strong> from that pack.
+    shifting_tides_term: Shifting Tides (×1 per set)
+    shifting_tides_def: >
+      When picked or counterdrafted, this card is immediately
+      sacrificed. Then the pack it was selected from is shuffled back
+      into its owner's draft pile and replaced with an equal number of
+      fresh cards. If picked simultaneously with another draft format
+      card, Shifting Tides always resolves first.
+
+  glossary:
+    heading: 13. Glossary
+    action_term: Action
+    action_def: "Optional <code>Action:</code> effect; triggerable in any action window."
+    action_window_term: Action window
+    action_window_def: A pause between phase steps where either player may take actions. The engine advances only after both pass consecutively.
+    active_player_term: Active player
+    active_player_def: The player whose turn it currently is.
+    applied_damage_term: Applied damage
+    applied_damage_def: Damage committed to a target. Toughness fires here.
+    assigned_damage_term: Assigned damage
+    assigned_damage_def: Damage placed near a target but not yet committed; still cancellable.
+    attachment_term: Attachment
+    attachment_def: A support card attached to another card. Sacrificed when its host leaves play.
+    burn_token_term: Burn token
+    burn_token_def: Placed on an overrun capital section. Two burns on one player ends the game.
+    capital_term: Capital
+    capital_def: "A player's three-zone area: kingdom, quest zone, battlefield."
+    constant_effect_term: Constant effect
+    constant_effect_def: Card text without a bold trigger; active while the card is in play.
+    controller_term: Controller
+    controller_def: The player currently in control of a card. Defaults to the owner.
+    corrupt_term: Corrupt
+    corrupt_def: Flagged so as to be unable to attack or defend. Restored at most once per Kingdom phase.
+    development_term: Development
+    development_def: Face-down card in a zone, adding +1 HP. Max one per turn.
+    forced_effect_term: Forced effect
+    forced_effect_def: "<code>Forced:</code> effect; fires automatically, cannot be cancelled."
+    loyalty_term: Loyalty
+    loyalty_def: Variable cost portion paid in resources; reduced by matching race symbols, floor of zero.
+    non_combat_damage_term: Non-combat damage
+    non_combat_damage_def: Damage dealt to units or capitals outside of combat (e.g. by card effects). Assigned then applied just like combat damage; Counterstrike is the only damage source that bypasses the two-step process.
+    owner_term: Owner
+    owner_def: The player whose deck the card began in; cards revert here on leaving play.
+    power_icon_term: Power icon
+    power_icon_def: "Symbol on a card. In Kingdom → resources, Quest → draw, Battlefield → damage."
+    quest_term: Quest
+    quest_def: Persistent card in the quest zone; accumulates resources via a questing unit.
+    sacrifice_term: Sacrifice
+    sacrifice_def: "Send a card to its owner's discard pile. Absolute; cannot be cancelled."
+    trait_term: Trait
+    trait_def: "Flavor tag (Warrior, Hero, Spell, Building, …). No inherent rules."
+    uncancellable_term: Uncancellable damage
+    uncancellable_def: Damage that bypasses Toughness and cancellation effects.
+    unique_card_term: Unique card
+    unique_card_def: Marked with a banner before its title. A player may not control more than one copy at a time.
+    zone_term: Zone
+    zone_def: "One of Kingdom, Quest, Battlefield. Each player has three, each at 8 base HP."
+
+cards:
+  page_title: Card Database
+  eyebrow: "Warhammer: Invasion · Cards"
+  lead: >
+    Browse every card from the released sets, plus fan-made expansions.
+    Some sets ship as stubs (image + name only) — toggle them off to
+    focus on the canonical pool.
+
+  sidebar:
+    aria_label: Browse by cycle and set
+    eyebrow: Browse
+    cycles_heading: Cycles
+    all_cycles: All cycles
+    toggle: ☰ Cycles & sets
+    close_aria: Close sidebar
+
+  filters:
+    aria_label: Filters
+    search_placeholder: Search by name, trait, or text…
+    search_aria: Search cards
+    type_label: Type
+    race_label: Race
+    cost_label: Cost
+    any_type: Any type
+    any_race: Any race
+    any_cost: Any cost
+    include_stubs: Include stubs
+    clear: Clear
+    clear_cycle: Clear cycle
+    clear_set: Clear set
+
+  summary:
+    showing: "Showing {visible} of {total} cards"
+
+  status:
+    loading: Loading cards…
+    load_error: "Failed to load cards: {message}"
+    no_results: No cards match those filters.
+
+  grid:
+    no_image: No image
+    stub_badge: stub
+    stub_title: "Stub: image + name only"
+    load_more: "Load more ({remaining} remaining)"
+
+  modal:
+    aria_close: Close
+    no_image: No image available
+    cost_suffix: " cost"
+    loyalty_prefix: "loyalty "
+    power_prefix: "power "
+    health_prefix: "health "
+    quantity_prefix: "×"
+    stub_note: >
+      This card is a stub — only the image and title were available.
+      Engine text has not been transcribed yet.
+    illustrator: "Illustration · {name}"
+    cycle_suffix: " cycle"

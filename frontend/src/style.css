@@ -1,21 +1,11 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.55;
   font-weight: 400;
 
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #1c1c1f;
-
-  --bg: #1c1c1f;
-  --bg-elev: #232328;
-  --bg-elev-2: #2b2b31;
-  --fg: rgba(255, 255, 255, 0.87);
-  --fg-dim: rgba(255, 255, 255, 0.6);
-  --fg-faint: rgba(255, 255, 255, 0.42);
-  --border: rgba(255, 255, 255, 0.12);
-  --accent: #c4634a;
-  --accent-strong: #e0775e;
+  color: var(--fg);
+  background-color: var(--bg);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -61,25 +51,9 @@ h4 {
 
 code,
 kbd {
-  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
   background: var(--bg-elev-2);
   padding: 0.08em 0.36em;
-  border-radius: 4px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #1c1c1f;
-    background-color: #f6f5f1;
-    --bg: #f6f5f1;
-    --bg-elev: #ffffff;
-    --bg-elev-2: #eceae3;
-    --fg: #1c1c1f;
-    --fg-dim: #4a4a52;
-    --fg-faint: #7d7d85;
-    --border: rgba(0, 0, 0, 0.12);
-    --accent: #a44229;
-    --accent-strong: #8b3621;
-  }
+  border-radius: var(--radius-sm);
 }

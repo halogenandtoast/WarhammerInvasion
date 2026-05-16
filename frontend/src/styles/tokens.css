@@ -1,0 +1,91 @@
+/*
+ * Design tokens — every colour, radius, font stack, and timing used by the
+ * frontend lives here. Components should reference these via var(--token);
+ * never hard-code a colour or magic number in component CSS.
+ *
+ * Dark mode is the default. Light mode overrides the colour tokens; the
+ * structural tokens (radii, fonts, motion, z-index) are scheme-agnostic.
+ */
+
+:root {
+  /* Typography */
+  --font-sans: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* Surfaces */
+  --bg: #1c1c1f;
+  --bg-elev: #232328;
+  --bg-elev-2: #2b2b31;
+
+  /* Text */
+  --fg: rgba(255, 255, 255, 0.87);
+  --fg-dim: rgba(255, 255, 255, 0.6);
+  --fg-faint: rgba(255, 255, 255, 0.42);
+
+  /* Borders */
+  --border: rgba(255, 255, 255, 0.12);
+
+  /* Accent (brand) */
+  --accent: #c4634a;
+  --accent-strong: #e0775e;
+  /* Text/icons on a strong colour fill (accent button, dark overlay scrim) */
+  --on-accent: #ffffff;
+
+  /* Image / modal scrims */
+  --overlay-strong: rgba(0, 0, 0, 0.7);
+  --overlay-medium: rgba(0, 0, 0, 0.6);
+  --overlay-soft: rgba(0, 0, 0, 0.45);
+
+  /* Factions */
+  --faction-order: #6e9bd1;
+  --faction-destruction: var(--accent);
+
+  /* Races */
+  --race-empire: #d4b357;
+  --race-dwarf: #c47d3a;
+  --race-high-elf: #5fa0d6;
+  --race-chaos: #8a2c4f;
+  --race-orc: #5c923f;
+  --race-dark-elf: #6e3f93;
+  --race-neutral: #777777;
+
+  /* Radii */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  /* Mobile tap target floor — see frontend/CLAUDE.md */
+  --tap-target: 44px;
+
+  /* Motion */
+  --transition-fast: 0.08s ease;
+  --transition-base: 0.2s ease;
+
+  /* Layering */
+  --z-toc-mobile: 10;
+  --z-topnav: 50;
+  --z-modal: 100;
+  --z-drawer-scrim: 150;
+  --z-drawer: 200;
+
+  /* Elevation */
+  --shadow-drawer: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f5f1;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #eceae3;
+    --fg: #1c1c1f;
+    --fg-dim: #4a4a52;
+    --fg-faint: #7d7d85;
+    --border: rgba(0, 0, 0, 0.12);
+    --accent: #a44229;
+    --accent-strong: #8b3621;
+  }
+}
