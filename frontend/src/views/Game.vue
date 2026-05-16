@@ -1037,25 +1037,33 @@ function formatTime(at: string): string {
   display: inline-block;
   min-width: 1ch;
   text-align: left;
-  /* Clip the leaving digit as it slides up past the top edge. */
-  overflow: hidden;
   line-height: 1;
 }
 .turn-number {
   display: inline-block;
   will-change: transform, opacity;
 }
+.turn-flip-enter-active {
+  transition: transform 320ms cubic-bezier(0.4, 0, 0.2, 1), opacity 320ms ease;
+}
+.turn-flip-enter-from {
+  opacity: 0;
+  transform: translateY(60%);
+}
 .turn-flip-leave-active {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
   transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1), opacity 420ms ease;
 }
 .turn-flip-leave-to {
-  transform: translateY(-110%);
+  transform: translateY(-120%);
   opacity: 0;
 }
 @media (prefers-reduced-motion: reduce) {
+  .turn-flip-enter-active,
   .turn-flip-leave-active { transition: opacity 120ms ease; }
+  .turn-flip-enter-from { transform: none; }
   .turn-flip-leave-to { transform: none; }
 }
 .active-label {
