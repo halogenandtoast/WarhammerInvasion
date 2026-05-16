@@ -7,6 +7,7 @@ import Login from './views/Login.vue'
 import Register from './views/Register.vue'
 import Decks from './views/Decks.vue'
 import DeckEdit from './views/DeckEdit.vue'
+import DeckView from './views/DeckView.vue'
 import { auth } from './stores/auth'
 
 type Route =
@@ -15,6 +16,7 @@ type Route =
   | { name: 'login' }
   | { name: 'register' }
   | { name: 'decks' }
+  | { name: 'deck-view'; id: string }
   | { name: 'deck-edit'; id: string }
 
 const { t } = useI18n({ useScope: 'global' })
@@ -25,8 +27,10 @@ function parseRoute(): Route {
   if (hash === 'login') return { name: 'login' }
   if (hash === 'register') return { name: 'register' }
   if (hash === 'decks') return { name: 'decks' }
-  const m = /^decks\/([\w-]+)$/.exec(hash)
-  if (m) return { name: 'deck-edit', id: m[1] }
+  const edit = /^decks\/([\w-]+)\/edit$/.exec(hash)
+  if (edit) return { name: 'deck-edit', id: edit[1] }
+  const view = /^decks\/([\w-]+)$/.exec(hash)
+  if (view) return { name: 'deck-view', id: view[1] }
   return { name: 'rules' }
 }
 
@@ -79,6 +83,12 @@ const view = computed(() => {
         return { component: Login, props: {} }
       }
       return { component: Decks, props: {} }
+    case 'deck-view':
+      if (!auth.isAuthenticated.value && auth.ready.value) {
+        navigate('#/login')
+        return { component: Login, props: {} }
+      }
+      return { component: DeckView, props: { deckId: route.value.id } }
     case 'deck-edit':
       if (!auth.isAuthenticated.value && auth.ready.value) {
         navigate('#/login')
@@ -93,7 +103,12 @@ const view = computed(() => {
 const isActive = (key: string): boolean => {
   if (key === 'rules') return route.value.name === 'rules'
   if (key === 'cards') return route.value.name === 'cards'
-  if (key === 'decks') return route.value.name === 'decks' || route.value.name === 'deck-edit'
+  if (key === 'decks')
+    return (
+      route.value.name === 'decks' ||
+      route.value.name === 'deck-view' ||
+      route.value.name === 'deck-edit'
+    )
   return false
 }
 

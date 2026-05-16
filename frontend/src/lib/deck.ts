@@ -229,3 +229,103 @@ export function hasFactionCards(
   }
   return false
 }
+
+const RACE_TO_CAPITAL: Record<Race, Capital | null> = {
+  Empire: 'empire',
+  Dwarf: 'dwarf',
+  'High Elf': 'high_elf',
+  Chaos: 'chaos',
+  Orc: 'orc',
+  'Dark Elf': 'dark_elf',
+  Neutral: null,
+}
+
+export interface ParsedDeckList {
+  /** Card-id → count, ready to drop into a DeckInput. */
+  counts: Record<string, number>
+  /** Total number of cards (sum of counts), including matches only. */
+  total: number
+  /** Suggested capital based on the most-present non-Neutral race. */
+  capital: Capital | null
+  /** Per-race totals across matched cards. */
+  raceCounts: Record<Race, number>
+  /** Card names that didn't match any known card, in input order. */
+  unknown: string[]
+  /** Raw lines that did not parse as `N Name`. */
+  parseErrors: string[]
+}
+
+/**
+ * Parses a pasted deck list of the form `N Name` (one entry per line) into a
+ * deck payload. Blank lines and lines beginning with `#` or `//` are ignored.
+ * Card names are matched case-insensitively against the (non-stub) catalog.
+ * The suggested capital is the one whose race has the highest total count;
+ * ties break in `ALL_CAPITALS` order.
+ */
+export function parseDeckList(text: string, cards: Card[]): ParsedDeckList {
+  const byName = new Map<string, Card>()
+  for (const c of cards) {
+    if (c.stub) continue
+    byName.set(c.name.toLowerCase(), c)
+  }
+
+  const counts: Record<string, number> = {}
+  const unknown: string[] = []
+  const parseErrors: string[] = []
+  const raceCounts: Record<Race, number> = {
+    Empire: 0,
+    Dwarf: 0,
+    'High Elf': 0,
+    Chaos: 0,
+    Orc: 0,
+    'Dark Elf': 0,
+    Neutral: 0,
+  }
+  let total = 0
+
+  // `3 Foo`, `3x Foo`, `3 x Foo`, `3× Foo`.
+  const lineRe = /^\s*(\d+)\s*[xX×]?\s+(.+?)\s*$/
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const trimmed = rawLine.trim()
+    if (!trimmed) continue
+    if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue
+
+    const m = lineRe.exec(rawLine)
+    if (!m) {
+      parseErrors.push(trimmed)
+      continue
+    }
+
+    const count = parseInt(m[1], 10)
+    const name = m[2].trim()
+    if (count <= 0 || !name) {
+      parseErrors.push(trimmed)
+      continue
+    }
+
+    const card = byName.get(name.toLowerCase())
+    if (!card) {
+      unknown.push(name)
+      continue
+    }
+
+    counts[card.id] = (counts[card.id] ?? 0) + count
+    total += count
+    if (card.race) raceCounts[card.race] += count
+  }
+
+  let bestRace: Race | null = null
+  let bestCount = 0
+  for (const cap of ALL_CAPITALS) {
+    const race = raceOfCapital(cap)
+    const n = raceCounts[race]
+    if (n > bestCount) {
+      bestCount = n
+      bestRace = race
+    }
+  }
+  const capital = bestRace ? RACE_TO_CAPITAL[bestRace] : null
+
+  return { counts, total, capital, raceCounts, unknown, parseErrors }
+}

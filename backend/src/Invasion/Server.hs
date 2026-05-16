@@ -64,6 +64,7 @@ import Network.HTTP.Types.Status
   , status404
   , status409
   )
+import Network.Wai (responseLBS)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Web.Cookie (SetCookie (..), defaultSetCookie, parseCookies, sameSiteLax)
@@ -102,6 +103,12 @@ runHandlerDB :: SqlPersistT (NoLoggingT (ResourceT IO)) a -> Handler a
 runHandlerDB action = do
   pool <- (.dbPool) <$> getYesod
   liftIO (runDB pool action)
+
+-- | Send a bodyless 204. 'sendStatusJSON status204' would attach a JSON
+-- body, which RFC 9110 forbids and which the Vite dev proxy refuses to
+-- forward.
+sendNoContent :: Handler a
+sendNoContent = sendWaiResponse (responseLBS status204 [] mempty)
 
 -- ----------------------------------------------------------------------------
 -- Health + game
@@ -204,7 +211,7 @@ postLogoutR = do
         E.where_ (r E.^. RefreshTokenTokenHash E.==. E.val h)
     Nothing -> pure ()
   clearRefreshCookie
-  sendStatusJSON status204 Aeson.Null
+  sendNoContent
 
 getMeR :: Handler Value
 getMeR = do
@@ -321,7 +328,7 @@ deleteDeckR did = do
       | (deckUserId deck) /= uk -> sendStatusJSON status404 (errorObj "not_found")
       | otherwise -> do
           runHandlerDB $ P.delete (DeckKey did)
-          sendStatusJSON status204 Aeson.Null
+          sendNoContent
 
 deckJson :: Entity Deck -> Value
 deckJson (Entity (DeckKey did) d) =

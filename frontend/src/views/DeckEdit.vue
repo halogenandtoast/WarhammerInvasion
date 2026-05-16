@@ -207,6 +207,16 @@ const filtered = computed(() => {
   })
 })
 
+const addedFiltered = computed(() =>
+  filtered.value
+    .filter((c) => (counts.value[c.id] ?? 0) > 0)
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
+
+const availableFiltered = computed(() =>
+  filtered.value.filter((c) => (counts.value[c.id] ?? 0) === 0),
+)
+
 // ----- derived summary -----------------------------------------------------
 
 const summary = computed(() =>
@@ -272,7 +282,7 @@ watch(editingCapital, () => scheduleSave())
 
     <template v-else-if="deck">
       <header class="page-head">
-        <button class="back" type="button" @click="emit('navigate', '#/decks')">
+        <button class="back" type="button" @click="emit('navigate', `#/decks/${deck.id}`)">
           ← {{ t('deck_edit.back') }}
         </button>
         <div class="name-wrap">
@@ -363,42 +373,84 @@ watch(editingCapital, () => scheduleSave())
             </p>
           </div>
 
-          <ul class="grid" role="list">
-            <li
-              v-for="card in filtered"
-              :key="card.id"
-              class="tile"
-              :class="[raceClass(card.race), { blocked: !isCardAllowedInDeck(card, editingCapital) }]"
-            >
-              <div class="img-wrap">
-                <img v-if="imageUrl(card)" :src="imageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
-                <div v-else class="no-img">{{ t('deck_edit.no_image') }}</div>
-                <span v-if="(counts[card.id] ?? 0) > 0" class="badge">
-                  {{ counts[card.id] }} / {{ MAX_COPIES_PER_TITLE }}
-                </span>
-              </div>
-              <div class="tile-foot">
-                <span class="name" :title="card.name">{{ card.name }}</span>
-                <div class="qty">
-                  <button
-                    class="qty-btn"
-                    type="button"
-                    :disabled="(counts[card.id] ?? 0) === 0"
-                    @click="remove(card)"
-                    :aria-label="t('deck_edit.minus_aria', { name: card.name })"
-                  >−</button>
-                  <span class="qty-num">{{ counts[card.id] ?? 0 }}</span>
-                  <button
-                    class="qty-btn"
-                    type="button"
-                    :disabled="(counts[card.id] ?? 0) >= MAX_COPIES_PER_TITLE || !isCardAllowedInDeck(card, editingCapital)"
-                    @click="add(card)"
-                    :aria-label="t('deck_edit.plus_aria', { name: card.name })"
-                  >+</button>
+          <section v-if="addedFiltered.length > 0" class="card-section added-section">
+            <h3 class="section-heading">
+              {{ t('deck_edit.in_deck_heading', { count: addedFiltered.length }) }}
+            </h3>
+            <ul class="grid" role="list">
+              <li
+                v-for="card in addedFiltered"
+                :key="`a-${card.id}`"
+                class="tile added"
+                :class="raceClass(card.race)"
+              >
+                <div class="img-wrap">
+                  <img v-if="imageUrl(card)" :src="imageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
+                  <div v-else class="no-img">{{ t('deck_edit.no_image') }}</div>
+                  <span class="badge">
+                    {{ counts[card.id] }} / {{ MAX_COPIES_PER_TITLE }}
+                  </span>
                 </div>
-              </div>
-            </li>
-          </ul>
+                <div class="tile-foot">
+                  <span class="name" :title="card.name">{{ card.name }}</span>
+                  <div class="qty">
+                    <button
+                      class="qty-btn"
+                      type="button"
+                      @click="remove(card)"
+                      :aria-label="t('deck_edit.minus_aria', { name: card.name })"
+                    >−</button>
+                    <span class="qty-num">{{ counts[card.id] ?? 0 }}</span>
+                    <button
+                      class="qty-btn"
+                      type="button"
+                      :disabled="(counts[card.id] ?? 0) >= MAX_COPIES_PER_TITLE"
+                      @click="add(card)"
+                      :aria-label="t('deck_edit.plus_aria', { name: card.name })"
+                    >+</button>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <section class="card-section available-section">
+            <h3 v-if="addedFiltered.length > 0" class="section-heading">
+              {{ t('deck_edit.available_heading', { count: availableFiltered.length }) }}
+            </h3>
+            <ul class="grid" role="list">
+              <li
+                v-for="card in availableFiltered"
+                :key="card.id"
+                class="tile"
+                :class="[raceClass(card.race), { blocked: !isCardAllowedInDeck(card, editingCapital) }]"
+              >
+                <div class="img-wrap">
+                  <img v-if="imageUrl(card)" :src="imageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
+                  <div v-else class="no-img">{{ t('deck_edit.no_image') }}</div>
+                </div>
+                <div class="tile-foot">
+                  <span class="name" :title="card.name">{{ card.name }}</span>
+                  <div class="qty">
+                    <button
+                      class="qty-btn"
+                      type="button"
+                      disabled
+                      :aria-label="t('deck_edit.minus_aria', { name: card.name })"
+                    >−</button>
+                    <span class="qty-num">0</span>
+                    <button
+                      class="qty-btn"
+                      type="button"
+                      :disabled="!isCardAllowedInDeck(card, editingCapital)"
+                      @click="add(card)"
+                      :aria-label="t('deck_edit.plus_aria', { name: card.name })"
+                    >+</button>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </section>
         </section>
 
         <!-- Deck panel -->
@@ -707,6 +759,22 @@ watch(editingCapital, () => scheduleSave())
   color: var(--fg-faint);
 }
 
+.card-section + .card-section {
+  margin-top: 1.25rem;
+}
+
+.section-heading {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.added-section .section-heading {
+  color: var(--accent-strong);
+}
+
 .grid {
   list-style: none;
   margin: 0;
@@ -714,6 +782,12 @@ watch(editingCapital, () => scheduleSave())
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 0.7rem;
+}
+
+.tile.added {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent-strong);
+  outline-offset: -2px;
 }
 
 .tile {

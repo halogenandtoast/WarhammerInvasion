@@ -19608,6 +19608,25 @@
     "stub": false
   },
   {
+    "id": "cataclysm-037",
+    "name": "Rift of Chaos",
+    "set": "Cataclysm",
+    "cycle": "Cataclysm Cycle",
+    "number": 37,
+    "type": "Support",
+    "race": "Chaos",
+    "cost": 3,
+    "loyalty": 2,
+    "power": 1,
+    "health": -1,
+    "traits": "Rift.",
+    "text": "This card gains [Power] for each burning zone.",
+    "quantity": 3,
+    "illustrator": "JB Casacop",
+    "image": "cataclysm-037.jpg",
+    "stub": false
+  },
+  {
     "id": "cataclysm-039",
     "name": "Chosen of the Gods",
     "set": "Cataclysm",

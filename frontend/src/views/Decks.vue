@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { createDeck, deleteDeck, listDecks, type DeckRecord } from '../api/decks'
-import { MIN_DECK_SIZE, MAX_DECK_SIZE, raceOfCapital, type Capital } from '../lib/deck'
+import {
+  MIN_DECK_SIZE,
+  MAX_DECK_SIZE,
+  parseDeckList,
+  raceOfCapital,
+  type Capital,
+  type ParsedDeckList,
+} from '../lib/deck'
+import type { Card } from '../types/card'
 import { ApiError } from '../api/client'
 
 const { t } = useI18n({ useScope: 'global' })
@@ -17,6 +25,14 @@ const creating = ref(false)
 const newName = ref('')
 const showNew = ref(false)
 
+const showImport = ref(false)
+const importing = ref(false)
+const importName = ref('')
+const importText = ref('')
+const allCards = ref<Card[]>([])
+const cardsLoaded = ref(false)
+const cardsError = ref<string | null>(null)
+
 onMounted(async () => {
   try {
     decks.value = await listDecks()
@@ -25,6 +41,35 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+})
+
+async function loadCardsIfNeeded() {
+  if (cardsLoaded.value || cardsError.value) return
+  try {
+    const res = await fetch('/cards.json')
+    if (!res.ok) throw new Error(`cards.json: ${res.status}`)
+    allCards.value = (await res.json()) as Card[]
+    cardsLoaded.value = true
+  } catch (e) {
+    cardsError.value = e instanceof Error ? e.message : 'cards_load_failed'
+  }
+}
+
+function openImport() {
+  showNew.value = false
+  showImport.value = !showImport.value
+  if (showImport.value) void loadCardsIfNeeded()
+}
+
+function openNew() {
+  showImport.value = false
+  showNew.value = !showNew.value
+}
+
+const parsed = computed<ParsedDeckList | null>(() => {
+  if (!cardsLoaded.value) return null
+  if (importText.value.trim().length === 0) return null
+  return parseDeckList(importText.value, allCards.value)
 })
 
 async function submitNew() {
@@ -38,13 +83,39 @@ async function submitNew() {
       capital: null,
       cards: {},
     })
-    emit('navigate', `#/decks/${deck.id}`)
+    emit('navigate', `#/decks/${deck.id}/edit`)
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.code : 'create_failed'
   } finally {
     creating.value = false
   }
 }
+
+async function submitImport() {
+  if (importing.value) return
+  const p = parsed.value
+  if (!p || p.total === 0) return
+  importing.value = true
+  try {
+    const deck = await createDeck({
+      name: importName.value.trim() || t('decks.list.import_form.name_default'),
+      capital: p.capital,
+      cards: p.counts,
+    })
+    emit('navigate', `#/decks/${deck.id}/edit`)
+  } catch (e) {
+    loadError.value = e instanceof ApiError ? e.code : 'create_failed'
+  } finally {
+    importing.value = false
+  }
+}
+
+watch(showImport, (open) => {
+  if (!open) {
+    importText.value = ''
+    importName.value = ''
+  }
+})
 
 async function remove(deck: DeckRecord) {
   if (!confirm(t('decks.list.confirm_delete', { name: deck.name }))) return
@@ -91,9 +162,14 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
         <h1>{{ t('decks.list.heading') }}</h1>
         <p class="lead">{{ t('decks.list.lead') }}</p>
       </div>
-      <button class="primary" type="button" @click="showNew = !showNew">
-        {{ showNew ? t('decks.list.cancel_new') : t('decks.list.new') }}
-      </button>
+      <div class="head-actions">
+        <button class="ghost" type="button" @click="openImport">
+          {{ showImport ? t('decks.list.cancel_import') : t('decks.list.import') }}
+        </button>
+        <button class="primary" type="button" @click="openNew">
+          {{ showNew ? t('decks.list.cancel_new') : t('decks.list.new') }}
+        </button>
+      </div>
     </header>
 
     <form v-if="showNew" class="new-form" @submit.prevent="submitNew">
@@ -106,6 +182,73 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
       <p class="hint">{{ t('decks.list.capital_hint') }}</p>
       <button class="primary" type="submit" :disabled="creating || newName.trim().length === 0">
         {{ creating ? t('decks.list.creating') : t('decks.list.create') }}
+      </button>
+    </form>
+
+    <form v-if="showImport" class="new-form import-form" @submit.prevent="submitImport">
+      <div class="row">
+        <label class="field grow">
+          <span class="field-label">{{ t('decks.list.name_label') }}</span>
+          <input
+            v-model="importName"
+            type="text"
+            maxlength="80"
+            :placeholder="t('decks.list.import_form.name_default')"
+          />
+        </label>
+      </div>
+      <label class="field grow">
+        <span class="field-label">{{ t('decks.list.import_form.paste_label') }}</span>
+        <textarea
+          v-model="importText"
+          rows="10"
+          spellcheck="false"
+          :placeholder="t('decks.list.import_form.paste_placeholder')"
+        ></textarea>
+      </label>
+      <p class="hint">{{ t('decks.list.import_form.paste_hint') }}</p>
+
+      <p v-if="cardsError" class="error">{{ cardsError }}</p>
+
+      <section v-if="parsed" class="import-preview" aria-live="polite">
+        <h3>{{ t('decks.list.import_form.preview_heading') }}</h3>
+        <p class="preview-total">
+          {{ t('decks.list.import_form.preview_total', { count: parsed.total }) }}
+        </p>
+        <p class="preview-capital">
+          <template v-if="parsed.capital">
+            {{ t('decks.list.import_form.preview_capital', { capital: t(`decks.capital.${parsed.capital}`) }) }}
+            <span class="chip capital-chip" :class="capitalRaceClass(parsed.capital)">
+              {{ t(`decks.capital.${parsed.capital}`) }}
+            </span>
+          </template>
+          <template v-else>{{ t('decks.list.import_form.preview_capital_none') }}</template>
+        </p>
+        <div v-if="parsed.unknown.length > 0" class="preview-warnings">
+          <p class="warn-heading">
+            {{ t('decks.list.import_form.preview_unknown_heading', { count: parsed.unknown.length }) }}
+          </p>
+          <ul>
+            <li v-for="(n, i) in parsed.unknown" :key="`u-${i}`">{{ n }}</li>
+          </ul>
+        </div>
+        <div v-if="parsed.parseErrors.length > 0" class="preview-warnings">
+          <p class="warn-heading">
+            {{ t('decks.list.import_form.preview_parse_errors_heading', { count: parsed.parseErrors.length }) }}
+          </p>
+          <ul>
+            <li v-for="(line, i) in parsed.parseErrors" :key="`p-${i}`">{{ line }}</li>
+          </ul>
+        </div>
+      </section>
+      <p v-else-if="cardsLoaded" class="hint">{{ t('decks.list.import_form.empty') }}</p>
+
+      <button
+        class="primary"
+        type="submit"
+        :disabled="importing || !parsed || parsed.total === 0"
+      >
+        {{ importing ? t('decks.list.import_form.submitting') : t('decks.list.import_form.submit') }}
       </button>
     </form>
 
@@ -216,6 +359,12 @@ h1 {
   border-color: var(--accent-strong);
 }
 
+.head-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .new-form {
   margin-bottom: 1.5rem;
   padding: 1rem 1.2rem;
@@ -225,6 +374,89 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
+}
+
+.import-form textarea {
+  min-height: 220px;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.import-form textarea:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.import-preview h3 {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.preview-total {
+  margin: 0;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.preview-capital {
+  margin: 0;
+  color: var(--fg-dim);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.preview-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border-left: 3px solid var(--accent-strong);
+  padding: 0.25rem 0 0.25rem 0.6rem;
+}
+
+.preview-warnings .warn-heading {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--accent-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.preview-warnings ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
 }
 
 .row {

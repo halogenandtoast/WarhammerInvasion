@@ -61,11 +61,31 @@ decks:
     lead: Build a 50–100 card deck around one capital. Order and Destruction can't share a deck.
     new: New deck
     cancel_new: Cancel
+    import: Import list
+    cancel_import: Cancel
     name_label: Deck name
     name_placeholder: e.g. Dwarven Engineers
     capital_hint: You'll pick a capital board on the next screen.
     create: Create deck
     creating: Creating…
+    import_form:
+      paste_label: Paste deck list
+      paste_placeholder: |
+        3 Bloodcrusher
+        2 Bloodletter
+        1 Bloodthirster
+        ...
+      paste_hint: One entry per line. Format "N Name". Capital is picked from the most-present race.
+      name_default: Imported deck
+      submit: Import deck
+      submitting: Importing…
+      preview_heading: Preview
+      preview_total: "{count} cards parsed"
+      preview_capital: "Suggested capital: {capital}"
+      preview_capital_none: No capital suggestion — no faction cards matched.
+      preview_unknown_heading: "Unknown ({count}):"
+      preview_parse_errors_heading: "Couldn't parse ({count}):"
+      empty: Paste a deck list to preview.
     loading: Loading decks…
     empty: No decks yet. Hit "New deck" to start building.
     size_under: "{size} cards — need {min} minimum"
@@ -76,10 +96,27 @@ decks:
     delete: Delete
     delete_aria: "Delete deck {name}"
 
+deck_view:
+  loading: Loading deck…
+  back: Back to decks
+  edit: Edit deck
+  delete: Delete deck
+  confirm_delete: "Delete \"{name}\"? This can't be undone."
+  capital_unset: "No capital selected — open the editor to pick one."
+  empty: This deck has no cards yet.
+  count_full: "{count} cards"
+  cost_curve: Cost curve
+  by_type: By type
+  by_race: By race
+  group_heading: "{type} ({count})"
+  copies: "×{count}"
+
 deck_edit:
   loading: Loading deck…
   untitled: Untitled deck
-  back: Back to decks
+  back: Back to deck
+  in_deck_heading: "In deck ({count})"
+  available_heading: "Available ({count})"
   delete: Delete deck
   confirm_delete: "Delete \"{name}\"? This can't be undone."
   name_aria: Deck name
