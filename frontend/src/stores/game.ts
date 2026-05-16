@@ -3,7 +3,7 @@
 // The store is *assigned to* by server frames. The view layer never
 // mutates GameView directly — every change is a server round-trip.
 
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { openSocket, type SocketStatus, type TypedSocket } from '../api/socket'
 import type {
   ChatLine,
@@ -38,13 +38,21 @@ function reset() {
 // before/after DOM and morphs elements that share a
 // `view-transition-name` (see SvgCard's `transitionName` prop). Falls
 // back to a plain assignment on browsers without the API (Firefox).
+//
+// Vue flushes DOM updates on the next microtask, so the callback must
+// `await nextTick()` — otherwise the browser snapshots "new" before
+// Vue patches the DOM, leaving the new state identical to the old and
+// the transition does nothing.
 type ViewTransitionDoc = Document & {
-  startViewTransition?: (cb: () => void) => unknown
+  startViewTransition?: (cb: () => Promise<void> | void) => unknown
 }
 function withViewTransition(update: () => void) {
   const d = document as ViewTransitionDoc
   if (typeof d.startViewTransition === 'function') {
-    d.startViewTransition(update)
+    d.startViewTransition(async () => {
+      update()
+      await nextTick()
+    })
   } else {
     update()
   }
@@ -144,8 +152,8 @@ function passPriority() {
   socket?.send({ tag: 'GamePassPriority' })
 }
 
-function playCard(card: string, zone: ZoneKind | null = null, target: number | null = null) {
-  socket?.send({ tag: 'GamePlayCard', card, zone, target })
+function playCard(cardKey: number, zone: ZoneKind | null = null, target: number | null = null) {
+  socket?.send({ tag: 'GamePlayCard', cardKey, zone, target })
 }
 
 export const game = {

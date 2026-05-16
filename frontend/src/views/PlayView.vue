@@ -10,6 +10,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { game } from '../stores/game'
 import type {
+  EngineCard,
   EngineCardDef,
   EngineGame,
   EngineLegend,
@@ -111,7 +112,7 @@ const opponentLegend = computed(() => legendFor(opponentSeatKey.value))
 // next 'GameUpdate') is what actually moves the card.
 
 interface OpenPlay {
-  card: EngineCardDef
+  card: EngineCard
   anchor: DOMRect
 }
 const openPlay = ref<OpenPlay | null>(null)
@@ -141,7 +142,7 @@ const canPlayCard = (card: EngineCardDef): boolean => {
   return true
 }
 
-function onHandCardClick(payload: { card: EngineCardDef | null; rect: DOMRect }) {
+function onHandCardClick(payload: { card: EngineCard | null; rect: DOMRect }) {
   if (!payload.card) return
   if (!canPlayCard(payload.card)) return
   openPlay.value = { card: payload.card, anchor: payload.rect }
@@ -178,21 +179,21 @@ function confirmLabel(kind: EngineCardDef['kind']): string {
 function playToZone(z: ZoneKind) {
   const card = openPlay.value?.card
   if (!card) return
-  game.playCard(card.code, z, null)
+  game.playCard(card.key, z, null)
   closePopover()
 }
 
 function playAsAttachment(targetKey: number) {
   const card = openPlay.value?.card
   if (!card) return
-  game.playCard(card.code, null, targetKey)
+  game.playCard(card.key, null, targetKey)
   closePopover()
 }
 
 function playWithoutTarget() {
   const card = openPlay.value?.card
   if (!card) return
-  game.playCard(card.code, null, null)
+  game.playCard(card.key, null, null)
   closePopover()
 }
 

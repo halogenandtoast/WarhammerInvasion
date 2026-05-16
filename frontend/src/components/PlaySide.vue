@@ -16,6 +16,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type {
+  EngineCard,
   EngineCardDef,
   EngineLegend,
   EnginePlayer,
@@ -40,7 +41,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'hand-card-click', payload: { card: EngineCardDef | null; rect: DOMRect }): void
+  (e: 'hand-card-click', payload: { card: EngineCard | null; rect: DOMRect }): void
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
@@ -189,9 +190,9 @@ const pilesLayout = computed(() => {
   }
 })
 
-const topDiscard = computed<{ code?: string; title?: string } | null>(() => {
+const topDiscard = computed<EngineCard | null>(() => {
   const d = props.player.discard
-  return d.length ? (d[d.length - 1] as { code?: string; title?: string }) : null
+  return d.length ? d[d.length - 1] : null
 })
 
 // ---- player chip + resources layout (inside the player column) ----
@@ -316,21 +317,21 @@ const handCardY = computed(
   () => combinedY.value + (COMBINED_H - CARD_SM.h) / 2,
 )
 
-const handCards = computed<Array<EngineCardDef | null>>(() => {
+const handCards = computed<Array<EngineCard | null>>(() => {
   if (props.perspective === 'opponent') {
     return new Array(props.player.hand.length).fill(null)
   }
   return props.player.hand
 })
 
-function isCardClickable(card: EngineCardDef | null): boolean {
+function isCardClickable(card: EngineCard | null): boolean {
   if (!card || props.perspective !== 'self') return false
   if (!props.canPlayCard) return false
   return props.canPlayCard(card)
 }
 
 function onHandClick(
-  card: EngineCardDef | null,
+  card: EngineCard | null,
   payload: { rect: DOMRect },
 ) {
   if (!card) return
@@ -414,7 +415,7 @@ const legendSlot = computed(() => {
         :width="legendSlot.w"
         :height="legendSlot.h"
         :card="{ code: legend.cardDef.code, title: legend.cardDef.title }"
-        :transition-name="`legend-${legend.key}`"
+        :transition-name="`card-${legend.key}`"
       />
       <rect
         v-else
@@ -470,7 +471,7 @@ const legendSlot = computed(() => {
             :card="{ code: att.cardDef.code, title: att.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
-            :transition-name="`att-${att.key}`"
+            :transition-name="`card-${att.key}`"
           />
           <SvgCard
             :x="evenSpread(zoneUnits(zr.z).length, zr.x + 12, zr.w - 24, CARD_SM.w)[i]"
@@ -478,7 +479,7 @@ const legendSlot = computed(() => {
             :card="{ code: u.cardDef.code, title: u.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
-            :transition-name="`unit-${u.key}`"
+            :transition-name="`card-${u.key}`"
           />
         </g>
       </template>
@@ -494,7 +495,7 @@ const legendSlot = computed(() => {
             :card="{ code: att.cardDef.code, title: att.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
-            :transition-name="`att-${att.key}`"
+            :transition-name="`card-${att.key}`"
           />
           <SvgCard
             :x="tallStackX(zr.x, zr.w)"
@@ -502,7 +503,7 @@ const legendSlot = computed(() => {
             :card="{ code: u.cardDef.code, title: u.cardDef.title }"
             :width="CARD_SM.w"
             :height="CARD_SM.h"
-            :transition-name="`unit-${u.key}`"
+            :transition-name="`card-${u.key}`"
           />
         </g>
       </template>
@@ -577,7 +578,7 @@ const legendSlot = computed(() => {
       <g class="hand">
         <SvgCard
           v-for="(c, i) in handCards"
-          :key="i"
+          :key="c ? c.key : `opp-${i}`"
           :x="handXs[i]"
           :y="handCardY"
           :card="c"
@@ -585,6 +586,7 @@ const legendSlot = computed(() => {
           :width="CARD_SM.w"
           :height="CARD_SM.h"
           :clickable="isCardClickable(c)"
+          :transition-name="c ? `card-${c.key}` : undefined"
           @card-click="(payload) => onHandClick(c, payload)"
         />
         <text
@@ -639,6 +641,7 @@ const legendSlot = computed(() => {
             :height="PILE_H"
             :card="topDiscard"
             rotated
+            :transition-name="`card-${topDiscard.key}`"
           />
           <rect
             v-if="!topDiscard"
@@ -699,6 +702,7 @@ const legendSlot = computed(() => {
             :height="PILE_H"
             :card="topDiscard"
             rotated
+            :transition-name="`card-${topDiscard.key}`"
           />
           <rect
             v-if="!topDiscard"
