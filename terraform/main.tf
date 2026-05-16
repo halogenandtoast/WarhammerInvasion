@@ -3,8 +3,18 @@ locals {
 }
 
 resource "digitalocean_ssh_key" "default" {
+  count      = var.ssh_key_name == "" ? 1 : 0
   name       = "${var.name}-deploy"
-  public_key = var.ssh_public_key
+  public_key = trimspace(var.ssh_public_key)
+}
+
+data "digitalocean_ssh_key" "existing" {
+  count = var.ssh_key_name == "" ? 0 : 1
+  name  = var.ssh_key_name
+}
+
+locals {
+  ssh_key_fingerprint = var.ssh_key_name == "" ? digitalocean_ssh_key.default[0].fingerprint : data.digitalocean_ssh_key.existing[0].fingerprint
 }
 
 resource "digitalocean_droplet" "app" {
@@ -12,7 +22,7 @@ resource "digitalocean_droplet" "app" {
   region   = var.region
   size     = var.droplet_size
   image    = var.droplet_image
-  ssh_keys = [digitalocean_ssh_key.default.fingerprint]
+  ssh_keys = [local.ssh_key_fingerprint]
   tags     = local.tags
 
   monitoring = true
@@ -28,8 +38,8 @@ resource "digitalocean_droplet" "app" {
 }
 
 resource "digitalocean_firewall" "app" {
-  name = var.name
-  tags = local.tags
+  name        = var.name
+  droplet_ids = [digitalocean_droplet.app.id]
 
   # SSH
   inbound_rule {

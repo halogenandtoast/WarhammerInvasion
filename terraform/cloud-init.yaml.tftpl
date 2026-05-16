@@ -37,7 +37,7 @@ write_files:
       WHI_DEBUG=${whi_debug}
 
 runcmd:
-  # Swap — Haskell compilation OOMs on small droplets.
+  # Swap -- Haskell compilation OOMs on small droplets.
   - |
     if [ ! -f /swapfile ]; then
       fallocate -l ${swap_size_gb}G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$((${swap_size_gb} * 1024))

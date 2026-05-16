@@ -29,8 +29,20 @@ variable "droplet_image" {
 }
 
 variable "ssh_public_key" {
-  description = "OpenSSH-formatted public key string. Will be uploaded to DigitalOcean and authorized on the droplet."
+  description = "OpenSSH-formatted public key string. Used only when ssh_key_name is empty; Terraform will then upload it as a new DO SSH key."
   type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ssh_public_key == "" || can(regex("^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521)) AAAA", trimspace(var.ssh_public_key)))
+    error_message = "ssh_public_key must be a one-line OpenSSH public key like 'ssh-ed25519 AAAA... user@host'. Run `cat ~/.ssh/id_ed25519.pub` and paste the full output — make sure you have the .pub file, not the private key."
+  }
+}
+
+variable "ssh_key_name" {
+  description = "Name of an SSH key already uploaded to your DigitalOcean account. If set, Terraform looks it up instead of uploading ssh_public_key. Find it with `doctl compute ssh-key list` or the DO web console."
+  type        = string
+  default     = ""
 }
 
 variable "ssh_allowed_cidrs" {

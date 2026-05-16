@@ -80,13 +80,12 @@ ssh root@<ip> 'cd /opt/whi && docker compose logs -f'
 The droplet's checkout lives at `/opt/whi`. To deploy a new revision:
 
 ```sh
-ssh root@<ip>
-cd /opt/whi
-git pull
-docker compose up -d --build
+../scripts/deploy.sh                 # git pull + docker compose up -d --build
+../scripts/deploy.sh --branch foo    # deploy a different ref
 ```
 
-For now, that's manual. There's no CI/CD glue here.
+The script reads the droplet IP from `terraform output ipv4_address`; set
+`WHI_HOST` to override.
 
 ## Things this does NOT do
 

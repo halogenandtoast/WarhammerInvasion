@@ -3,8 +3,14 @@
 # DigitalOcean API token. Prefer `export DIGITALOCEAN_TOKEN=...` and omit this.
 do_token = "dop_v1_..."
 
-# Public key to authorize on the droplet.
-ssh_public_key = "ssh-ed25519 AAAA... you@host"
+# Authorize a key on the droplet. Pick ONE of:
+#
+# A) Reference a key already uploaded to your DO account (run
+#    `doctl compute ssh-key list` to find the name):
+# ssh_key_name = "my-laptop"
+#
+# B) Or upload a new key. Paste the contents of ~/.ssh/id_ed25519.pub:
+# ssh_public_key = "ssh-ed25519 AAAA... you@host"
 
 # Git URL the droplet clones on first boot. Public repo or a URL that embeds
 # a deploy token — there is no SSH agent forwarding into the droplet.
