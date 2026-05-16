@@ -577,7 +577,7 @@ cards:
     clear_set: Clear set
 
   summary:
-    showing: "Showing {visible} of {total} cards"
+    total: "Showing {total} cards"
 
   status:
     loading: Loading cards…
@@ -588,7 +588,6 @@ cards:
     no_image: No image
     stub_badge: stub
     stub_title: "Stub: image + name only"
-    load_more: "Load more ({remaining} remaining)"
 
   modal:
     aria_close: Close

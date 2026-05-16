@@ -18,9 +18,6 @@ const selectedCost = ref<string | 'all'>('all')
 const includeStubs = ref(true)
 const sidebarOpen = ref(false)
 
-const PAGE_SIZE = 60
-const visibleCount = ref(PAGE_SIZE)
-
 const focusedCard = ref<Card | null>(null)
 
 onMounted(async () => {
@@ -103,16 +100,6 @@ const filtered = computed(() => {
   })
 })
 
-const visibleCards = computed(() => filtered.value.slice(0, visibleCount.value))
-const hasMore = computed(() => visibleCount.value < filtered.value.length)
-
-watch(
-  [search, selectedCycle, selectedSet, selectedType, selectedRace, selectedCost, includeStubs],
-  () => {
-    visibleCount.value = PAGE_SIZE
-  },
-)
-
 watch(selectedCycle, (cycle) => {
   if (cycle !== 'all') {
     const sets = setsByCycle.value[cycle] ?? []
@@ -121,10 +108,6 @@ watch(selectedCycle, (cycle) => {
     }
   }
 })
-
-function loadMore() {
-  visibleCount.value = Math.min(visibleCount.value + PAGE_SIZE, filtered.value.length)
-}
 
 function clearFilters() {
   search.value = ''
@@ -316,7 +299,7 @@ function onKey(e: KeyboardEvent) {
         </div>
 
         <div class="active-summary" v-if="!loading">
-          <span class="count" v-html="t('cards.summary.showing', { visible: `<strong>${Math.min(visibleCards.length, filtered.length)}</strong>`, total: `<strong>${filtered.length}</strong>` })" />
+          <span class="count" v-html="t('cards.summary.total', { total: `<strong>${filtered.length}</strong>` })" />
           <span v-if="selectedCycle !== 'all'" class="chip">
             {{ selectedCycle }}
             <button type="button" @click="selectCycle('all')" :aria-label="t('cards.filters.clear_cycle')">
@@ -339,7 +322,7 @@ function onKey(e: KeyboardEvent) {
       </div>
 
       <ul v-else class="grid" role="list">
-        <li v-for="card in visibleCards" :key="card.id" class="card-tile">
+        <li v-for="card in filtered" :key="card.id" class="card-tile">
           <button
             class="card-button"
             :class="[raceClass(card.race), { stub: card.stub }]"
@@ -370,12 +353,6 @@ function onKey(e: KeyboardEvent) {
           </button>
         </li>
       </ul>
-
-      <div v-if="hasMore" class="load-more">
-        <button class="primary" type="button" @click="loadMore">
-          {{ t('cards.grid.load_more', { remaining: filtered.length - visibleCount }) }}
-        </button>
-      </div>
     </div>
     </div>
 
@@ -909,12 +886,6 @@ button.primary:hover {
 .card-button.race-orc { box-shadow: inset 3px 0 0 var(--race-orc); }
 .card-button.race-dark-elf { box-shadow: inset 3px 0 0 var(--race-dark-elf); }
 .card-button.race-neutral { box-shadow: inset 3px 0 0 var(--race-neutral); }
-
-.load-more {
-  display: grid;
-  place-items: center;
-  margin: 2rem 0 0;
-}
 
 /* ---------- Modal ---------- */
 .modal-backdrop {

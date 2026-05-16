@@ -36,22 +36,24 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
 <template>
   <div class="app-shell">
     <nav class="topnav" :aria-label="t('app.nav.primary_label')">
-      <a class="brand" href="#" @click="navigate($event, 'rules')">
-        <span class="brand-mark" aria-hidden="true">⚔</span>
-        <span class="brand-text">{{ t('app.brand') }}</span>
-      </a>
-      <ul class="nav-links">
-        <li v-for="id in navItems" :key="id">
-          <a
-            :href="id === 'rules' ? '#' : '#/cards'"
-            :class="{ active: route === id }"
-            :aria-current="route === id ? 'page' : undefined"
-            @click="navigate($event, id)"
-          >
-            {{ t(`app.nav.${id}`) }}
-          </a>
-        </li>
-      </ul>
+      <div class="topnav-inner">
+        <a class="brand" href="#" @click="navigate($event, 'rules')">
+          <span class="brand-mark" aria-hidden="true">⚔</span>
+          <span class="brand-text">{{ t('app.brand') }}</span>
+        </a>
+        <ul class="nav-links">
+          <li v-for="id in navItems" :key="id">
+            <a
+              :href="id === 'rules' ? '#' : '#/cards'"
+              :class="{ active: route === id }"
+              :aria-current="route === id ? 'page' : undefined"
+              @click="navigate($event, id)"
+            >
+              {{ t(`app.nav.${id}`) }}
+            </a>
+          </li>
+        </ul>
+      </div>
     </nav>
     <component :is="view" />
   </div>
@@ -65,25 +67,32 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
 }
 
 .topnav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.6rem 1.5rem;
-  background: var(--bg-elev);
-  border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: var(--z-topnav);
+  background: color-mix(in srgb, var(--bg-elev) 78%, transparent);
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.topnav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  height: 48px;
+  padding: 0 1.25rem;
 }
 
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   color: var(--fg);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
 }
 .brand:hover {
   text-decoration: none;
@@ -91,8 +100,9 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
 }
 
 .brand-mark {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   color: var(--accent-strong);
+  line-height: 1;
 }
 
 .nav-links {
@@ -100,34 +110,47 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
   margin: 0;
   padding: 0;
   display: flex;
-  gap: 0.25rem;
+  gap: 0.125rem;
 }
 
 .nav-links a {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  min-height: var(--tap-target);
-  padding: 0 0.85rem;
-  border-radius: var(--radius-md);
+  height: 32px;
+  padding: 0 0.75rem;
+  border-radius: var(--radius-pill);
   color: var(--fg-dim);
-  font-size: 0.95rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .nav-links a:hover {
-  background: var(--bg-elev-2);
   color: var(--fg);
   text-decoration: none;
 }
 
 .nav-links a.active {
   color: var(--fg);
-  background: var(--bg-elev-2);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+/* Restore mobile tap targets without bulking up the bar visually */
+@media (pointer: coarse) {
+  .nav-links a {
+    min-height: var(--tap-target);
+    height: auto;
+    padding: 0.5rem 0.9rem;
+  }
 }
 
 @media (max-width: 480px) {
-  .topnav {
-    padding: 0.5rem 1rem;
+  .topnav-inner {
+    height: 44px;
+    padding: 0 0.875rem;
+    gap: 0.5rem;
   }
   .brand-text {
     display: none;
