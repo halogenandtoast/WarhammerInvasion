@@ -25,6 +25,7 @@ module Invasion.Server.Protocol
     -- * Game socket
   , GameIn (..)
   , GameOut (..)
+  , ZoneTarget (..)
   ) where
 
 import Data.Aeson (FromJSON, ToJSON, Value)
@@ -34,7 +35,7 @@ import Data.Time (UTCTime)
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
 import Invasion.Prelude
-import Invasion.Types (CardCode, UnitKey, ZoneKind)
+import Invasion.Types (CardCode, PlayerKey, UnitKey, ZoneKind)
 
 -- ----------------------------------------------------------------------------
 -- Common
@@ -180,8 +181,25 @@ data GameIn
       , zone :: Maybe ZoneKind
       , target :: Maybe UnitKey
       }
+  | -- | Trigger a printed action ability on an in-play card. The
+    -- engine validates that the source belongs to the sender, debits
+    -- the resource cost, and checks the supplied target against the
+    -- action's declared 'TargetSchema'.
+    GameTriggerAction
+      { source :: UnitKey
+      , actionIndex :: Int
+      , target :: Maybe UnitKey
+      , targetZone :: Maybe ZoneTarget
+      }
   | -- | Drop this user from the seat, broadcast to the other seat.
     GameLeave
+  deriving stock (Show, Generic)
+
+-- | Zone reference for action targets that point at a capital zone.
+data ZoneTarget = ZoneTarget
+  { player :: PlayerKey
+  , kind :: ZoneKind
+  }
   deriving stock (Show, Generic)
 
 data GameOut
@@ -208,6 +226,7 @@ mconcat
   , deriveJSON defaultOptions ''GameView
   , deriveJSON defaultOptions ''LobbyIn
   , deriveJSON defaultOptions ''LobbyOut
+  , deriveJSON defaultOptions ''ZoneTarget
   , deriveJSON defaultOptions ''GameIn
   , deriveJSON defaultOptions ''GameOut
   ]

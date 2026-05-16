@@ -114,6 +114,11 @@ data QuestDetails = QuestDetails
     -- accumulates resource counters, Dominion of Chaos stores combat
     -- damage that's been routed here. The exact semantics live in each
     -- card's 'receive'.
+  , questingUnit :: Maybe UnitKey
+    -- ^ The unit currently questing on this card, if any. Only one
+    -- unit may quest on a given quest at a time. When the questing
+    -- unit leaves play the slot clears and accumulated 'tokens' are
+    -- lost.
   }
   deriving stock Show
 
@@ -194,6 +199,7 @@ instance ToJSON QuestDetails where
       , "controller" .= d.controller
       , "cardDef" .= d.cardDef
       , "tokens" .= d.tokens
+      , "questingUnit" .= d.questingUnit
       ]
 
 instance ToJSON TacticContext where

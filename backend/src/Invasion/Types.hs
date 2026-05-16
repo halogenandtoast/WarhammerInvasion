@@ -59,7 +59,7 @@ data Race = Dwarf | Empire | HighElf | Chaos | Orc | DarkElf
 mconcat
   [ deriveToJSON defaultOptions ''Ref
   , deriveJSON defaultOptions ''UnitKey
-  , deriveToJSON defaultOptions ''PlayerKey
+  , deriveJSON defaultOptions ''PlayerKey
   , deriveToJSON defaultOptions ''Number
   , deriveToJSON defaultOptions ''CardKind
   , -- Race is a single-constructor type today (just 'Dwarf'). The Aeson
@@ -74,3 +74,4 @@ mconcat
   ]
 
 instance ToJSONKey (Ref k)
+instance ToJSONKey ZoneKind

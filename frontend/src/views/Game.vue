@@ -7,6 +7,7 @@ import { listDecks, type DeckRecord } from '../api/decks'
 import { ApiError } from '../api/client'
 import type {
   ActionWindowTrigger,
+  ChatLine,
   LogEntry,
   Phase,
   PlayerKey,
@@ -31,8 +32,7 @@ const decksLoading = ref(true)
 const decksError = ref<string | null>(null)
 
 const chatText = ref('')
-const chatBox = ref<HTMLElement | null>(null)
-const logBox = ref<HTMLElement | null>(null)
+const messagesBox = ref<HTMLElement | null>(null)
 const copied = ref(false)
 
 const errorBanner = ref<string | null>(null)
@@ -217,25 +217,42 @@ watch(
   },
 )
 
-watch(
-  () => view.value?.chat.length,
-  async () => {
-    await nextTick()
-    const el = chatBox.value
-    if (el) el.scrollTop = el.scrollHeight
-  },
-)
-
-watch(
-  () => engine.value?.log.length,
-  async () => {
-    await nextTick()
-    const el = logBox.value
-    if (el) el.scrollTop = el.scrollHeight
-  },
-)
-
 const logEntries = computed<LogEntry[]>(() => engine.value?.log ?? [])
+const chatLines = computed<ChatLine[]>(() => view.value?.chat ?? [])
+
+// Merge chat + log into a single chronologically-ordered stream so the
+// side rail reads as one conversation. ISO-8601 timestamps sort
+// lexicographically, so a stable string sort is sufficient.
+type Message =
+  | { kind: 'log'; at: string; entry: LogEntry }
+  | { kind: 'chat'; at: string; line: ChatLine }
+
+const messages = computed<Message[]>(() => {
+  const out: Message[] = []
+  for (const entry of logEntries.value) out.push({ kind: 'log', at: entry.at, entry })
+  for (const line of chatLines.value) out.push({ kind: 'chat', at: line.at, line })
+  out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+  return out
+})
+
+watch(
+  () => messages.value.length,
+  async () => {
+    await nextTick()
+    const el = messagesBox.value
+    if (el) el.scrollTop = el.scrollHeight
+  },
+)
+
+// Map a chat author's userId to their seat so the renderer can tint
+// each player's messages distinctly. Returns null for system/unknown
+// authors (e.g. spectators down the line) so they fall through to the
+// neutral chat styling.
+function seatOf(userId: string): PlayerKey | null {
+  const seat = view.value?.seats.find((s) => s.user.userId === userId)
+  if (!seat) return null
+  return seat.seat === 'Player1' ? 'Player1' : 'Player2'
+}
 
 // Resolve a player key in a log param to that player's display name,
 // pulled from the seat list. Falls back to a generic "Player 1/2"
@@ -283,10 +300,6 @@ function formatLogEntry(entry: LogEntry): string {
     resolved[k] = resolveParam(k, v)
   }
   return t(entry.key, resolved, { default: t('log.unknown', { key: entry.key }) })
-}
-
-function logEntryKey(entry: LogEntry, i: number): string {
-  return `${entry.at}-${i}`
 }
 
 function logCategoryClass(cat: LogEntry['category']): string {
@@ -484,49 +497,45 @@ function formatTime(at: string): string {
         </template>
       </section>
 
-      <!-- Side rail: game log on top, chat on bottom. They share the
-           same column so wide layouts get both at once, narrow layouts
-           stack them under the table surface. -->
+      <!-- Side rail: one merged stream of game-log entries and player
+           chat, sorted chronologically. Chat lines are highlighted so
+           they stand out against the engine's transcript. -->
       <aside class="side-panel">
-        <section class="log-panel" :aria-label="t('game.log.heading')">
+        <section class="messages-panel" :aria-label="t('game.messages.heading')">
           <header class="panel-head">
-            <h2>{{ t('game.log.heading') }}</h2>
+            <h2>{{ t('game.messages.heading') }}</h2>
           </header>
-          <div ref="logBox" class="log-scroll">
-            <div v-if="logEntries.length === 0" class="log-empty">
-              {{ t('game.log.empty') }}
+          <div ref="messagesBox" class="messages-scroll">
+            <div v-if="messages.length === 0" class="messages-empty">
+              {{ t('game.messages.empty') }}
             </div>
-            <ol v-else class="log-list" role="log" aria-live="polite">
-              <li
-                v-for="(entry, i) in logEntries"
-                :key="logEntryKey(entry, i)"
-                class="log-line"
-                :class="logCategoryClass(entry.category)"
-              >
-                <time class="log-time">{{ formatTime(entry.at) }}</time>
-                <p class="log-text">{{ formatLogEntry(entry) }}</p>
-              </li>
+            <ol v-else class="messages-list" role="log" aria-live="polite">
+              <template v-for="(msg, i) in messages" :key="`${msg.at}-${i}`">
+                <li
+                  v-if="msg.kind === 'log'"
+                  class="log-line"
+                  :class="logCategoryClass(msg.entry.category)"
+                >
+                  <time class="log-time">{{ formatTime(msg.entry.at) }}</time>
+                  <p class="log-text">{{ formatLogEntry(msg.entry) }}</p>
+                </li>
+                <li
+                  v-else
+                  class="chat-line"
+                  :class="seatOf(msg.line.from.userId) === 'Player1'
+                    ? 'seat-player1'
+                    : seatOf(msg.line.from.userId) === 'Player2'
+                      ? 'seat-player2'
+                      : null"
+                >
+                  <div class="chat-meta">
+                    <span class="chat-author">{{ msg.line.from.displayName }}</span>
+                    <time class="chat-time">{{ formatTime(msg.line.at) }}</time>
+                  </div>
+                  <p class="chat-text">{{ msg.line.text }}</p>
+                </li>
+              </template>
             </ol>
-          </div>
-        </section>
-
-        <section class="chat-panel" :aria-label="t('game.chat.heading')">
-          <header class="panel-head">
-            <h2>{{ t('game.chat.heading') }}</h2>
-          </header>
-          <div ref="chatBox" class="chat-scroll">
-            <div v-if="!view || view.chat.length === 0" class="chat-empty">
-              {{ t('game.chat.empty') }}
-            </div>
-            <ul v-else class="chat-list" role="log" aria-live="polite">
-              <li v-for="(line, i) in view.chat" :key="`${line.at}-${i}`" class="chat-line">
-                <div class="chat-meta">
-                  <span class="chat-author">{{ line.from.displayName }}</span>
-                  <time class="chat-time">{{ formatTime(line.at) }}</time>
-                </div>
-                <p class="chat-text">{{ line.text }}</p>
-              </li>
-            </ul>
           </div>
           <form class="chat-input" @submit.prevent="sendChat">
             <input
@@ -633,6 +642,9 @@ function formatTime(at: string): string {
   }
   .game-page > .game-grid {
     grid-template-columns: 1fr;
+    /* Give the table surface the bulk of the height and let the
+       messages rail take only as much as it needs (capped below). */
+    grid-template-rows: minmax(0, 1fr) auto;
     grid-area: main;
   }
 }
@@ -892,16 +904,13 @@ function formatTime(at: string): string {
 .ghost:hover { color: var(--fg); border-color: var(--fg-dim); }
 .hint { margin: 0; font-size: 0.78rem; color: var(--fg-faint); }
 
-/* ───────── side rail (log + chat) ───────── */
+/* ───────── side rail (merged messages stream) ───────── */
 
 .side-panel {
   background: var(--bg-elev);
   border-left: 1px solid var(--border);
-  display: grid;
-  /* Log gets a generous share at the top; chat keeps a tighter slice
-     since most exchanges are short. minmax(0, …) keeps both children
-     scrollable rather than letting one push the other off-screen. */
-  grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
 }
@@ -909,18 +918,21 @@ function formatTime(at: string): string {
   .side-panel {
     border-left: none;
     border-top: 1px solid var(--border);
-    min-height: 320px;
+    /* Keep the messages rail compact on narrow screens — the table is
+       the focus; the rail is just enough to see recent activity and
+       reach the chat input. */
+    min-height: 140px;
+    max-height: 28dvh;
   }
 }
 
-.log-panel,
-.chat-panel {
+.messages-panel {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
   min-width: 0;
 }
-.chat-panel { border-top: 1px solid var(--border); }
 
 .panel-head {
   display: flex;
@@ -932,20 +944,31 @@ function formatTime(at: string): string {
 }
 .panel-head h2 { margin: 0; font-size: 0.88rem; font-weight: 600; }
 
-/* ─── game log ─── */
-.log-scroll {
+.messages-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem 0.75rem;
+  min-height: 0;
+}
+.messages-empty {
+  margin: auto;
+  color: var(--fg-faint);
+  font-style: italic;
+  text-align: center;
+  padding: 1rem 0;
+}
+.messages-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  min-height: 0;
+  gap: 0.3rem;
   font-size: 0.82rem;
   line-height: 1.35;
 }
-.log-empty { margin: auto; color: var(--fg-faint); font-style: italic; }
-.log-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+
+/* ─── log entries (engine transcript) ─── */
 .log-line {
   display: grid;
   grid-template-columns: 3rem 1fr;
@@ -963,23 +986,52 @@ function formatTime(at: string): string {
 .log-line.cat-result { border-left-color: var(--accent-strong, #c4634a); color: var(--fg); font-weight: 600; }
 .log-line.cat-system { /* default colors */ }
 
-/* ─── chat ─── */
-.chat-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.65rem 0.85rem;
+/* ─── chat lines (player messages) ─── */
+/* Player chat needs to read as "someone is talking" against the
+   engine's terse transcript, so it gets its own card-style block with
+   a tinted background, accent rule, and slightly larger body text.
+   Each seat gets its own hue (overrides below) so the two players are
+   visually separable at a glance. */
+.chat-line {
+  --chat-hue: var(--accent);
+  --chat-bg: rgba(196, 99, 74, 0.10);
+  --chat-ring: rgba(196, 99, 74, 0.18);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  min-height: 0;
+  gap: 0.15rem;
+  padding: 0.45rem 0.6rem;
+  margin: 0.25rem 0;
+  background: var(--chat-bg);
+  border-left: 3px solid var(--chat-hue);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px var(--chat-ring);
 }
-.chat-empty { margin: auto; color: var(--fg-faint); font-style: italic; }
-.chat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
-.chat-line { display: flex; flex-direction: column; gap: 0.1rem; }
+.chat-line.seat-player1 {
+  --chat-hue: var(--race-empire);
+  --chat-bg: rgba(212, 179, 87, 0.12);
+  --chat-ring: rgba(212, 179, 87, 0.22);
+}
+.chat-line.seat-player2 {
+  --chat-hue: var(--race-high-elf);
+  --chat-bg: rgba(95, 160, 214, 0.12);
+  --chat-ring: rgba(95, 160, 214, 0.22);
+}
+.chat-line.seat-player1 .chat-author { color: var(--race-empire); }
+.chat-line.seat-player2 .chat-author { color: var(--race-high-elf); }
 .chat-meta { display: flex; align-items: baseline; gap: 0.4rem; }
-.chat-author { font-weight: 600; font-size: 0.86rem; }
-.chat-time { color: var(--fg-faint); font-size: 0.7rem; }
-.chat-text { margin: 0; font-size: 0.9rem; line-height: 1.4; word-break: break-word; }
+.chat-author {
+  font-weight: 600;
+  font-size: 0.86rem;
+  color: var(--fg);
+}
+.chat-time { color: var(--fg-faint); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+.chat-text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  word-break: break-word;
+  color: var(--fg);
+}
 .chat-input {
   display: flex;
   gap: 0.5rem;

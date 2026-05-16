@@ -75,7 +75,7 @@ newtype CardBuilder k a = CardBuilder (State (CardDef k) a)
 
 emptyCardDef :: CardCode -> String -> CardKind -> CardDef k
 emptyCardDef code title kind =
-  CardDef code title kind [] (Fixed 0) 0 0 Nothing [] Nothing Nothing [] False noReceive
+  CardDef code title kind [] (Fixed 0) 0 0 Nothing [] Nothing Nothing [] False [] noReceive
 
 unit :: CardCode -> String -> CardBuilder Unit () -> CardDef Unit
 unit code title = buildCard $ (emptyCardDef code title Unit) {CardDef.hitPoints = Just (Fixed 1)}
@@ -153,13 +153,91 @@ scout = keyword Scout
 onReceive :: Receive k -> CardBuilder k ()
 onReceive r = modify \cardDef -> cardDef {receive = r}
 
+-- | Append an 'ActionDef' to the card's action list. Multiple actions
+-- can be declared; the engine surfaces them to the client by index.
+action :: ActionDef k -> CardBuilder k ()
+action a = modify \cardDef -> cardDef {actions = cardDef.actions ++ [a]}
+
+-- | Convenience builder for declaring a tactic's target schema. The
+-- effect closure isn't used for tactics — the engine fires the
+-- card's 'receive' with 'TacticResolved'; the action metadata is
+-- there purely for client display and target validation.
+tacticTargets :: TargetSchema -> CardBuilder Tactic ()
+tacticTargets schema = action ActionDef
+  { actionName = "Play"
+  , actionCost = 0  -- the actual cost lives on CardDef.cost
+  , actionTarget = schema
+  , actionEffect = ActionEffect \_pk _ctx _tgt -> pure ()
+  }
+
 -- | First in-play unit controlled by an opponent of 'pk'. Used as an
--- auto-target placeholder until the engine surfaces real action
--- prompts.
+-- auto-target placeholder when the supplied 'ActionTarget' is
+-- 'NoTarget' or invalid.
 firstEnemyUnit :: PlayerKey -> Game -> Maybe UnitDetails
 firstEnemyUnit pk g = case filter (\u -> u.controller /= pk) g.units of
   (u : _) -> Just u
   [] -> Nothing
+
+-- | Resolve an enemy-unit target: prefer the explicit pick if it
+-- references an in-play opposing unit; otherwise fall back to the
+-- first enemy in play. Returns 'Nothing' if neither is available.
+resolveEnemyUnit :: PlayerKey -> ActionTarget -> Game -> Maybe UnitDetails
+resolveEnemyUnit pk t g = case t of
+  TargetUnit k -> case findUnit k g of
+    Just u | u.controller /= pk -> Just u
+    _ -> firstEnemyUnit pk g
+  _ -> firstEnemyUnit pk g
+
+-- | Resolve a friendly-unit target with the same fallback discipline
+-- as 'resolveEnemyUnit'.
+resolveFriendlyUnit :: PlayerKey -> ActionTarget -> Game -> Maybe UnitDetails
+resolveFriendlyUnit pk t g = case t of
+  TargetUnit k -> case findUnit k g of
+    Just u | u.controller == pk -> Just u
+    _ -> firstMine
+  _ -> firstMine
+  where
+    firstMine = case filter (\u -> u.controller == pk) g.units of
+      (u : _) -> Just u
+      [] -> Nothing
+
+-- | Resolve a zone target: prefer the explicit pick; otherwise fall
+-- back to the opponent's most-damaged unburned zone.
+resolveEnemyZone :: PlayerKey -> ActionTarget -> Game -> Maybe (PlayerKey, ZoneKind)
+resolveEnemyZone pk t g = case t of
+  TargetZone owner z | owner /= pk -> Just (owner, z)
+  _ ->
+    let opp = case pk of
+          Player1 -> g.player2
+          Player2 -> g.player1
+        scored =
+          [ (d, z)
+          | (z, zL) <-
+              [ (KingdomZone, opp.capital.kingdom)
+              , (QuestZone, opp.capital.quest)
+              , (BattlefieldZone, opp.capital.battlefield)
+              ]
+          , not zL.burned
+          , let Damage d = zL.damage
+          ]
+     in case scored of
+          [] -> Nothing
+          xs ->
+            let (_, z) = maximum xs
+             in Just (pk.next, z)
+
+-- | Resolve an enemy-support target: prefer the explicit pick;
+-- otherwise fall back to the first enemy support in play.
+resolveEnemySupport :: PlayerKey -> ActionTarget -> Game -> Maybe SupportDetails
+resolveEnemySupport pk t g = case t of
+  TargetSupport k -> case findSupport k g of
+    Just s | s.controller /= pk -> Just s
+    _ -> fallback
+  _ -> fallback
+  where
+    fallback = case filter (\s -> s.controller /= pk) g.supports of
+      (s : _) -> Just s
+      [] -> Nothing
 
 -- | First unit controlled by 'pk' sitting in the given zone.
 firstUnitOfInZone :: PlayerKey -> ZoneKind -> Game -> Maybe UnitDetails
@@ -412,9 +490,6 @@ trollSlayers = unit "core-004" "Troll Slayers" do
   body
     "Battlefield. This unit gains {power}{power} while you have at least two developments in this zone."
 
--- TODO: re-implement the "Action: pay 2 -> target unit +1 power until end
--- of turn" ability once the engine exposes action prompts on top of
--- CardDef.receive.
 runesmith :: CardDef Unit
 runesmith = unit "core-005" "Runesmith" do
   race Dwarf
@@ -425,6 +500,19 @@ runesmith = unit "core-005" "Runesmith" do
   trait Priest
   body
     "Quest. Action: Spend 2 resources to have a target unit gain {power} until the end of the turn."
+  action ActionDef
+    { actionName = "Buff a unit"
+    , actionCost = 2
+    , actionTarget = AnyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k ->
+          push
+            ( InstallModifier
+                (UnitRef k)
+                (Modifier (GainPower 1) UntilEndOfTurn)
+            )
+        _ -> pure ()
+    }
 
 -- TODO: re-implement the "+2 power while a capital section is burning"
 -- effect once burning is wired through CardDef.receive.
@@ -463,6 +551,25 @@ dwarfCannonCrew = unit "core-008" "Dwarf Cannon Crew" do
   trait Engineer
   body
     "Forced: When this unit enters play, search the top five cards of your deck for a support card with cost 2 or lower. You may put that card into this zone. Then, shuffle your deck."
+  onReceive $ Receive \msg owner self -> case msg of
+    UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key -> do
+      let scanFor =
+            [ c.key
+            | c <- take 5 owner.deck
+            , SupportCardDef cd <- [c.def]
+            , Fixed n <- [cd.cost]
+            , n <= 2
+            ]
+      case scanFor of
+        (sKey : _) -> do
+          -- Pull the picked card to the front of the deck (so the
+          -- engine's hand-or-deck lookups can find it), then play it
+          -- into this unit's zone via the existing PlaySupport path.
+          push (PlaySupportFromDeck self.controller sKey self.zone)
+          push (ShuffleDeck self.controller)
+        [] ->
+          push (ShuffleDeck self.controller)
+    _ -> pure ()
 
 dwarfMasons :: CardDef Unit
 dwarfMasons = unit "core-009" "Dwarf Masons" do
@@ -574,6 +681,38 @@ aGloriousDeath = quest "core-017" "A Glorious Death" do
   loyalty 2
   body
     "Quest. Action: Sacrifice the unit on this quest to destroy up to two target attacking units. Use this ability only if A Glorious Death has 3 or more resource tokens on it.\nQuest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here."
+  -- Forced: tick a token at controller-turn-begin when a unit is
+  -- questing here.
+  onReceive $ Receive \msg _owner self -> case msg of
+    BeginTurn k | k == self.controller -> do
+      g <- getGame
+      case findQuest self.key g of
+        Just q | q.questingUnit /= Nothing ->
+          push (AdjustQuestTokens self.key 1)
+        _ -> pure ()
+    _ -> pure ()
+  -- Action: sacrifice the questing unit + destroy up to 2 attackers.
+  -- Gated on >= 3 tokens.
+  action ActionDef
+    { actionName = "Glorious sacrifice"
+    , actionCost = 0
+    , actionTarget = NoTargetSchema
+    , actionEffect = ActionEffect \pk self _tgt -> do
+        g <- getGame
+        case findQuest self.key g of
+          Just q
+            | q.tokens >= 3
+            , Just questerKey <- q.questingUnit -> do
+                push (DestroyUnit questerKey)
+                case g.combat of
+                  Just cs | cs.attackingPlayer /= pk ->
+                    traverse_
+                      (\k -> push (DestroyUnit k))
+                      (take 2 cs.attackers)
+                  _ -> pure ()
+                push (AdjustQuestTokens self.key (-3))
+          _ -> pure ()
+    }
 
 grudgeThrower :: CardDef Support
 grudgeThrower = support "core-018" "Grudge Thrower" do
@@ -595,7 +734,7 @@ buryingTheGrudge = tactic "core-019" "Burying the Grudge" do
   -- resource pool. No 'AddResources' message exists yet, so we mutate
   -- the player record directly via the dispatch hook.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       let gain = g.unitsDiscardedThisTurn
       when (gain > 0) $
@@ -612,7 +751,7 @@ stubbornRefusal = tactic "core-020" "Stubborn Refusal" do
   -- Auto-target: move damage from the controller's most-damaged unit
   -- onto the first enemy unit in the same corresponding zone.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       let mine =
             [ u
@@ -645,7 +784,7 @@ strikingTheGrudge = tactic "core-021" "Striking the Grudge" do
   flavor "Honour redeemed, oaths fulfilled."
   -- Auto-target the first friendly combatant.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       case g.combat of
         Just cs ->
@@ -676,7 +815,7 @@ grudgeThrowerAssault = tactic "core-022" "Grudge Thrower Assault" do
     "Play during combat, after damage has been assigned.\nAction: Destroy one target attacking unit."
   -- Auto-target the first enemy attacker.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       case g.combat of
         Just cs | cs.attackingPlayer /= pk ->
@@ -693,14 +832,13 @@ demolition = tactic "core-023" "Demolition!" do
   loyalty 1
   body "Action: Destroy one target support card or development."
   flavor "KABOOM!"
-  -- Auto-target the first enemy free-standing support. Development
-  -- targeting awaits proper prompts.
+  tacticTargets SupportTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      case [s.key | s <- g.supports, s.controller /= pk] of
-        (sKey : _) -> push (DestroySupport sKey)
-        [] -> pure ()
+      case resolveEnemySupport pk target g of
+        Just s -> push (DestroySupport s.key)
+        Nothing -> pure ()
     _ -> pure ()
 
 wakeTheMountain :: CardDef Tactic
@@ -714,7 +852,7 @@ wakeTheMountain = tactic "core-024" "Wake the Mountain" do
   -- battlefield) of the two eligible zones. AddDevelopment doesn't
   -- consume deck cards today; same approximation as Dwarf Masons.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       let me = case pk of
             Player1 -> g.player1
@@ -736,7 +874,7 @@ masterRuneOfValaya = tactic "core-025" "Master Rune of Valaya" do
   body "Action: Cancel all damage assigned during the battlefield phase this turn."
   flavor "Valaya preseve and protect us in our hour of need!"
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller ->
+    TacticResolved pk _code _target | pk == self.controller ->
       push CancelAllBattlefieldDamageThisTurn
     _ -> pure ()
 
@@ -870,7 +1008,7 @@ bloodForTheBloodGod = tactic "core-103" "Blood for the Blood God" do
   -- printed power. (Real card chooses "any battlefield"; we'd want a
   -- target prompt for that.)
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       case firstEnemyUnit self.controller g of
         Just target -> push (DealDamageToUnit target.key target.cardDef.power)
@@ -989,27 +1127,22 @@ wolvesOfTheNorth = quest "path-of-the-zealot-032" "Wolves of the North" do
   trait QuestTrait
   body
     "Action: During your quest phase, the unit questing on this card can initiate a single attack against a single zone controlled by an opponent."
-  -- Approximation: on the controller's quest phase, auto-initiate an
-  -- out-of-phase attack using the first friendly Chaos unit in their
-  -- battlefield. Targets the opposing battlefield. (The real card
-  -- requires committing a unit to the quest first; that subsystem
-  -- isn't built yet.)
-  onReceive $ Receive \msg _owner self -> case msg of
-    BeginPhase QuestPhase -> do
-      g <- getGame
-      when (g.currentPlayer == self.controller) $
-        case filter
-          ( \u ->
-              u.controller == self.controller
-                && u.zone == BattlefieldZone
-                && not u.corrupted
-                && Chaos `elem` u.cardDef.races
-          )
-          g.units of
-          (attacker : _) ->
-            push (BeginCombat self.controller BattlefieldZone [attacker.key])
-          [] -> pure ()
-    _ -> pure ()
+  -- Action: the questing unit initiates an out-of-phase attack
+  -- against the chosen enemy zone. The target schema is an enemy
+  -- zone; the questing unit is read off the quest itself.
+  action ActionDef
+    { actionName = "Out-of-phase attack"
+    , actionCost = 0
+    , actionTarget = EnemyZoneTargetSchema
+    , actionEffect = ActionEffect \pk self target -> do
+        g <- getGame
+        case (findQuest self.key g, target) of
+          (Just q, TargetZone owner z)
+            | owner /= pk
+            , Just attackerKey <- q.questingUnit ->
+                push (BeginCombat pk z [attackerKey])
+          _ -> pure ()
+    }
 
 doombull :: CardDef Unit
 doombull = unit "the-chaos-moon-032" "Doombull" do
@@ -1082,7 +1215,7 @@ berserkFury = tactic "the-warpstone-chronicles-094" "Berserk Fury" do
   -- turn. EndTurn clears the modifier in one go via
   -- 'ClearScopedModifiers UntilEndOfTurn'.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       case filter (\u -> u.controller == self.controller) g.units of
         (target : _) -> do
@@ -1148,7 +1281,7 @@ markOfChaos = support "omens-of-ruin-013" "Mark of Chaos" do
           g <- getGame
           case findUnit hostKey g of
             Just host | host.controller == turnOwner ->
-              push (DealDamageToUnit hostKey 1)
+              push (DealDamageToUnitUncancellable hostKey 1)
             _ -> pure ()
     _ -> pure ()
 
@@ -1269,7 +1402,7 @@ recklessAttack = tactic "days-of-blood-018" "Reckless Attack" do
   -- handler auto-adds it to the combat attackers and to
   -- 'attackersThisPhase'), and schedule the end-of-phase sacrifice.
   onReceive $ Receive \msg owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       let pickFromDiscard =
             [ c.key
@@ -1406,6 +1539,14 @@ rieklandMarksmen = unit "core-033" "Riekland Marksmen" do
   hitPoints 1
   trait Warrior
   body "Action: Spend 1 resource to deal 1 damage to target unit."
+  action ActionDef
+    { actionName = "Shoot"
+    , actionCost = 1
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k -> push (DealDamageToUnit k 1)
+        _ -> pure ()
+    }
 
 thyrusGorman :: CardDef Unit
 thyrusGorman = unit "core-034" "Thyrus Gorman" do
@@ -1419,6 +1560,14 @@ thyrusGorman = unit "core-034" "Thyrus Gorman" do
   body
     "Limit one Hero per zone.\n\
     \Action: Spend 2 resources to deal 2 damage to target unit."
+  action ActionDef
+    { actionName = "Cast"
+    , actionCost = 2
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k -> push (DealDamageToUnit k 2)
+        _ -> pure ()
+    }
 
 karlFranz :: CardDef Unit
 karlFranz = unit "core-035" "Karl Franz" do
@@ -1544,17 +1693,17 @@ defendingTheEmpire = quest "core-045" "Defending the Empire" do
   body
     "Quest. Forced: At the beginning of your turn, place 1 resource token on this card if a unit is questing here.\n\
     \Action: Spend 3 resource tokens from this card to heal all damage on your capital."
-  -- Quest-unit assignment isn't tracked yet, so the per-turn token slot
-  -- ticks unconditionally on the controller's turn-begin. Once 3
-  -- tokens accrue, auto-fire the heal-capital payoff and reset.
+  -- Tokens only accrue while a unit is questing here. On reaching 3
+  -- tokens, auto-fire the heal-capital payoff and reset.
   onReceive $ Receive \msg _owner self -> case msg of
     BeginTurn k | k == self.controller -> do
-      push (AdjustQuestTokens self.key 1)
       g <- getGame
       case findQuest self.key g of
-        Just q | q.tokens + 1 >= 3 -> do
-          push (AdjustQuestTokens self.key (-3))
-          push (HealCapital self.controller 99)
+        Just q | q.questingUnit /= Nothing -> do
+          push (AdjustQuestTokens self.key 1)
+          when (q.tokens + 1 >= 3) $ do
+            push (AdjustQuestTokens self.key (-3))
+            push (HealCapital self.controller 99)
         _ -> pure ()
     _ -> pure ()
 
@@ -1565,7 +1714,7 @@ forSigmar = tactic "core-046" "For Sigmar!" do
   loyalty 1
   body "Action: Each of your units gains {power} until the end of the turn."
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       let mine = [u | u <- g.units, u.controller == pk]
       traverse_
@@ -1585,11 +1734,12 @@ sigmarsWrath = tactic "core-047" "Sigmar's Wrath" do
   cost 3
   loyalty 2
   body "Action: Deal 3 damage to target unit."
+  tacticTargets EnemyUnitTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      case firstEnemyUnit self.controller g of
-        Just target -> push (DealDamageToUnit target.key 3)
+      case resolveEnemyUnit pk target g of
+        Just t -> push (DealDamageToUnit t.key 3)
         Nothing -> pure ()
     _ -> pure ()
 
@@ -1600,7 +1750,7 @@ counterCharge = tactic "core-048" "Counter-charge" do
   loyalty 2
   body "Play during combat. Action: Target defending unit gains {power}{power} until the end of the turn."
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       case g.combat of
         Just cs ->
@@ -1622,7 +1772,7 @@ battleOfTheReik = tactic "core-049" "Battle of the Reik" do
   loyalty 2
   body "Action: Deal 1 damage to each attacking and each defending unit."
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller ->
+    TacticResolved pk _code _target | pk == self.controller ->
       push (DealDamageToEachUnitInCombat 1)
     _ -> pure ()
 
@@ -1679,6 +1829,14 @@ highElfArchers = unit "core-054" "High Elf Archers" do
   hitPoints 1
   trait Warrior
   body "Action: Spend 1 resource to deal 1 damage to target unit."
+  action ActionDef
+    { actionName = "Loose arrow"
+    , actionCost = 1
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k -> push (DealDamageToUnit k 1)
+        _ -> pure ()
+    }
 
 seaGuardOfLothern :: CardDef Unit
 seaGuardOfLothern = unit "core-055" "Sea Guard of Lothern" do
@@ -1861,19 +2019,19 @@ theWhiteTower = quest "core-070" "The White Tower" do
   body
     "Quest. Forced: At the beginning of your turn, place 1 resource token here if a unit is questing here.\n\
     \Action: Spend 3 tokens to draw 3 cards."
-  -- Approximation: tick a token on every controller-turn-begin (we
-  -- don't track questing-unit assignment yet). Auto-fire the draw-3
-  -- payoff each time the count would cross 3, then reset.
+  -- Tokens only accrue with a questing unit. On reaching 3, auto-fire
+  -- the draw-3 payoff and reset.
   onReceive $ Receive \msg _owner self -> case msg of
     BeginTurn k | k == self.controller -> do
-      push (AdjustQuestTokens self.key 1)
       g <- getGame
       case findQuest self.key g of
-        Just q | q.tokens + 1 >= 3 -> do
-          push (AdjustQuestTokens self.key (-3))
-          push (Draw (Drawing StandardDraw self.controller))
-          push (Draw (Drawing StandardDraw self.controller))
-          push (Draw (Drawing StandardDraw self.controller))
+        Just q | q.questingUnit /= Nothing -> do
+          push (AdjustQuestTokens self.key 1)
+          when (q.tokens + 1 >= 3) $ do
+            push (AdjustQuestTokens self.key (-3))
+            push (Draw (Drawing StandardDraw self.controller))
+            push (Draw (Drawing StandardDraw self.controller))
+            push (Draw (Drawing StandardDraw self.controller))
         _ -> pure ()
     _ -> pure ()
 
@@ -1884,19 +2042,23 @@ voiceOfCommand = tactic "core-071" "Voice of Command" do
   loyalty 2
   traits [Spell]
   body "Action: Target unit gains {power}{power} until the end of the turn."
-  -- Auto-target the first friendly unit; without action prompts the
-  -- caster can't pick yet.
+  tacticTargets AnyUnitTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      case [u | u <- g.units, u.controller == pk] of
-        (target : _) ->
+      let pick = case target of
+            TargetUnit k -> findUnit k g
+            _ -> case [u | u <- g.units, u.controller == pk] of
+              (u : _) -> Just u
+              [] -> Nothing
+      case pick of
+        Just t ->
           push
             ( InstallModifier
-                (UnitRef target.key)
+                (UnitRef t.key)
                 (Modifier (GainPower 2) UntilEndOfTurn)
             )
-        [] -> pure ()
+        Nothing -> pure ()
     _ -> pure ()
 
 dragonBreath :: CardDef Tactic
@@ -1906,23 +2068,13 @@ dragonBreath = tactic "core-072" "Dragon Breath" do
   loyalty 3
   traits [Spell]
   body "Action: Deal 2 damage to each enemy unit in target zone."
-  -- Auto-target: pick the opponent zone with the most enemy units.
+  tacticTargets EnemyZoneTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      let counts =
-            [ ( length
-                  [ ()
-                  | u <- g.units
-                  , u.controller /= pk
-                  , u.zone == z
-                  ]
-              , z
-              )
-            | z <- [BattlefieldZone, QuestZone, KingdomZone]
-            ]
-          (_, bestZone) = maximum counts
-      push (DealDamageToEachEnemyUnitInZone pk bestZone 2)
+      case resolveEnemyZone pk target g of
+        Just (_, z) -> push (DealDamageToEachEnemyUnitInZone pk z 2)
+        Nothing -> pure ()
     _ -> pure ()
 
 magicOfTheOldOnes :: CardDef Tactic
@@ -1933,7 +2085,7 @@ magicOfTheOldOnes = tactic "core-073" "Magic of the Old Ones" do
   traits [Spell]
   body "Action: Draw 2 cards."
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       push (Draw (Drawing StandardDraw self.controller))
       push (Draw (Drawing StandardDraw self.controller))
     _ -> pure ()
@@ -1945,11 +2097,12 @@ battleMagic = tactic "core-074" "Battle Magic" do
   loyalty 2
   traits [Spell]
   body "Action: Deal 2 damage to target unit."
+  tacticTargets EnemyUnitTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      case firstEnemyUnit self.controller g of
-        Just target -> push (DealDamageToUnit target.key 2)
+      case resolveEnemyUnit pk target g of
+        Just t -> push (DealDamageToUnit t.key 2)
         Nothing -> pure ()
     _ -> pure ()
 
@@ -2077,6 +2230,14 @@ chaosSorcerer = unit "core-093" "Chaos Sorcerer" do
   hitPoints 2
   trait Sorcerer
   body "Quest. Action: Spend 2 resources to corrupt target enemy unit."
+  action ActionDef
+    { actionName = "Corrupt"
+    , actionCost = 2
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k -> push (CorruptUnit k)
+        _ -> pure ()
+    }
 
 horrorOfTzeentch :: CardDef Unit
 horrorOfTzeentch = unit "core-094" "Horror of Tzeentch" do
@@ -2209,11 +2370,12 @@ tidesOfChaos = tactic "core-101" "Tides of Chaos" do
   cost 2
   loyalty 2
   body "Action: Corrupt target unit."
+  tacticTargets EnemyUnitTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      case firstEnemyUnit self.controller g of
-        Just target -> push (CorruptUnit target.key)
+      case resolveEnemyUnit pk target g of
+        Just t -> push (CorruptUnit t.key)
         Nothing -> pure ()
     _ -> pure ()
 
@@ -2223,28 +2385,13 @@ doomOfTheEmpire = tactic "core-102" "Doom of the Empire" do
   cost 3
   loyalty 3
   body "Action: Deal 2 damage to target zone."
-  -- Auto-target the opponent's most-damaged zone.
+  tacticTargets EnemyZoneTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      let opp = case pk of
-            Player1 -> g.player2
-            Player2 -> g.player1
-          scored =
-            [ (d, z)
-            | (z, zL) <-
-                [ (KingdomZone, opp.capital.kingdom)
-                , (QuestZone, opp.capital.quest)
-                , (BattlefieldZone, opp.capital.battlefield)
-                ]
-            , not zL.burned
-            , let Damage d = zL.damage
-            ]
-      case scored of
-        [] -> pure ()
-        xs ->
-          let (_, z) = maximum xs
-           in push (DealDamageToZone pk.next z 2)
+      case resolveEnemyZone pk target g of
+        Just (owner, z) -> push (DealDamageToZone owner z 2)
+        Nothing -> pure ()
     _ -> pure ()
 
 -- ============================================================================
@@ -2379,6 +2526,16 @@ orcShaman = unit "core-117" "Orc Shaman" do
   hitPoints 2
   trait Sorcerer
   body "Action: Spend 2 resources to deal 2 damage to a target unit; deal 1 damage to this unit."
+  action ActionDef
+    { actionName = "Sorcery"
+    , actionCost = 2
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk self target -> case target of
+        TargetUnit k -> do
+          push (DealDamageToUnit k 2)
+          push (DealDamageToUnitUncancellable self.key 1)
+        _ -> pure ()
+    }
 
 trolls :: CardDef Unit
 trolls = unit "core-118" "Trolls" do
@@ -2487,33 +2644,34 @@ greenskinRush = quest "core-126" "Greenskin Rush" do
   body
     "Quest. Forced: At the beginning of your turn, place 1 resource token here if a unit is questing here.\n\
     \Action: Spend 2 tokens to put a Goblin unit from your hand into play."
-  -- Tick a token each controller-turn-begin; once 2 tokens accrue,
-  -- auto-summon the first Goblin-trait Orc unit from hand (Night
-  -- Goblins, Wolf Riders, Spider Riders, Snotlings) into the
-  -- battlefield. Quest-unit assignment isn't tracked yet.
+  -- Tokens only accrue while a unit is questing here. Once 2 tokens
+  -- accrue, auto-summon the first Goblin-trait Orc unit from hand
+  -- (Night Goblins, Wolf Riders, Spider Riders, Snotlings) into the
+  -- battlefield.
   onReceive $ Receive \msg owner self -> case msg of
     BeginTurn k | k == self.controller -> do
-      push (AdjustQuestTokens self.key 1)
       g <- getGame
       case findQuest self.key g of
-        Just q | q.tokens + 1 >= 2 -> do
-          let goblinCodes =
-                [ CardCode "core-114"  -- Night Goblins
-                , CardCode "core-115"  -- Goblin Wolf Riders
-                , CardCode "core-119"  -- Forest Goblin Spider Riders
-                , CardCode "core-120"  -- Snotlings
-                ]
-              pickHandUnit =
-                [ c.key
-                | c <- owner.hand
-                , UnitCardDef cd <- [c.def]
-                , cd.code `elem` goblinCodes
-                ]
-          case pickHandUnit of
-            (uKey : _) -> do
-              push (AdjustQuestTokens self.key (-2))
-              push (PutUnitIntoPlay self.controller uKey BattlefieldZone)
-            [] -> pure ()
+        Just q | q.questingUnit /= Nothing -> do
+          push (AdjustQuestTokens self.key 1)
+          when (q.tokens + 1 >= 2) $ do
+            let goblinCodes =
+                  [ CardCode "core-114"  -- Night Goblins
+                  , CardCode "core-115"  -- Goblin Wolf Riders
+                  , CardCode "core-119"  -- Forest Goblin Spider Riders
+                  , CardCode "core-120"  -- Snotlings
+                  ]
+                pickHandUnit =
+                  [ c.key
+                  | c <- owner.hand
+                  , UnitCardDef cd <- [c.def]
+                  , cd.code `elem` goblinCodes
+                  ]
+            case pickHandUnit of
+              (uKey : _) -> do
+                push (AdjustQuestTokens self.key (-2))
+                push (PutUnitIntoPlay self.controller uKey BattlefieldZone)
+              [] -> pure ()
         _ -> pure ()
     _ -> pure ()
 
@@ -2524,7 +2682,7 @@ waaagh = tactic "core-127" "Waaagh!" do
   loyalty 2
   body "Action: Each of your Orc units gains {power}{power} until the end of the turn."
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       let mine =
             [ u
@@ -2553,7 +2711,7 @@ crushEm = tactic "core-128" "Crush 'Em" do
   -- DeferDamageToUnitUntilEoT for "lots of damage" → relies on the
   -- existing end-of-turn pump to trigger destroy.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       case [u | u <- g.units, u.controller == pk] of
         (target : _) -> do
@@ -2573,22 +2731,13 @@ runEmDown = tactic "core-129" "Run 'Em Down" do
   cost 2
   loyalty 1
   body "Action: Deal 1 damage to each enemy unit in target zone."
+  tacticTargets EnemyZoneTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      let counts =
-            [ ( length
-                  [ ()
-                  | u <- g.units
-                  , u.controller /= pk
-                  , u.zone == z
-                  ]
-              , z
-              )
-            | z <- [BattlefieldZone, QuestZone, KingdomZone]
-            ]
-          (_, bestZone) = maximum counts
-      push (DealDamageToEachEnemyUnitInZone pk bestZone 1)
+      case resolveEnemyZone pk target g of
+        Just (_, z) -> push (DealDamageToEachEnemyUnitInZone pk z 1)
+        Nothing -> pure ()
     _ -> pure ()
 
 daBigStomp :: CardDef Tactic
@@ -2597,14 +2746,13 @@ daBigStomp = tactic "core-130" "Da Big Stomp" do
   cost 3
   loyalty 2
   body "Action: Destroy target support card or development."
-  -- Auto-target the first enemy free-standing support. Developments
-  -- aren't individually targetable yet.
+  tacticTargets SupportTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      case [s.key | s <- g.supports, s.controller /= pk] of
-        (sKey : _) -> push (DestroySupport sKey)
-        [] -> pure ()
+      case resolveEnemySupport pk target g of
+        Just s -> push (DestroySupport s.key)
+        Nothing -> pure ()
     _ -> pure ()
 
 -- ============================================================================
@@ -2649,6 +2797,14 @@ morathi = unit "core-132" "Morathi" do
   body
     "Limit one Hero per zone.\n\
     \Action: Spend 2 resources to corrupt one target unit."
+  action ActionDef
+    { actionName = "Corrupt"
+    , actionCost = 2
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k -> push (CorruptUnit k)
+        _ -> pure ()
+    }
 
 croneHellebron :: CardDef Unit
 croneHellebron = unit "core-133" "Crone Hellebron" do
@@ -2775,6 +2931,14 @@ darkSorceress = unit "core-141" "Dark Sorceress" do
   hitPoints 2
   trait Sorcerer
   body "Action: Spend 2 resources to deal 2 damage to a target unit."
+  action ActionDef
+    { actionName = "Cast"
+    , actionCost = 2
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k -> push (DealDamageToUnit k 2)
+        _ -> pure ()
+    }
 
 assassinsOfKhaine :: CardDef Unit
 assassinsOfKhaine = unit "core-142" "Assassins of Khaine" do
@@ -2808,6 +2972,14 @@ repeaterCrossbowmen = unit "core-143" "Repeater Crossbowmen" do
   hitPoints 2
   trait Warrior
   body "Action: Spend 1 resource to deal 1 damage to a target unit."
+  action ActionDef
+    { actionName = "Loose bolts"
+    , actionCost = 1
+    , actionTarget = EnemyUnitTargetSchema
+    , actionEffect = ActionEffect \_pk _self target -> case target of
+        TargetUnit k -> push (DealDamageToUnit k 1)
+        _ -> pure ()
+    }
 
 bloodwrackMedusa :: CardDef Unit
 bloodwrackMedusa = unit "core-144" "Bloodwrack Medusa" do
@@ -2915,19 +3087,20 @@ slaughterAtLustria = quest "core-152" "Slaughter at Lustria" do
   body
     "Quest. Forced: At the beginning of your turn, place 1 token here if a unit is questing here.\n\
     \Action: Spend 3 tokens to corrupt up to 2 target units."
-  -- Tick a token each controller-turn-begin (no quest-unit gating yet).
-  -- On crossing 3 tokens, auto-corrupt 2 enemy units and reset.
+  -- Tokens only accrue while a unit is questing here. On crossing 3
+  -- tokens, auto-corrupt 2 enemy units and reset.
   onReceive $ Receive \msg _owner self -> case msg of
     BeginTurn k | k == self.controller -> do
-      push (AdjustQuestTokens self.key 1)
       g <- getGame
       case findQuest self.key g of
-        Just q | q.tokens + 1 >= 3 -> do
-          push (AdjustQuestTokens self.key (-3))
-          let enemies =
-                take 2 $
-                  filter (\u -> u.controller /= self.controller && not u.corrupted) g.units
-          traverse_ (\u -> push (CorruptUnit u.key)) enemies
+        Just q | q.questingUnit /= Nothing -> do
+          push (AdjustQuestTokens self.key 1)
+          when (q.tokens + 1 >= 3) $ do
+            push (AdjustQuestTokens self.key (-3))
+            let enemies =
+                  take 2 $
+                    filter (\u -> u.controller /= self.controller && not u.corrupted) g.units
+            traverse_ (\u -> push (CorruptUnit u.key)) enemies
         _ -> pure ()
     _ -> pure ()
 
@@ -2937,18 +3110,23 @@ khainesEmbrace = tactic "core-153" "Khaine's Embrace" do
   cost 2
   loyalty 2
   body "Action: Destroy target unit with 2 or fewer hit points."
+  tacticTargets EnemyUnitTargetSchema
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      let weak =
-            [ u
-            | u <- g.units
-            , u.controller /= pk
-            , u.effectiveMaxHP <= 2
-            ]
-      case weak of
-        (t : _) -> push (DestroyUnit t.key)
-        [] -> pure ()
+      let pick = case target of
+            TargetUnit k -> case findUnit k g of
+              Just u | u.controller /= pk && u.effectiveMaxHP <= 2 -> Just u
+              _ -> firstWeak
+            _ -> firstWeak
+          firstWeak = case
+            [u | u <- g.units, u.controller /= pk, u.effectiveMaxHP <= 2]
+            of
+              (u : _) -> Just u
+              [] -> Nothing
+      case pick of
+        Just t -> push (DestroyUnit t.key)
+        Nothing -> pure ()
     _ -> pure ()
 
 murderousProwess :: CardDef Tactic
@@ -2958,7 +3136,7 @@ murderousProwess = tactic "core-154" "Murderous Prowess" do
   loyalty 2
   body "Action: Each of your Dark Elf units gains {power} until the end of the turn."
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code _target | pk == self.controller -> do
       g <- getGame
       let mine =
             [ u
@@ -2983,12 +3161,11 @@ coldBloodedSlaughter = tactic "core-155" "Cold Blooded Slaughter" do
   cost 3
   loyalty 3
   body "Action: Deal damage equal to your hand size to a target unit."
-  -- Auto-target the first enemy. Note that 'hand' has already shed
-  -- the tactic itself by the time TacticResolved fires.
+  tacticTargets EnemyUnitTargetSchema
   onReceive $ Receive \msg owner self -> case msg of
-    TacticResolved pk _code | pk == self.controller -> do
+    TacticResolved pk _code target | pk == self.controller -> do
       g <- getGame
-      case firstEnemyUnit pk g of
+      case resolveEnemyUnit pk target g of
         Just t -> push (DealDamageToUnit t.key (length owner.hand))
         Nothing -> pure ()
     _ -> pure ()

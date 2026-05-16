@@ -4,6 +4,8 @@ module Invasion.Player (module Invasion.Player) where
 
 import Data.Aeson (ToJSON)
 import Data.Aeson.TH
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Invasion.Capital
 import {-# SOURCE #-} Invasion.Card (Card)
 import Invasion.Prelude
@@ -24,9 +26,25 @@ data Player = Player
   , hand :: [Card]
   , deck :: [Card]
   , discard :: [Card]
+  , developmentCards :: Map ZoneKind [Card]
+    -- ^ The actual facedown cards placed as developments, keyed by
+    -- the zone they sit in. The card identities are tracked here so
+    -- that destroy-development effects (e.g. Demolition!) can route
+    -- the card back to its owner's discard pile. The corresponding
+    -- 'Zone.developments' count is the length of the list for that
+    -- zone and is kept in sync by the engine.
   , race :: Race
   }
   deriving stock Show
+
+-- | Initial empty per-zone development cards.
+emptyDevelopmentCards :: Map ZoneKind [Card]
+emptyDevelopmentCards =
+  Map.fromList
+    [ (KingdomZone, [])
+    , (QuestZone, [])
+    , (BattlefieldZone, [])
+    ]
 
 -- | Top-level lifecycle state of a player. 'Eliminated' is terminal: a
 -- player loses if either two of their capital zones burn or their deck

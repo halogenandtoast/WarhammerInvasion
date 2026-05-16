@@ -2,6 +2,7 @@
 
 module Invasion.Message (module Invasion.Message) where
 
+import Invasion.CardDef (ActionTarget)
 import Invasion.Game (ActionWindowTrigger)
 import Invasion.Modifier (Modifier, ModifierScope)
 import Invasion.Player (Drawing, EliminationReason)
@@ -41,11 +42,27 @@ data Message where
   -- constructor, and reuses the key as the new in-play unit / support /
   -- quest / legend identity. No fresh key is minted on play.
   PlayUnit :: PlayerKey -> UnitKey -> ZoneKind -> Message
+  PlayUnitOnQuest :: PlayerKey -> UnitKey -> UnitKey -> Message
+    -- ^ Play a unit from hand into the quest zone, simultaneously
+    -- committing it to quest on the named Quest card. The first
+    -- 'UnitKey' is the in-hand card key; the second is the existing
+    -- Quest's key. Pays cost, places the unit in 'QuestZone', and
+    -- sets 'QuestDetails.questingUnit'.
   UnitEnteredPlay :: PlayerKey -> UnitKey -> Message
+  AssignUnitToQuest :: PlayerKey -> UnitKey -> UnitKey -> Message
+    -- ^ Attach an already-in-play unit (first UnitKey, must be in the
+    -- quest zone of pk) to a quest (second UnitKey). Refused if the
+    -- quest already has a questing unit.
   -- Damage / destroy
   DealDamageToUnit :: UnitKey -> Int -> Message
-    -- ^ Apply N damage to a target unit. If accumulated damage equals
-    -- or exceeds the unit's HP, the engine queues 'DestroyUnit'.
+    -- ^ Apply N damage to a target unit, subject to Toughness
+    -- cancellation. If accumulated damage equals or exceeds the
+    -- unit's HP, the engine queues 'DestroyUnit'.
+  DealDamageToUnitUncancellable :: UnitKey -> Int -> Message
+    -- ^ Same as 'DealDamageToUnit' but bypasses Toughness and other
+    -- damage-cancel effects. Used by cards with the
+    -- 'DamageCannotBeCancelled' keyword or that explicitly call out
+    -- uncancellable damage in their text.
   HealUnit :: UnitKey -> Int -> Message
     -- ^ Remove up to N damage from a target unit (clamped to 0).
   DestroyUnit :: UnitKey -> Message
@@ -74,6 +91,10 @@ data Message where
   PlaySupport :: PlayerKey -> UnitKey -> ZoneKind -> Message
     -- ^ Play a non-attachment Support card from hand into one of your
     -- zones. Pays cost, removes the card, emits 'SupportEnteredPlay'.
+  PlaySupportFromDeck :: PlayerKey -> UnitKey -> ZoneKind -> Message
+    -- ^ Bypass the cost / hand path: pull the named support card out
+    -- of the player's deck and put it directly into the named zone.
+    -- Used by deck-search effects (e.g. Dwarf Cannon Crew).
   PlayQuest :: PlayerKey -> UnitKey -> Message
     -- ^ Play a Quest from hand. Emits 'QuestEnteredPlay'.
   QuestEnteredPlay :: PlayerKey -> UnitKey -> Message
@@ -95,13 +116,22 @@ data Message where
     -- ^ Pin a card (by code) as an "experience" on a host unit. Used by
     -- Skulltaker; the host card text reads 'experiences' to scale.
   -- Tactics
-  PlayTactic :: PlayerKey -> UnitKey -> Message
+  PlayTactic :: PlayerKey -> UnitKey -> ActionTarget -> Message
     -- ^ Play a Tactic from hand: pay cost, send to discard, fire the
-    -- tactic's 'receive' once with 'TacticResolved'.
-  TacticResolved :: PlayerKey -> CardCode -> Message
+    -- tactic's 'receive' once with 'TacticResolved'. The
+    -- 'ActionTarget' is the target the player chose at play time (or
+    -- 'NoTarget' for non-targeting tactics).
+  TacticResolved :: PlayerKey -> CardCode -> ActionTarget -> Message
     -- ^ Dispatch hook fired exactly once when a tactic resolves. The
     -- tactic's CardDef.receive is invoked with this message; cards
-    -- like Berserk Fury and Blood for the Blood God react here.
+    -- like Berserk Fury and Blood for the Blood God react here. The
+    -- 'ActionTarget' carries the choice from 'PlayTactic'.
+  -- Card action abilities
+  TriggerCardAction :: PlayerKey -> UnitKey -> Int -> ActionTarget -> Message
+    -- ^ Trigger the indexed action ability on an in-play card. The
+    -- engine validates target (against the card's declared
+    -- 'TargetSchema'), debits the resource cost, and fires the
+    -- action's effect.
   -- Deferred effects
   DeferDamageToUnitUntilEoT :: UnitKey -> Int -> Message
     -- ^ Schedule N damage to land on the target at end of turn.

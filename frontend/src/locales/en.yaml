@@ -794,14 +794,12 @@ game:
     start_disabled_started: Game has already started.
     leave: Leave game
     confirm_leave: Leaving will end the game for both players. Continue?
-  chat:
-    heading: Game chat
-    placeholder: Say something to your opponent…
+  messages:
+    heading: Messages
     empty: No messages yet.
+  chat:
+    placeholder: Say something to your opponent…
     send: Send
-  log:
-    heading: Game log
-    empty: The game hasn't started yet.
   errors:
     not_seated: You're not seated in this game.
     deck_not_found: That deck no longer exists.

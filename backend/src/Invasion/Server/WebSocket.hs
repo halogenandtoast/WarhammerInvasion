@@ -45,6 +45,7 @@ import Invasion.Auth.Jwt
   )
 import Invasion.Card (Card (..), SomeCardDef (..))
 import Invasion.CardDef (CardDef (..), Trait (Attachment))
+import Invasion.CardDef qualified as CardDef
 import Invasion.DB (DbPool, runDB)
 import Invasion.Engine
   ( Message
@@ -57,6 +58,7 @@ import Invasion.Engine
       , PlayTactic
       , PlayUnit
       , Setup
+      , TriggerCardAction
       )
   , applyMessage
   , newGame
@@ -68,6 +70,7 @@ import Invasion.Model
 import Invasion.Prelude
 import Invasion.Server.Lobby
 import Invasion.Server.Protocol
+import Invasion.Server.Protocol qualified as Proto
 import Invasion.Types
   ( CardCode (..)
   , PlayerKey (..)
@@ -478,6 +481,27 @@ handleGameIn env slot user = \case
                   writeTVar slot.engine (Just g')
                   v <- gameViewSTM slot user
                   broadcastGameWithView slot v
+  GameTriggerAction {source, actionIndex, target, targetZone} -> do
+    mGame <- readTVarIO slot.engine
+    case mGame of
+      Nothing -> sendGameError slot user "game_not_started"
+      Just g -> do
+        seatKey <- atomically do
+          sm <- readTVar slot.seats
+          pure $ findSeatFor user sm
+        case seatKey >>= seatKeyToPlayerKey of
+          Nothing -> sendGameError slot user "not_seated"
+          Just pk -> do
+            let actionTarget = case (target, targetZone) of
+                  (Just u, _) -> CardDef.TargetUnit u
+                  (_, Just (Proto.ZoneTarget {player = zp, kind = zk})) ->
+                    CardDef.TargetZone zp zk
+                  _ -> CardDef.NoTarget
+            g' <- applyMessage g (TriggerCardAction pk source actionIndex actionTarget)
+            atomically do
+              writeTVar slot.engine (Just g')
+              v <- gameViewSTM slot user
+              broadcastGameWithView slot v
   GameLeave -> do
     sts <- readTVarIO slot.status
     -- A "leave" while playing ends the game.
@@ -542,8 +566,16 @@ playMessageFor pk cardKey mZone mTarget = \case
         Just z -> Right (PlaySupport pk cardKey z)
         Nothing -> Left "zone_required"
   QuestCardDef _ -> Right (PlayQuest pk cardKey)
-  TacticCardDef _ -> Right (PlayTactic pk cardKey)
+  TacticCardDef _ -> Right (PlayTactic pk cardKey (tacticTargetFor mTarget mZone))
   LegendCardDef _ -> Right (PlayLegend pk cardKey)
+
+-- | Map the legacy zone/unit fields on 'GamePlayCard' into the
+-- richer 'ActionTarget' carried by 'PlayTactic'. Unit pick wins;
+-- otherwise zone pick (against the opponent, since most zone-targeting
+-- tactics are offensive); otherwise no target.
+tacticTargetFor :: Maybe UnitKey -> Maybe ZoneKind -> CardDef.ActionTarget
+tacticTargetFor (Just u) _ = CardDef.TargetUnit u
+tacticTargetFor _ _ = CardDef.NoTarget
 
 sendGameError :: GameSlot -> UserInfo -> Text -> IO ()
 sendGameError slot user code = atomically do

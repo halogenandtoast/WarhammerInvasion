@@ -8,6 +8,7 @@ module Invasion.CardDef (module Invasion.CardDef) where
 import Control.Monad.IO.Class (MonadIO)
 import Data.Aeson
 import Data.Aeson.TH
+import Data.Text (Text)
 import Invasion.Player (Player)
 import Invasion.Prelude
 import Invasion.Types
@@ -78,6 +79,60 @@ newtype Receive k = Receive
 noReceive :: Receive k
 noReceive = Receive \_ _ _ -> pure ()
 
+-- | What kind of target an action requires. The engine validates the
+-- supplied 'ActionTarget' against this schema before invoking the
+-- action's effect.
+data TargetSchema
+  = NoTargetSchema
+    -- ^ The action takes no target.
+  | AnyUnitTargetSchema
+    -- ^ Any unit currently in play.
+  | EnemyUnitTargetSchema
+    -- ^ A unit controlled by the opponent.
+  | FriendlyUnitTargetSchema
+    -- ^ A unit controlled by the player triggering the action.
+  | AnyZoneTargetSchema
+    -- ^ A zone of any player.
+  | EnemyZoneTargetSchema
+    -- ^ A zone controlled by the opponent.
+  | SupportTargetSchema
+    -- ^ A free-standing support in play.
+  deriving stock (Show, Eq)
+
+-- | The concrete target supplied with a 'TriggerCardAction' message.
+data ActionTarget
+  = NoTarget
+  | TargetUnit UnitKey
+  | TargetZone PlayerKey ZoneKind
+  | TargetSupport UnitKey
+  deriving stock (Show, Eq)
+
+mconcat
+  [ deriveToJSON defaultOptions ''TargetSchema
+  , deriveToJSON defaultOptions ''ActionTarget
+  ]
+
+-- | The bespoke effect a card's action runs once cost has been paid and
+-- target has been validated. Same capability set as 'Receive'.
+newtype ActionEffect k = ActionEffect
+  { unEffect
+      :: forall m
+       . (HasGame m, MonadIO m, HasQueue Message m)
+      => PlayerKey -> InPlay k -> ActionTarget -> m ()
+  }
+
+-- | A single Action ability printed on a card. Cards may declare zero
+-- or more actions; the engine enumerates them during action windows.
+-- Field names are prefixed with @action@ so they can't shadow
+-- 'CardDef'\'s own @cost@/@target@ fields under
+-- @DuplicateRecordFields@.
+data ActionDef k = ActionDef
+  { actionName :: Text
+  , actionCost :: Int
+  , actionTarget :: TargetSchema
+  , actionEffect :: ActionEffect k
+  }
+
 data CardDef (k :: CardKind) = CardDef
   { code :: CardCode
   , title :: String
@@ -92,6 +147,7 @@ data CardDef (k :: CardKind) = CardDef
   , flavor :: Maybe String
   , keywords :: [Keyword]
   , unique :: Bool
+  , actions :: [ActionDef k]
   , receive :: Receive k
   }
 
@@ -107,7 +163,9 @@ instance Show (CardDef k) where
 
 -- The 'receive' function field is not JSON-encodable; the frontend only
 -- needs the static metadata anyway. Hand-roll the instance so the field
--- is silently dropped.
+-- is silently dropped. Actions also serialize as just their static
+-- metadata (name/cost/target schema) so the client can render the
+-- available-actions list without seeing the effect closures.
 instance ToJSON (CardDef k) where
   toJSON c =
     object
@@ -124,4 +182,12 @@ instance ToJSON (CardDef k) where
       , "flavor" .= c.flavor
       , "keywords" .= c.keywords
       , "unique" .= c.unique
+      , "actions" .= map actionDefMeta c.actions
       ]
+    where
+      actionDefMeta a =
+        object
+          [ "name" .= a.actionName
+          , "cost" .= a.actionCost
+          , "target" .= a.actionTarget
+          ]
