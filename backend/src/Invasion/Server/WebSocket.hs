@@ -43,10 +43,17 @@ import Invasion.Auth.Jwt
   , verifyJwt
   )
 import Invasion.DB (DbPool, runDB)
+import Invasion.Engine
+  ( Message (BeginGame, PassPriority, Setup)
+  , applyMessage
+  , dwarfStarterDeck
+  , newGame
+  )
 import Invasion.Model
 import Invasion.Prelude
 import Invasion.Server.Lobby
 import Invasion.Server.Protocol
+import Invasion.Types (PlayerKey (..))
 import Network.HTTP.Types (Query, parseQuery)
 import Network.Wai (Application, rawPathInfo, rawQueryString)
 import Network.Wai.Handler.WebSockets (websocketsOr)
@@ -389,12 +396,42 @@ handleGameIn env slot user = \case
                        (Map.elems sm)
             if not ready
               then sendGameError slot user "not_ready"
-              else atomically do
-                trySetStatus slot StatusPlaying
-                v <- gameViewSTM slot user
-                broadcastGameWithView slot v
-                summaries <- summariesSTM env.lobby
-                broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
+              else do
+                -- Build the engine game and pump it through Setup +
+                -- BeginGame so we land on the first action window. We
+                -- still use the dwarf starter for both seats — actual
+                -- deck loading from the chosen deckIds is the next
+                -- step, but the engine has nothing to do with the
+                -- card pool yet so this is enough to drive the basic
+                -- phase machinery.
+                case newGame dwarfStarterDeck dwarfStarterDeck of
+                  Left err -> sendGameError slot user (T.pack err)
+                  Right g0 -> do
+                    g1 <- applyMessage g0 Setup
+                    g2 <- applyMessage g1 BeginGame
+                    atomically do
+                      writeTVar slot.engine (Just g2)
+                      trySetStatus slot StatusPlaying
+                      v <- gameViewSTM slot user
+                      broadcastGameWithView slot v
+                      summaries <- summariesSTM env.lobby
+                      broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
+  GamePassPriority -> do
+    mGame <- readTVarIO slot.engine
+    case mGame of
+      Nothing -> sendGameError slot user "game_not_started"
+      Just g -> do
+        seatKey <- atomically do
+          sm <- readTVar slot.seats
+          pure $ findSeatFor user sm
+        case seatKey >>= seatKeyToPlayerKey of
+          Nothing -> sendGameError slot user "not_seated"
+          Just pk -> do
+            g' <- applyMessage g (PassPriority pk)
+            atomically do
+              writeTVar slot.engine (Just g')
+              v <- gameViewSTM slot user
+              broadcastGameWithView slot v
   GameLeave -> do
     sts <- readTVarIO slot.status
     -- A "leave" while playing ends the game.
@@ -419,6 +456,12 @@ findSeatFor user m =
    in case matches of
         (k : _) -> Just k
         [] -> Nothing
+
+seatKeyToPlayerKey :: Text -> Maybe PlayerKey
+seatKeyToPlayerKey = \case
+  "Player1" -> Just Player1
+  "Player2" -> Just Player2
+  _ -> Nothing
 
 sendGameError :: GameSlot -> UserInfo -> Text -> IO ()
 sendGameError slot user code = atomically do

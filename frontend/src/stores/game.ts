@@ -112,11 +112,18 @@ function leaveGame() {
   socket?.send({ tag: 'GameLeave' })
 }
 
+function passPriority() {
+  socket?.send({ tag: 'GamePassPriority' })
+}
+
 export const game = {
   status: computed(() => _status.value),
   gameId: computed(() => _gameId.value),
   you: computed(() => _you.value),
   view: computed(() => _view.value),
+  // Convenience: pulls the engine snapshot off the latest view. Null
+  // until the game is started.
+  engine: computed(() => _view.value?.engine ?? null),
   lastError: computed(() => _lastError.value),
   closed: computed(() => _closed.value),
   connect,
@@ -125,5 +132,6 @@ export const game = {
   selectDeck,
   clearDeck,
   startGame,
+  passPriority,
   leaveGame,
 }

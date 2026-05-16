@@ -61,6 +61,21 @@
   /* Mobile tap target floor — see frontend/CLAUDE.md */
   --tap-target: 44px;
 
+  /*
+   * Card sizing — the single source of truth for how wide/tall a card
+   * is, used by every card-rendering surface (in-game table, hand,
+   * deckbuilder, cards browser). Aspect ratio is roughly 5:7 to match
+   * real-world TCG card stock. Keep --card-w-sm/--card-h-sm in step
+   * with the same ratio so the SVG playboard and HTML hand line up.
+   *
+   * If you need a different size locally, scale via transform; do not
+   * fork the tokens.
+   */
+  --card-w: 96px;
+  --card-h: 134px;
+  --card-w-sm: 72px;
+  --card-h-sm: 100px;
+
   /* Motion */
   --transition-fast: 0.08s ease;
   --transition-base: 0.2s ease;

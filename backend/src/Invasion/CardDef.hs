@@ -33,7 +33,7 @@ data CardDef (k :: CardKind) = CardDef
 data Keyword = Toughness Number | BattlefieldOnly | Scout
   deriving stock Show
 
-data Cost = Resources Number | NoCost
+data Cost = PayResources Number | NoCost
 
 data Trait
   = Warrior

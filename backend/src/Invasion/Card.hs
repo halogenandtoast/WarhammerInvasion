@@ -212,7 +212,7 @@ instance Card TrollSlayers where
     battlefield this \zone -> when (zone.developments >= 2) (constantly $ gainPower this 2)
 
 resources :: Int -> Cost
-resources n = Resources (Fixed n)
+resources n = PayResources (Fixed n)
 
 newtype Runesmith = Runesmith UnitDetails
   deriving stock Show

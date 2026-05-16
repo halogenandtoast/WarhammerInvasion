@@ -51,6 +51,121 @@ export interface GameView {
   seats: SeatView[]
   status: GameStatus
   chat: ChatLine[]
+  // The engine snapshot. `null` while the game is waiting; populated
+  // once Setup + BeginGame have run. Kept here as a single payload so
+  // the renderer can derive everything from one source of truth.
+  engine: EngineGame | null
+}
+
+// ---------------------------------------------------------------------------
+// Engine snapshot
+// Mirror of the JSON produced by Invasion.Game's ToJSON instance.
+
+export type PlayerKey = 'Player1' | 'Player2'
+
+export type Phase = 'KingdomPhase' | 'QuestPhase' | 'CapitalPhase' | 'BattlefieldPhase'
+
+export type ZoneKind = 'KingdomZone' | 'QuestZone' | 'BattlefieldZone'
+
+export interface EngineZone {
+  kind: ZoneKind
+  developments: number
+  damage: number
+  burned: boolean
+  // hitPoints is derived (8 + developments); not on the wire.
+}
+
+export interface EngineCapital {
+  kingdom: EngineZone
+  quest: EngineZone
+  battlefield: EngineZone
+}
+
+export type ActionWindowTrigger =
+  | 'KingdomActionWindow'
+  | 'QuestActionWindow'
+  | 'CapitalActionWindow'
+  | 'BattlefieldActionWindow'
+  | 'AfterDeclareCombatTarget'
+  | 'AfterDeclareAttackers'
+  | 'AfterDeclareDefenders'
+  | 'AfterAssignCombatDamage'
+  | 'AfterApplyCombatDamage'
+
+export type PassState =
+  | { tag: 'NoPasses'; contents: PlayerKey }
+  | { tag: 'OnePass'; contents: PlayerKey }
+
+export interface EngineActionWindow {
+  trigger: ActionWindowTrigger
+  awaiting: PassState
+}
+
+export type EliminationReason = 'DeckedOut' | 'CapitalBurned'
+
+export type PlayerLifecycle =
+  | { tag: 'IdlePlayer' }
+  | { tag: 'Eliminated'; contents: EliminationReason }
+  | { tag: 'PlayerDraw'; contents: unknown }
+
+// Currently only Dwarf exists engine-side, but the asset set covers the
+// full Warhammer: Invasion race list. Add to this union as we add races
+// to backend/src/Invasion/Types.hs.
+export type Race =
+  | 'Dwarf'
+  | 'Empire'
+  | 'HighElf'
+  | 'Chaos'
+  | 'Orc'
+  | 'DarkElf'
+
+export interface EnginePlayer {
+  key: PlayerKey
+  state: PlayerLifecycle
+  capital: EngineCapital
+  resources: number
+  // hand / deck / discard are arrays of card-def JSON; we only need
+  // their .length for the basic in-game UI, so leave them unknown.
+  hand: unknown[]
+  deck: unknown[]
+  discard: unknown[]
+  race: Race
+}
+
+export type GameLifecycle =
+  | { tag: 'GameSetup' }
+  | { tag: 'GamePlaying' }
+  | {
+      tag: 'GameFinished'
+      contents: {
+        winner: PlayerKey
+        reason: 'OpponentDeckedOut' | 'OpponentCapitalBurned'
+      }
+    }
+
+export interface EngineGame {
+  player1: EnginePlayer
+  player2: EnginePlayer
+  firstPlayer: PlayerKey
+  currentPlayer: PlayerKey
+  turn: number
+  phase: Phase | null
+  actionWindow: EngineActionWindow | null
+  modifiers: unknown
+  lifecycle: GameLifecycle
+}
+
+// Derived helpers — keep alongside the wire types so they stay in sync.
+export function zoneHitPoints(z: EngineZone): number {
+  return 8 + z.developments
+}
+
+export function zoneBurning(z: EngineZone): boolean {
+  return z.damage >= zoneHitPoints(z)
+}
+
+export function priorityHolder(s: PassState): PlayerKey {
+  return s.contents
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +205,7 @@ export type GameIn =
   | { tag: 'GameSelectDeck'; deckId: string }
   | { tag: 'GameClearDeck' }
   | { tag: 'GameStart' }
+  | { tag: 'GamePassPriority' }
   | { tag: 'GameLeave' }
 
 export type GameOut =

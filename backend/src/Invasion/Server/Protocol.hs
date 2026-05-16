@@ -27,7 +27,7 @@ module Invasion.Server.Protocol
   , GameOut (..)
   ) where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
 import Data.Text (Text)
 import Data.Time (UTCTime)
@@ -101,6 +101,12 @@ data GameView = GameView
   , seats :: [SeatView]
   , status :: GameStatus
   , chat :: [ChatLine]
+  , engine :: Maybe Value
+    -- ^ The engine 'Game' value, serialized as a JSON blob, present once
+    -- the game has been started. Sent as opaque 'Value' here so this
+    -- module doesn't need to import the engine; the frontend has a
+    -- typed view of the relevant subset. Eventually this becomes a
+    -- per-viewer snapshot (opponent's hand hidden).
   }
   deriving stock (Show, Generic)
 
@@ -155,6 +161,10 @@ data GameIn
     GameClearDeck
   | -- | Host-only. Transition Waiting -> Playing if both seats have decks.
     GameStart
+  | -- | Pass the current action window. The server fills in the
+    -- 'PlayerKey' from the sender's seat; if it isn't this player's
+    -- priority the engine will silently ignore the message.
+    GamePassPriority
   | -- | Drop this user from the seat, broadcast to the other seat.
     GameLeave
   deriving stock (Show, Generic)

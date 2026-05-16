@@ -18,7 +18,7 @@ data family Field (k :: CardKind) typ
 
 data instance Field Unit typ where
   UnitController :: Field Unit PlayerKey
-  UnitZone :: Field Unit Zone
+  UnitZone :: Field Unit ZoneKind
   UnitPower :: Field Unit Int
 
 class Entity (k :: CardKind) a where
@@ -29,7 +29,7 @@ class Entity (k :: CardKind) a where
 data UnitDetails = UnitDetails
   { key :: UnitKey
   , controller :: PlayerKey
-  , zone :: Zone
+  , zone :: ZoneKind
   , cardDef :: CardDef Unit
   }
   deriving stock Show
@@ -50,4 +50,3 @@ instance Entity Unit UnitDetails where
 
 getModifiers :: (HasGame m, Reference a) => a -> m [ModifierDetails]
 getModifiers a = fromMaybe [] . Map.lookup (toRef a) <$> getAllModifiers
-

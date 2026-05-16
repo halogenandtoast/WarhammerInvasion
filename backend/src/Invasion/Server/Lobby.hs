@@ -50,6 +50,7 @@ module Invasion.Server.Lobby
 import Control.Concurrent.STM
 import Control.Monad (forM, unless, when)
 import Data.Aeson qualified as Aeson
+import Data.Aeson (toJSON)
 import Data.ByteString.Lazy qualified as BSL
 import Data.List (find, sortOn)
 import Data.Map.Strict (Map)
@@ -62,6 +63,7 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime)
 import Data.UUID (UUID)
+import Invasion.Game (Game)
 import Invasion.Prelude
 import Invasion.Server.Protocol
 
@@ -105,6 +107,11 @@ data GameSlot = GameSlot
   , status :: TVar GameStatus
   , connections :: TVar (Map ConnId GameConn)
   , lastEmptyAt :: TVar (Maybe UTCTime)
+  , engine :: TVar (Maybe Game)
+    -- ^ The authoritative engine state. 'Nothing' while the slot is in
+    -- 'StatusWaiting'; 'Just' once 'GameStart' kicks off Setup +
+    -- BeginGame. Mutated by the WebSocket handler thread, never by the
+    -- engine itself (see ARCHITECTURE.md §3.3).
   }
 
 -- ----------------------------------------------------------------------------
@@ -187,6 +194,7 @@ createGame st gid name host vis pw token = do
   status <- newTVar StatusWaiting
   connections <- newTVar Map.empty
   lastEmptyAt <- newTVar Nothing
+  engine <- newTVar Nothing
   let slot = GameSlot
         { gameId = gid
         , name
@@ -199,6 +207,7 @@ createGame st gid name host vis pw token = do
         , status
         , connections
         , lastEmptyAt
+        , engine
         }
   modifyTVar' st.games (Map.insert gid slot)
   pure slot
@@ -296,6 +305,7 @@ gameViewSTM slot viewer = do
   sm <- readTVar slot.seats
   sts <- readTVar slot.status
   chatLines <- foldr (:) [] <$> readTVar slot.chat
+  mEngine <- readTVar slot.engine
   let seatList =
         [ SeatView
             { seat = k
@@ -318,6 +328,7 @@ gameViewSTM slot viewer = do
     , seats = seatList
     , status = sts
     , chat = chatLines
+    , engine = fmap toJSON mEngine
     }
 
 -- | If the slot has no connections, write 'now' to the empty timestamp.

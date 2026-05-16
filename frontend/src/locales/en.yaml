@@ -809,10 +809,62 @@ game:
     forbidden: This game requires a link or password to join.
     closed_left: You left the game.
     closed_unknown: The game ended.
+    game_not_started: The game hasn't started yet.
   invite_join:
     heading: Join this game
     lead: You're joining via an invite link. Connecting…
     password_lead: This game is private. Enter the password to join.
+  play:
+    turn_label: "Turn {n}"
+    your_turn: Your turn
+    opponent_turn: "{name}'s turn"
+    first_player_tag: First
+    phase:
+      Kingdom: Kingdom
+      Quest: Quest
+      Capital: Capital
+      Battlefield: Battlefield
+    window:
+      heading: Action window
+      trigger:
+        KingdomActionWindow: After kingdom resources
+        QuestActionWindow: After quest draw
+        CapitalActionWindow: Capital phase
+        BattlefieldActionWindow: Battlefield phase
+        AfterDeclareCombatTarget: After declaring target
+        AfterDeclareAttackers: After declaring attackers
+        AfterDeclareDefenders: After declaring defenders
+        AfterAssignCombatDamage: After assigning damage
+        AfterApplyCombatDamage: After applying damage
+      waiting_you: Your call — act or pass.
+      waiting_them: Waiting on {name}…
+      passes_so_far_zero: No one has passed yet.
+      passes_so_far_one: "{name} passed; you pass to close the window."
+      closed: No window open.
+      pass: Pass
+      pass_disabled: Not your priority.
+    seat:
+      you: You
+      opponent: Opponent
+      resources: Resources
+      hand: Hand
+      deck: Deck
+      discard: Discard
+    capital:
+      heading: Capital
+      kingdom: Kingdom
+      quest: Quest
+      battlefield: Battlefield
+      hp_short: "{damage}/{hp}"
+      burned: Burned
+      developments_one: "{n} development"
+      developments_other: "{n} developments"
+    finished:
+      heading: Game over
+      you_win: You win.
+      you_lose: "{name} wins."
+      reason_decked: Decked out.
+      reason_burned: Capital burned.
 
 cards:
   page_title: Card Database
