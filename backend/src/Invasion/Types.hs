@@ -18,9 +18,9 @@ instance HasField "next" PlayerKey PlayerKey where
   getField Player2 = Player1
 
 data Number = Fixed Int | Variable
-  deriving stock Show
+  deriving stock (Show, Eq)
 
-data CardKind = Unit | Support | Quest | Tactic | DraftFormat
+data CardKind = Unit | Support | Quest | Tactic | Legend | DraftFormat
   deriving stock Show
 
 -- | Identifies which of a capital's three zones something belongs to.

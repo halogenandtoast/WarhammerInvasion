@@ -14,6 +14,7 @@ import type {
   ActionWindowTrigger,
   EngineCardDef,
   EngineGame,
+  EngineLegend,
   EnginePlayer,
   EngineUnit,
   PlayerKey,
@@ -104,6 +105,14 @@ const opponentUnits = computed<EngineUnit[]>(() => {
   return props.engine.units.filter((u) => u.controller === k)
 })
 
+// At most one legend per player at a time (engine-enforced).
+function legendFor(k: PlayerKey | null): EngineLegend | null {
+  if (!k) return null
+  return props.engine.legends.find((l) => l.controller === k) ?? null
+}
+const myLegend = computed(() => legendFor(mySeatKey.value))
+const opponentLegend = computed(() => legendFor(opponentSeatKey.value))
+
 // ---- hand-card play popover ----
 //
 // When the player clicks a card in their own hand, we open a small DOM
@@ -130,12 +139,17 @@ function isAttachment(card: EngineCardDef): boolean {
 
 // Is this card playable at all right now? Tactics any time we hold
 // priority; everything else needs the active player to be us AND the
-// open window to be the capital action window.
+// open window to be the capital action window. Legends additionally
+// require that the controller doesn't already have one in play
+// (engine-enforced, but mirroring the rule client-side avoids opening
+// a popover that won't do anything).
 const canPlayCard = (card: EngineCardDef): boolean => {
   if (!priorityIsMe.value) return false
   if (card.kind === 'Tactic') return true
   if (props.engine.actionWindow?.trigger !== 'CapitalActionWindow') return false
-  return props.engine.currentPlayer === mySeatKey.value
+  if (props.engine.currentPlayer !== mySeatKey.value) return false
+  if (card.kind === 'Legend' && myLegend.value) return false
+  return true
 }
 
 function onHandCardClick(payload: { card: EngineCardDef | null; rect: DOMRect }) {
@@ -160,6 +174,15 @@ function zoneLabel(z: ZoneKind): string {
     case 'KingdomZone': return t('game.play.action.kingdom')
     case 'QuestZone': return t('game.play.action.quest')
     case 'BattlefieldZone': return t('game.play.action.battlefield')
+  }
+}
+
+function confirmLabel(kind: EngineCardDef['kind']): string {
+  switch (kind) {
+    case 'Tactic': return t('game.play.action.play_tactic')
+    case 'Legend': return t('game.play.action.play_legend')
+    case 'Quest': return t('game.play.action.play_quest')
+    default: return t('game.play.action.play_quest')
   }
 }
 
@@ -224,6 +247,7 @@ const popoverStyle = computed<Record<string, string>>(() => {
         v-if="opponent && opponentSeatKey"
         :player="opponent"
         :units="opponentUnits"
+        :legend="opponentLegend"
         perspective="opponent"
         :seat-name="seatName(opponentSeatKey)"
         :is-active="engine.currentPlayer === opponentSeatKey"
@@ -236,6 +260,7 @@ const popoverStyle = computed<Record<string, string>>(() => {
         v-if="me && mySeatKey"
         :player="me"
         :units="myUnits"
+        :legend="myLegend"
         perspective="self"
         :seat-name="seatName(mySeatKey)"
         :is-active="engine.currentPlayer === mySeatKey"
@@ -328,11 +353,11 @@ const popoverStyle = computed<Record<string, string>>(() => {
             </ul>
           </template>
 
-          <!-- Quest / Tactic: simple confirm -->
+          <!-- Quest / Tactic / Legend: simple confirm -->
           <template v-else>
             <div class="play-popover-actions">
               <button class="play-popover-btn primary" type="button" @click="playWithoutTarget">
-                {{ openPlay.card.kind === 'Tactic' ? t('game.play.action.play_tactic') : t('game.play.action.play_quest') }}
+                {{ confirmLabel(openPlay.card.kind) }}
               </button>
             </div>
           </template>

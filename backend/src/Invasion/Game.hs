@@ -11,7 +11,7 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 import Invasion.Capital
-import Invasion.Entity (QuestDetails, SupportDetails, UnitDetails)
+import Invasion.Entity (LegendDetails, QuestDetails, SupportDetails, UnitDetails)
 import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
@@ -100,12 +100,13 @@ priorityHolder = \case
   NoPasses p -> p
   OnePass p -> p
 
--- | A scheduled effect that fires at a specific trigger. Currently
--- only end-of-turn fires; add more constructors as cards need new
--- trigger points (start of phase, after combat, …).
+-- | A scheduled effect that fires at a specific trigger.
 data PendingEffect
   = PEDealDamageToUnit UnitKey Int
-    -- ^ At end of turn: deal N damage to the named unit.
+    -- ^ Deal N damage to the named unit when the effect fires.
+  | PESacrificeAttackersThisPhase
+    -- ^ Destroy every unit currently recorded in
+    -- 'Game.attackersThisPhase'. Used by Reckless Attack.
   deriving stock Show
 
 -- | In-flight combat state. Set on 'BeginCombat', mutated through the
@@ -163,7 +164,7 @@ data Game = Game
     -- currently being processed.
   , actionWindow :: Maybe ActionWindow
     -- ^ 'Just' when the engine is paused awaiting player passes.
-  , modifiers :: Map (Ref Target) [ModifierDetails]
+  , modifiers :: Map (Ref Target) [Modifier]
   , lifecycle :: GameState
     -- ^ Named 'lifecycle' (not 'state') because 'Player' also has a
     -- 'state' field, and using the same name would force every record
@@ -185,6 +186,11 @@ data Game = Game
     -- ^ Quest cards currently in play (sit in the quest zone for the
     -- controller who played them, or — for Mission quests — in an
     -- opponent's zone).
+  , legends :: [LegendDetails]
+    -- ^ Legends currently in play. By rule each player may control at
+    -- most one legend at a time; the engine enforces that gate on
+    -- 'PlayLegend'. Legends live on their controller's capital board
+    -- (not inside a zone) but contribute power to all three zones.
   , nextUnitKey :: UnitKey
     -- ^ Monotonic counter for minting fresh 'UnitKey's as units enter
     -- play.
@@ -195,6 +201,17 @@ data Game = Game
     -- ^ 'Just' while a combat is in progress between 'BeginCombat' and
     -- 'EndCombat'. Card receives consult this to know they're in the
     -- combat path.
+  , attackersThisPhase :: [UnitKey]
+    -- ^ Every unit that has attacked this battlefield phase. Reset on
+    -- 'BeginPhase BattlefieldPhase'. Reckless Attack reads this to
+    -- pick its sacrifice targets at end of phase.
+  , pendingEndOfPhase :: [(Phase, PendingEffect)]
+    -- ^ Effects scheduled to fire on 'EndPhase' for a specific phase.
+    -- Entries matching the firing phase are extracted, run, and
+    -- discarded.
+  , limitedPlayedThisTurn :: Bool
+    -- ^ One Limited tactic per turn. Set on 'PlayTactic' when the
+    -- card carries the 'Limited' keyword; cleared on 'BeginTurn'.
   }
   deriving stock Show
 
@@ -203,7 +220,7 @@ instance HasField "over" Game Bool where
     GameFinished _ -> True
     _ -> False
 
-getAllModifiers :: HasGame m => m (Map (Ref Target) [ModifierDetails])
+getAllModifiers :: HasGame m => m (Map (Ref Target) [Modifier])
 getAllModifiers = do
   g <- getGame
   pure g.modifiers

@@ -25,6 +25,26 @@ Active player picks **one** of the opponent's three zones (kingdom, quest,
 battlefield) to attack. This decision happens *before* attackers are
 chosen.
 
+### Attacking a legend through a zone
+
+If the opponent controls a **legend**, after declaring which zone is
+under attack the active player must additionally declare whether the
+attack is targeting **that section of the capital** or the opponent's
+**legend through that zone**. (See [cards.md](./cards.md) — Legends.)
+
+- The zone is still what defines who can defend: only units in the
+  named (defending) zone are eligible to defend, exactly as with a
+  capital-section attack.
+- If any units are declared as defenders of the legend, enough damage
+  to **destroy each defending unit** must be assigned **before any
+  damage can be assigned to the legend itself** — same precedence rule
+  as defending a capital section.
+- A defending legend contributes its **power in the attacked zone** as
+  damage to the battle.
+- The legend is destroyed when applied damage ≥ its hit points. It
+  does **not** burn the zone — the attacker is hitting the legend, not
+  the section.
+
 ## 2. Declare attackers
 
 Active player picks any subset of units in their own **battlefield** to

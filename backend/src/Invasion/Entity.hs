@@ -7,6 +7,7 @@ module Invasion.Entity
   , SupportDetails (..)
   , QuestDetails (..)
   , TacticContext (..)
+  , LegendDetails (..)
   , unitPrintedHP
   , getModifiers
   ) where
@@ -125,12 +126,26 @@ data TacticContext = TacticContext
   }
   deriving stock Show
 
+-- | A Legend card in play. Legends are persistent like units, with HP
+-- and damage, but they're their own type and aren't targetable by
+-- unit-targeting effects. Mirrors 'UnitDetails' for now; specialised
+-- fields can land later.
+data LegendDetails = LegendDetails
+  { key :: UnitKey
+  , controller :: PlayerKey
+  , zone :: ZoneKind
+  , cardDef :: CardDef Legend
+  , damage :: Damage
+  }
+  deriving stock Show
+
 -- Hook each in-play record into the open type family declared in
 -- 'Invasion.CardDef'.
 type instance InPlay Unit = UnitDetails
 type instance InPlay Support = SupportDetails
 type instance InPlay Quest = QuestDetails
 type instance InPlay Tactic = TacticContext
+type instance InPlay Legend = LegendDetails
 
 instance Reference UnitDetails where
   toRef details = UnitRef details.key
@@ -143,7 +158,7 @@ instance Entity Unit UnitDetails where
     UnitZone -> pure . (.zone)
     UnitPower -> \details -> do
       mods <- getModifiers details
-      let additionalPower = sum [n | GainPower n <- mods]
+      let additionalPower = sum [n | Modifier (GainPower n) _ <- mods]
       pure $ details.cardDef.power + additionalPower
 
 instance ToJSON UnitDetails where
@@ -188,5 +203,15 @@ instance ToJSON TacticContext where
       , "cardDef" .= d.cardDef
       ]
 
-getModifiers :: (HasGame m, Reference a) => a -> m [ModifierDetails]
+instance ToJSON LegendDetails where
+  toJSON d =
+    object
+      [ "key" .= d.key
+      , "controller" .= d.controller
+      , "zone" .= d.zone
+      , "cardDef" .= d.cardDef
+      , "damage" .= d.damage
+      ]
+
+getModifiers :: (HasGame m, Reference a) => a -> m [Modifier]
 getModifiers a = fromMaybe [] . Map.lookup (toRef a) <$> getAllModifiers

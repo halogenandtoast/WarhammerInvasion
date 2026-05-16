@@ -9,10 +9,11 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Invasion.CardDef
 import Invasion.CardDef qualified as CardDef
-import Invasion.Entity (QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
+import Invasion.Entity (LegendDetails (..), QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Capital
 import Invasion.Game
 import Invasion.Message
+import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
@@ -23,18 +24,21 @@ data SomeCardDef where
   SupportCardDef :: CardDef 'Support -> SomeCardDef
   QuestCardDef :: CardDef 'Quest -> SomeCardDef
   TacticCardDef :: CardDef 'Tactic -> SomeCardDef
+  LegendCardDef :: CardDef 'Legend -> SomeCardDef
 
 instance Show SomeCardDef where
   show (UnitCardDef card) = show card
   show (SupportCardDef card) = show card
   show (QuestCardDef card) = show card
   show (TacticCardDef card) = show card
+  show (LegendCardDef card) = show card
 
 instance ToJSON SomeCardDef where
   toJSON (UnitCardDef card) = toJSON card
   toJSON (SupportCardDef card) = toJSON card
   toJSON (QuestCardDef card) = toJSON card
   toJSON (TacticCardDef card) = toJSON card
+  toJSON (LegendCardDef card) = toJSON card
 
 newtype CardBuilder k a = CardBuilder (State (CardDef k) a)
   deriving newtype (Functor, Applicative, Monad, MonadState (CardDef k))
@@ -55,6 +59,13 @@ quest code title = buildCard $ emptyCardDef code title Quest
 tactic :: CardCode -> String -> CardBuilder Tactic a -> CardDef Tactic
 tactic code title = buildCard $ emptyCardDef code title Tactic
 
+-- | Legends are persistent like units (they have hit points and live on
+-- the capital board) but they're their own card type and are not
+-- targeted by unit/support/tactic effects. The HP default of 1 mirrors
+-- 'unit'; legend cards will normally override via 'hitPoints'.
+legend :: CardCode -> String -> CardBuilder Legend () -> CardDef Legend
+legend code title = buildCard $ (emptyCardDef code title Legend) {CardDef.hitPoints = Just (Fixed 1)}
+
 buildCard :: CardDef k -> CardBuilder k a -> CardDef k
 buildCard def (CardBuilder inner) = execState inner def
 
@@ -73,7 +84,14 @@ loyalty l = modify \cardDef -> cardDef {loyalty = l}
 power :: Int -> CardBuilder k ()
 power p = modify \cardDef -> cardDef {power = p}
 
-hitPoints :: Int -> CardBuilder Unit ()
+-- | Cards that carry hit points: units and legends. Other kinds reject
+-- 'hitPoints' at the type level so a tactic builder can't silently set
+-- an HP value that the engine would never read.
+class HasHitPoints (k :: CardKind)
+instance HasHitPoints 'Unit
+instance HasHitPoints 'Legend
+
+hitPoints :: HasHitPoints k => Int -> CardBuilder k ()
 hitPoints hp = modify \cardDef -> cardDef {CardDef.hitPoints = Just (Fixed hp)}
 
 trait :: Trait -> CardBuilder k ()
@@ -138,6 +156,19 @@ findSupport skey g = case filter (\s -> s.key == skey) g.supports of
 findQuest :: UnitKey -> Game -> Maybe QuestDetails
 findQuest qkey g = case filter (\q -> q.key == qkey) g.quests of
   (q : _) -> Just q
+  [] -> Nothing
+
+-- | Look up an in-play legend by key.
+findLegend :: UnitKey -> Game -> Maybe LegendDetails
+findLegend lkey g = case filter (\l -> l.key == lkey) g.legends of
+  (l : _) -> Just l
+  [] -> Nothing
+
+-- | The legend currently in play for the given player, if any. Each
+-- player may control at most one legend at a time.
+legendOf :: PlayerKey -> Game -> Maybe LegendDetails
+legendOf pk g = case filter (\l -> l.controller == pk) g.legends of
+  (l : _) -> Just l
   [] -> Nothing
 
 -- | Total number of currently-burning zones across both capitals. Used
@@ -626,6 +657,28 @@ viciousMarauder = unit "the-fourth-waystone-091" "Vicious Marauder" do
   trait Warrior
   keyword BattlefieldOnly
   body "Battlefield only. This unit must attack during your battlefield phase, if able."
+  -- Approximation: when the battlefield action window opens for the
+  -- controller's turn, auto-initiate an attack on the opposing
+  -- battlefield with every friendly unit in that zone (the marauder
+  -- itself plus any others) — strictly, the rules force only the
+  -- marauder, but auto-batching with others keeps the line of play
+  -- coherent until action prompts exist.
+  onReceive $ Receive \msg _owner self -> case msg of
+    OpenActionWindow BattlefieldActionWindow -> do
+      g <- getGame
+      when
+        (g.currentPlayer == self.controller && self.zone == BattlefieldZone)
+        $ do
+          let attackers =
+                [ u.key
+                | u <- g.units
+                , u.controller == self.controller
+                , u.zone == BattlefieldZone
+                , not u.corrupted
+                ]
+          unless (null attackers) $
+            push (BeginCombat self.controller BattlefieldZone attackers)
+    _ -> pure ()
 
 warhounds :: CardDef Unit
 warhounds = unit "legends-032" "Warhounds" do
@@ -658,6 +711,27 @@ wolvesOfTheNorth = quest "path-of-the-zealot-032" "Wolves of the North" do
   trait QuestTrait
   body
     "Action: During your quest phase, the unit questing on this card can initiate a single attack against a single zone controlled by an opponent."
+  -- Approximation: on the controller's quest phase, auto-initiate an
+  -- out-of-phase attack using the first friendly Chaos unit in their
+  -- battlefield. Targets the opposing battlefield. (The real card
+  -- requires committing a unit to the quest first; that subsystem
+  -- isn't built yet.)
+  onReceive $ Receive \msg _owner self -> case msg of
+    BeginPhase QuestPhase -> do
+      g <- getGame
+      when (g.currentPlayer == self.controller) $
+        case filter
+          ( \u ->
+              u.controller == self.controller
+                && u.zone == BattlefieldZone
+                && not u.corrupted
+                && Chaos `elem` u.cardDef.races
+          )
+          g.units of
+          (attacker : _) ->
+            push (BeginCombat self.controller BattlefieldZone [attacker.key])
+          [] -> pure ()
+    _ -> pure ()
 
 doombull :: CardDef Unit
 doombull = unit "the-chaos-moon-032" "Doombull" do
@@ -725,15 +799,21 @@ berserkFury = tactic "the-warpstone-chronicles-094" "Berserk Fury" do
   loyalty 3
   body
     "Action: One target Unit gains 3 Power until the end of the turn. At the end of the turn, that unit takes 2 damage."
-  -- Auto-target the first friendly unit. The 2-damage half is now
-  -- scheduled until end of turn via 'DeferDamageToUnitUntilEoT'. The
-  -- +3 power until end of turn still needs scoped modifier support;
-  -- TODO once dynamic modifiers can be timed.
+  -- Auto-target the first friendly unit. Install a +3 power
+  -- UntilEndOfTurn modifier, then defer the 2-damage tick to end of
+  -- turn. EndTurn clears the modifier in one go via
+  -- 'ClearScopedModifiers UntilEndOfTurn'.
   onReceive $ Receive \msg _owner self -> case msg of
     TacticResolved pk _code | pk == self.controller -> do
       g <- getGame
       case filter (\u -> u.controller == self.controller) g.units of
-        (target : _) -> push (DeferDamageToUnitUntilEoT target.key 2)
+        (target : _) -> do
+          push
+            ( InstallModifier
+                (UnitRef target.key)
+                (Modifier (GainPower 3) UntilEndOfTurn)
+            )
+          push (DeferDamageToUnitUntilEoT target.key 2)
         [] -> pure ()
     _ -> pure ()
 
@@ -901,6 +981,26 @@ recklessAttack = tactic "days-of-blood-018" "Reckless Attack" do
     "Limited. Action: When your opponent declares at least 1 defender against your attack, \
     \put target unit in your discard pile into play in your battlefield declared as an attacker. \
     \At the end of the phase, sacrifice all units that attacked this phase."
+  -- Auto-resolution: when this tactic resolves, if a combat is in
+  -- progress with our controller as attacker, pull the first Chaos
+  -- unit from our discard, summon it into the battlefield (where the
+  -- handler auto-adds it to the combat attackers and to
+  -- 'attackersThisPhase'), and schedule the end-of-phase sacrifice.
+  onReceive $ Receive \msg owner self -> case msg of
+    TacticResolved pk _code | pk == self.controller -> do
+      g <- getGame
+      let pickFromDiscard =
+            [ cd.code
+            | UnitCardDef cd <- owner.discard
+            , Chaos `elem` cd.races
+            ]
+      case (g.combat, pickFromDiscard) of
+        (Just cs, (c : _))
+          | cs.attackingPlayer == pk -> do
+              push (PutUnitIntoPlayFromDiscard pk c BattlefieldZone)
+              push ScheduleAttackerSacrifice
+        _ -> pure ()
+    _ -> pure ()
 
 dominionOfChaos :: CardDef Quest
 dominionOfChaos = quest "the-ruinous-hordes-082" "Dominion of Chaos" do

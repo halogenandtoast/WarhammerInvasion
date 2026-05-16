@@ -34,6 +34,7 @@ explanation.
 | **Inflicted damage** | The total amount before assigning to targets. |
 | **Kingdom** | Zone that produces resources. Base power 3. |
 | **Keyword** | Shorthand rule like Toughness, Counterstrike, Scout, Limited, Order Only, Destruction Only. |
+| **Legend** | Persistent card type that lives on the capital board (not in a zone). Contributes power to all three zones. Max one in play per player. Not affected by card effects that target unit/support/tactic. See [cards.md](./cards.md). |
 | **Limited** | Keyword: max one card with Limited played per turn (across all your Limited cards). |
 | **Loyalty** | Variable cost portion paid in resources; reduced by matching race symbols in play, floor of 0. See [cards.md](./cards.md). |
 | **Mulligan** | Optional one-time redraw of the starting hand during setup. |

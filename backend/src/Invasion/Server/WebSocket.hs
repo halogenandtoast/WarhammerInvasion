@@ -51,6 +51,7 @@ import Invasion.Engine
       ( BeginGame
       , PassPriority
       , PlayAttachment
+      , PlayLegend
       , PlayQuest
       , PlaySupport
       , PlayTactic
@@ -530,6 +531,7 @@ playMessageFor pk code mZone mTarget = \case
         Nothing -> Left "zone_required"
   QuestCardDef _ -> Right (PlayQuest pk code)
   TacticCardDef _ -> Right (PlayTactic pk code)
+  LegendCardDef _ -> Right (PlayLegend pk code)
 
 sendGameError :: GameSlot -> UserInfo -> Text -> IO ()
 sendGameError slot user code = atomically do

@@ -21,7 +21,7 @@ data Keyword
   | Scout
   | Limited
   | DamageCannotBeCancelled
-  deriving stock Show
+  deriving stock (Show, Eq)
 
 data Cost = PayResources Number | NoCost
 

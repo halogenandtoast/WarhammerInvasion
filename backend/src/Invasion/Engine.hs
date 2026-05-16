@@ -15,12 +15,14 @@ import Data.Traversable
 import Invasion.Capital
 import Invasion.Card
 import Invasion.CardDef
-import Invasion.Entity (QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..), unitPrintedHP)
+import Invasion.Entity (LegendDetails (..), QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..), unitPrintedHP)
 import Invasion.Game
 import Invasion.Message
+import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
+import Data.Maybe (fromMaybe)
 import Queue
 import System.Random.Shuffle
 
@@ -183,6 +185,7 @@ instance Run Game where
     let preUnits = g.units
         preSupports = g.supports
         preQuests = g.quests
+        preLegends = g.legends
     g' <- execStateT (receive msg) (g {player1, player2})
     -- Recompute cached effective stats on every unit before card
     -- receives run. This way attachments/experiences/burning all show
@@ -191,6 +194,7 @@ instance Run Game where
     dispatchToInPlayUnits msg preUnits g''
     dispatchToInPlaySupports msg preSupports g''
     dispatchToInPlayQuests msg preQuests g''
+    dispatchToInPlayLegends msg preLegends g''
     pure g''
   receive = \case
     Setup -> do
@@ -203,7 +207,12 @@ instance Run Game where
       logIt LogSystem "log.game.begins" []
       send (BeginTurn fp)
     BeginTurn k -> do
-      modify \g -> g {currentPlayer = k, turn = g.turn + Turn 1}
+      modify \g ->
+        g
+          { currentPlayer = k
+          , turn = g.turn + Turn 1
+          , limitedPlayedThisTurn = False
+          }
       t <- gets (.turn)
       logIt LogTurn
         "log.turn.begins"
@@ -215,12 +224,21 @@ instance Run Game where
       pending <- gets (.pendingEndOfTurn)
       modify \g -> g {pendingEndOfTurn = []}
       traverse_ firePendingEffect pending
+      -- Drop UntilEndOfTurn modifiers.
+      send (ClearScopedModifiers UntilEndOfTurn)
       modify \g -> g {phase = Nothing}
       logIt LogTurn "log.turn.ends" [("player", playerParam k)]
       send (BeginTurn k.next)
     BeginPhase phase -> do
       g <- get
-      modify \gx -> gx {phase = Just phase}
+      modify \gx ->
+        gx
+          { phase = Just phase
+          , attackersThisPhase =
+              if phase == BattlefieldPhase
+                then []
+                else gx.attackersThisPhase
+          }
       if shouldSkipFirstTurnPhase phase g
         then do
           logIt LogPhase "log.phase.skipped" [("phase", phaseParam phase)]
@@ -246,6 +264,12 @@ instance Run Game where
               -- emit the 5-step sub-sequence here.
               send (OpenActionWindow BattlefieldActionWindow)
     EndPhase phase -> do
+      -- Fire any scheduled end-of-phase effects for this phase before
+      -- handing off.
+      pending <- gets (.pendingEndOfPhase)
+      let (mine, rest) = (filter ((== phase) . fst) pending, filter ((/= phase) . fst) pending)
+      modify \g -> g {pendingEndOfPhase = rest}
+      traverse_ (firePendingEffect . snd) mine
       modify \g -> g {phase = Nothing}
       logIt LogPhase "log.phase.ends" [("phase", phaseParam phase)]
       case nextPhase phase of
@@ -648,25 +672,36 @@ instance Run Game where
     PlayTactic pk code -> do
       g <- get
       let player = lookupPlayer pk g
+          isLimited = Limited `elem` (case Map.lookup code allCards of
+            Just (TacticCardDef cd) -> cd.keywords
+            _ -> [])
       case takeTacticFromHand code player of
         Nothing -> pure ()
-        Just (cardDef, playerWithoutCard) -> case cardDef.cost of
-          Variable -> pure ()
-          Fixed n ->
-            when (player.resources >= Resources n) $ do
-              let paidPlayer =
-                    playerWithoutCard
-                      { resources = player.resources - Resources n
-                      , discard = TacticCardDef cardDef : playerWithoutCard.discard
-                      }
-              modify (setPlayer pk paidPlayer)
-              logIt LogPlayerAction
-                "log.tactic.played"
-                [ ("player", playerParam pk)
-                , ("card", T.pack cardDef.title)
-                , ("cost", T.pack (show n))
-                ]
-              send (TacticResolved pk code)
+        Just (cardDef, playerWithoutCard)
+          | isLimited && g.limitedPlayedThisTurn ->
+              -- A Limited card has already been played this turn;
+              -- silently refuse.
+              pure ()
+          | otherwise -> case cardDef.cost of
+              Variable -> pure ()
+              Fixed n ->
+                when (player.resources >= Resources n) $ do
+                  let paidPlayer =
+                        playerWithoutCard
+                          { resources = player.resources - Resources n
+                          , discard =
+                              TacticCardDef cardDef : playerWithoutCard.discard
+                          }
+                  modify (setPlayer pk paidPlayer)
+                  when isLimited $
+                    modify \gx -> gx {limitedPlayedThisTurn = True}
+                  logIt LogPlayerAction
+                    "log.tactic.played"
+                    [ ("player", playerParam pk)
+                    , ("card", T.pack cardDef.title)
+                    , ("cost", T.pack (show n))
+                    ]
+                  send (TacticResolved pk code)
     TacticResolved pk code -> do
       g <- get
       case Map.lookup code allCards of
@@ -725,31 +760,44 @@ instance Run Game where
             send (Eliminate targetPlayer CapitalBurned)
     BeginCombat attacker zone attackerKeys -> do
       g <- get
-      -- Auto-pick defenders: every enemy unit currently in the
-      -- corresponding zone. Real combat would prompt the defender.
       let defender = attacker.next
-          autoDefenders =
-            [ u.key
-            | u <- g.units
-            , u.controller == defender
-            , u.zone == zone
-            , not u.corrupted
-            ]
-          combatState =
-            CombatState
-              { attackingPlayer = attacker
-              , defendingPlayer = defender
-              , targetZone = zone
-              , attackers = attackerKeys
-              , defenders = autoDefenders
+          -- Filter attackers by per-card eligibility (Sworn of Khorne,
+          -- corruption gating, etc.) before committing the combat.
+          eligible = filter (eligibleAttacker g defender zone) attackerKeys
+      if null eligible
+        then do
+          logIt LogSystem
+            "log.combat.aborted"
+            [("attacker", playerParam attacker)]
+        else do
+          -- Auto-pick defenders: every enemy unit currently in the
+          -- corresponding zone. Real combat would prompt the defender.
+          let autoDefenders =
+                [ u.key
+                | u <- g.units
+                , u.controller == defender
+                , u.zone == zone
+                , not u.corrupted
+                ]
+              combatState =
+                CombatState
+                  { attackingPlayer = attacker
+                  , defendingPlayer = defender
+                  , targetZone = zone
+                  , attackers = eligible
+                  , defenders = autoDefenders
+                  }
+          modify \gx ->
+            gx
+              { combat = Just combatState
+              , attackersThisPhase = eligible <> gx.attackersThisPhase
               }
-      modify \gx -> gx {combat = Just combatState}
-      logIt LogPlayerAction
-        "log.combat.begins"
-        [ ("attacker", playerParam attacker)
-        , ("zone", zoneParam zone)
-        ]
-      send (DeclareDefenders autoDefenders)
+          logIt LogPlayerAction
+            "log.combat.begins"
+            [ ("attacker", playerParam attacker)
+            , ("zone", zoneParam zone)
+            ]
+          send (DeclareDefenders autoDefenders)
     DeclareDefenders defs -> do
       modify \gx -> case gx.combat of
         Just cs -> gx {combat = Just (cs {defenders = defs} :: CombatState)}
@@ -829,6 +877,78 @@ instance Run Game where
             , ("card", T.pack cardDef.title)
             ]
           send (UnitEnteredPlay pk unitKey)
+    PutUnitIntoPlayFromDiscard pk code zone -> do
+      g <- get
+      let player = lookupPlayer pk g
+      case takeUnitFromDiscard code player of
+        Nothing -> pure ()
+        Just (cardDef, playerWithoutCard) -> do
+          let UnitKey nextN = g.nextUnitKey
+              unitKey = UnitKey nextN
+              unitDetails =
+                UnitDetails
+                  { key = unitKey
+                  , controller = pk
+                  , zone
+                  , cardDef
+                  , damage = Damage 0
+                  , corrupted = False
+                  , attachments = []
+                  , experiences = []
+                  , effectivePower = cardDef.power
+                  , effectiveMaxHP = unitPrintedHPFromDef cardDef
+                  }
+          modify \gx ->
+            (setPlayer pk playerWithoutCard gx)
+              { units = unitDetails : gx.units
+              , nextUnitKey = UnitKey (nextN + 1)
+              -- If a combat is in progress with this player as
+              -- attacker, also add the fresh unit to its attackers
+              -- list (Reckless Attack relies on this).
+              , combat = case gx.combat of
+                  Just cs
+                    | cs.attackingPlayer == pk ->
+                        Just
+                          ( cs {attackers = unitKey : cs.attackers}
+                            :: CombatState
+                          )
+                  other -> other
+              , attackersThisPhase =
+                  case gx.combat of
+                    Just cs
+                      | cs.attackingPlayer == pk -> unitKey : gx.attackersThisPhase
+                    _ -> gx.attackersThisPhase
+              }
+          logIt LogSystem
+            "log.unit.summoned_from_discard"
+            [ ("player", playerParam pk)
+            , ("card", T.pack cardDef.title)
+            ]
+          send (UnitEnteredPlay pk unitKey)
+    InstallModifier target modifier -> do
+      modify \g ->
+        g
+          { modifiers =
+              Map.insertWith (++) target [modifier] g.modifiers
+          }
+      logIt LogSystem "log.modifier.installed" []
+    ClearScopedModifiers scope -> do
+      modify \g ->
+        g
+          { modifiers =
+              Map.map (filter (\m -> m.scope /= scope)) g.modifiers
+          }
+      logIt LogSystem "log.modifier.cleared" []
+    ScheduleAttackerSacrifice -> do
+      modify \g ->
+        g
+          { pendingEndOfPhase =
+              (BattlefieldPhase, PESacrificeAttackersThisPhase)
+                : g.pendingEndOfPhase
+          }
+      logIt LogSystem
+        "log.effect.scheduled"
+        [("trigger", "EndOfBattlefieldPhase"), ("what", "sacrifice attackers")]
     MoveAllDamage fromKey toKey -> do
       g <- get
       case (findUnit fromKey g, findUnit toKey g) of
@@ -850,6 +970,84 @@ instance Run Game where
             when (dstDmg + srcDmg >= dst.effectiveMaxHP) $
               send (DestroyUnit toKey)
         _ -> pure ()
+    PlayLegend pk code -> do
+      g <- get
+      -- One legend per player at a time. If one is already in play for
+      -- this player, silently refuse.
+      case legendOf pk g of
+        Just _ -> pure ()
+        Nothing -> do
+          let player = lookupPlayer pk g
+          case takeLegendFromHand code player of
+            Nothing -> pure ()
+            Just (cardDef, playerWithoutCard) -> case cardDef.cost of
+              Variable -> pure ()
+              Fixed n ->
+                when (player.resources >= Resources n) $ do
+                  let UnitKey nextN = g.nextUnitKey
+                      legendKey = UnitKey nextN
+                      paidPlayer =
+                        playerWithoutCard
+                          {resources = player.resources - Resources n}
+                      legendDetails =
+                        LegendDetails
+                          { key = legendKey
+                          , controller = pk
+                          , zone = BattlefieldZone
+                          , cardDef
+                          , damage = Damage 0
+                          }
+                  modify \gx ->
+                    (setPlayer pk paidPlayer gx)
+                      { legends = legendDetails : gx.legends
+                      , nextUnitKey = UnitKey (nextN + 1)
+                      }
+                  logIt LogPlayerAction
+                    "log.legend.played"
+                    [ ("player", playerParam pk)
+                    , ("card", T.pack cardDef.title)
+                    , ("cost", T.pack (show n))
+                    ]
+                  send (LegendEnteredPlay pk legendKey)
+    LegendEnteredPlay pk _key ->
+      logIt LogSystem "log.legend.entered_play" [("player", playerParam pk)]
+    DealDamageToLegend lkey amount -> do
+      g <- get
+      case findLegend lkey g of
+        Nothing -> pure ()
+        Just l -> do
+          let inflated = max 0 amount
+              Damage existing = l.damage
+              newDmg = Damage (existing + inflated)
+              l' = l {damage = newDmg} :: LegendDetails
+          modify \gx -> gx {legends = replaceLegend l' gx.legends}
+          logIt LogSystem
+            "log.legend.damaged"
+            [ ("card", T.pack l.cardDef.title)
+            , ("amount", T.pack (show inflated))
+            ]
+          let Damage total = newDmg
+              hp = legendPrintedHPFromDef l.cardDef
+          when (total >= hp) $
+            send (DestroyLegend lkey)
+    DestroyLegend lkey -> do
+      g <- get
+      case findLegend lkey g of
+        Nothing -> pure ()
+        Just l -> do
+          let owner = lookupPlayer l.controller g
+              owner' =
+                owner {discard = LegendCardDef l.cardDef : owner.discard}
+          modify \gx ->
+            (setPlayer l.controller owner' gx)
+              {legends = filter (\v -> v.key /= lkey) gx.legends}
+          logIt LogSystem
+            "log.legend.destroyed"
+            [ ("player", playerParam l.controller)
+            , ("card", T.pack l.cardDef.title)
+            ]
+          send (LegendLeftPlay l.controller lkey l.cardDef.code)
+    LegendLeftPlay _pk _lkey _code -> pure ()
 
 -- | First-turn penalty: the starting player skips Quest and Battlefield
 -- on the very first turn of the game.
@@ -893,9 +1091,13 @@ newGame deck1 deck2 = do
       , units = []
       , supports = []
       , quests = []
+      , legends = []
       , nextUnitKey = UnitKey 0
       , pendingEndOfTurn = []
       , combat = Nothing
+      , attackersThisPhase = []
+      , pendingEndOfPhase = []
+      , limitedPlayedThisTurn = False
       }
 
 -- | Look up a player record by key.
@@ -952,11 +1154,13 @@ takeQuestFromHand code p = go p.hand []
             Just (cd, p {hand = reverse acc ++ rest})
       _ -> go rest (s : acc)
 
--- | Fire one scheduled end-of-turn effect by translating it into a
--- normal message and enqueuing it.
+-- | Fire one scheduled effect by translating it into messages.
 firePendingEffect :: PendingEffect -> StateT Game GameT ()
 firePendingEffect = \case
   PEDealDamageToUnit ukey n -> send (DealDamageToUnit ukey n)
+  PESacrificeAttackersThisPhase -> do
+    g <- get
+    traverse_ (send . DestroyUnit) g.attackersThisPhase
 
 -- | The damage a single unit contributes in combat. Adds card-specific
 -- bonuses (Lord of Khorne, Rift of Battle, …) on top of the cached
@@ -979,6 +1183,26 @@ combatDamageOf g _side u =
       | any (\s -> s.cardDef.code == CardCode "the-accursed-dead-052") g.supports =
           1
       | otherwise = 0
+
+-- | Card-aware attacker eligibility check at 'BeginCombat'. Returns
+-- 'True' if the unit can attack the named defender zone right now.
+-- Sworn of Khorne is the current special case; others should plug in
+-- here as they land.
+eligibleAttacker :: Game -> PlayerKey -> ZoneKind -> UnitKey -> Bool
+eligibleAttacker g defender zone ukey = case findUnit ukey g of
+  Nothing -> False
+  Just u
+    -- Sworn of Khorne: only if the defender zone contains a corrupted
+    -- defending unit.
+    | u.cardDef.code == CardCode "fragments-of-power-031" ->
+        any
+          ( \v ->
+              v.controller == defender
+                && v.zone == zone
+                && v.corrupted
+          )
+          g.units
+    | otherwise -> True
 
 -- | Apply a total damage budget to a list of units, in order. Each
 -- unit absorbs up to its remaining HP (effectiveMaxHP minus current
@@ -1050,7 +1274,8 @@ unitPrintedHPFromDef cd = case cd.hitPoints of
 
 -- | Recompute cached effective stats for every in-play unit. Called
 -- after each engine step so 'effectivePower' and 'effectiveMaxHP'
--- always reflect current attachments, experiences, and zone state.
+-- always reflect current attachments, experiences, scoped modifiers,
+-- and zone state.
 recomputeUnitStats :: Game -> Game
 recomputeUnitStats g = g {units = map update g.units}
   where
@@ -1061,9 +1286,13 @@ recomputeUnitStats g = g {units = map update g.units}
       u.cardDef.power
         + sum (map (attachmentPowerBonus u) u.attachments)
         + experiencePowerBonus u
+        + modifierPowerBonus u
     computeMaxHP u =
       unitPrintedHPFromDef u.cardDef
         + sum (map (attachmentHPBonus u) u.attachments)
+    modifierPowerBonus u =
+      let mods = fromMaybe [] (Map.lookup (UnitRef u.key) g.modifiers)
+       in sum [n | Modifier (GainPower n) _ <- mods]
 
 -- | Per-attachment power contribution. Hard-coded by 'CardCode'.
 attachmentPowerBonus :: UnitDetails -> SupportDetails -> Int
@@ -1085,6 +1314,19 @@ experiencePowerBonus u = case u.cardDef.code of
   CardCode "faith-and-steel-113" -> length u.experiences
   _ -> 0
 
+-- | Pull a Unit card matching the given 'CardCode' out of a player's
+-- discard pile. Used by Reckless Attack-style resurrection effects.
+takeUnitFromDiscard :: CardCode -> Player -> Maybe (CardDef Unit, Player)
+takeUnitFromDiscard code p = go p.discard []
+  where
+    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Unit, Player)
+    go [] _ = Nothing
+    go (s : rest) acc = case s of
+      UnitCardDef cd
+        | cd.code == code ->
+            Just (cd, p {discard = reverse acc ++ rest})
+      _ -> go rest (s : acc)
+
 -- | Pull a Tactic card matching the given 'CardCode' out of a player's
 -- hand.
 takeTacticFromHand :: CardCode -> Player -> Maybe (CardDef Tactic, Player)
@@ -1098,13 +1340,38 @@ takeTacticFromHand code p = go p.hand []
             Just (cd, p {hand = reverse acc ++ rest})
       _ -> go rest (s : acc)
 
--- 'findSupport' / 'findQuest' are exported from 'Invasion.Card'.
+-- 'findSupport' / 'findQuest' / 'findLegend' are exported from
+-- 'Invasion.Card'.
+
+-- | Pull a Legend card matching the given 'CardCode' out of a player's
+-- hand.
+takeLegendFromHand :: CardCode -> Player -> Maybe (CardDef Legend, Player)
+takeLegendFromHand code p = go p.hand []
+  where
+    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Legend, Player)
+    go [] _ = Nothing
+    go (s : rest) acc = case s of
+      LegendCardDef cd
+        | cd.code == code ->
+            Just (cd, p {hand = reverse acc ++ rest})
+      _ -> go rest (s : acc)
+
+-- | Printed HP for a legend card definition. Mirrors
+-- 'unitPrintedHPFromDef'; 'Variable' falls back to 1 for now.
+legendPrintedHPFromDef :: CardDef Legend -> Int
+legendPrintedHPFromDef cd = case cd.hitPoints of
+  Just (Fixed n) -> n
+  Just Variable -> 1
+  Nothing -> 1
 
 replaceSupport :: SupportDetails -> [SupportDetails] -> [SupportDetails]
 replaceSupport s = map \v -> if v.key == s.key then s else v
 
 replaceQuest :: QuestDetails -> [QuestDetails] -> [QuestDetails]
 replaceQuest q = map \v -> if v.key == q.key then q else v
+
+replaceLegend :: LegendDetails -> [LegendDetails] -> [LegendDetails]
+replaceLegend l = map \v -> if v.key == l.key then l else v
 
 -- | Replace the unit whose key matches the supplied unit's key. No-op if
 -- the unit is no longer present (e.g. concurrent destroy).
@@ -1147,6 +1414,14 @@ dispatchToInPlayQuests msg snapshot g = traverse_ deliver snapshot
       let owner = lookupPlayer q.controller g
        in case q.cardDef.receive of
             Receive f -> f msg owner q
+
+dispatchToInPlayLegends :: Message -> [LegendDetails] -> Game -> GameT ()
+dispatchToInPlayLegends msg snapshot g = traverse_ deliver snapshot
+  where
+    deliver l =
+      let owner = lookupPlayer l.controller g
+       in case l.cardDef.receive of
+            Receive f -> f msg owner l
 
 -- | Append a single transcript line to the running 'Game.log'. Each
 -- entry carries an i18n key and a map of interpolation params; the

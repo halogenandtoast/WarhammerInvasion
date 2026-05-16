@@ -15,7 +15,14 @@
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { EngineCardDef, EnginePlayer, EngineUnit, EngineZone, ZoneKind } from '../api/protocol'
+import type {
+  EngineCardDef,
+  EngineLegend,
+  EnginePlayer,
+  EngineUnit,
+  EngineZone,
+  ZoneKind,
+} from '../api/protocol'
 import { zoneBurning, zoneHitPoints } from '../api/protocol'
 import { capitalImageFor, raceLabel } from '../lib/capital'
 import { CARD_SM } from '../lib/cardSize'
@@ -24,6 +31,7 @@ import SvgCard from './SvgCard.vue'
 const props = defineProps<{
   player: EnginePlayer
   units: EngineUnit[]
+  legend: EngineLegend | null
   perspective: 'self' | 'opponent'
   seatName: string
   isActive: boolean
@@ -325,6 +333,25 @@ const handXs = computed(() =>
 
 const capitalSrc = computed(() => capitalImageFor(props.player.race))
 const raceText = computed(() => raceLabel(props.player.race))
+
+// Legend slot: a landscape card-sized region centered horizontally on
+// the capital board, parked near the board's bottom edge. PILE_W /
+// PILE_H are already the rotated-card dims (100 × 72) we use for the
+// pile cards, which is a comfortable fit inside CAP_BOARD_W = 175.
+const legendSlot = computed(() => {
+  const w = PILE_W
+  const h = PILE_H
+  const x = xs.value.capBoardX + (CAP_BOARD_W - w) / 2
+  const y = layout.value.capY + CAP_H - h - 10
+  return {
+    w,
+    h,
+    x,
+    y,
+    labelX: xs.value.capBoardX + CAP_BOARD_W / 2,
+    labelY: y - 4,
+  }
+})
 </script>
 
 <template>
@@ -356,6 +383,48 @@ const raceText = computed(() => raceLabel(props.player.race))
         preserveAspectRatio="xMidYMid slice"
         class="capital-img"
       />
+    </g>
+
+    <!-- Legend slot: sits centered over the bottom of the capital
+         board. Shows the controller's legend if they have one, or an
+         empty placeholder otherwise. Legends aren't units, so they
+         live in their own slot rather than a zone. -->
+    <g class="legend-area">
+      <text
+        :x="legendSlot.labelX"
+        :y="legendSlot.labelY"
+        text-anchor="middle"
+        class="legend-label"
+      >
+        {{ t('game.play.capital.legend').toUpperCase() }}
+      </text>
+      <SvgCard
+        v-if="legend"
+        :x="legendSlot.x"
+        :y="legendSlot.y"
+        :width="legendSlot.w"
+        :height="legendSlot.h"
+        :card="{ code: legend.cardDef.code, title: legend.cardDef.title }"
+        rotated
+      />
+      <rect
+        v-else
+        :x="legendSlot.x"
+        :y="legendSlot.y"
+        :width="legendSlot.w"
+        :height="legendSlot.h"
+        rx="6"
+        class="legend-empty"
+      />
+      <text
+        v-if="legend && legend.damage > 0"
+        :x="legendSlot.x + legendSlot.w - 6"
+        :y="legendSlot.y + legendSlot.h - 6"
+        text-anchor="end"
+        class="legend-damage"
+      >
+        {{ legend.damage }}
+      </text>
     </g>
 
     <!-- Zone slots (kingdom, quest, battlefield) -->
@@ -729,6 +798,27 @@ const raceText = computed(() => raceLabel(props.player.race))
 .empty {
   fill: var(--fg-faint);
   font-size: 13px;
+  font-family: var(--font-sans);
+}
+
+.legend-label {
+  fill: var(--fg-faint);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+.legend-empty {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke: rgba(212, 179, 87, 0.35);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.legend-damage {
+  fill: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-family: var(--font-sans);
 }
 </style>

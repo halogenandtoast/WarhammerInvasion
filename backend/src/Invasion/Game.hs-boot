@@ -26,7 +26,7 @@ instance HasGame m => HasGame (StateT s m)
 
 data Game
 
-getAllModifiers :: HasGame m => m (Map (Ref Target) [ModifierDetails])
+getAllModifiers :: HasGame m => m (Map (Ref Target) [Modifier])
 getPlayer :: HasGame m => PlayerKey -> m Player
 getBattleField :: HasGame m => PlayerKey -> m Zone
 getKingdom :: HasGame m => PlayerKey -> m Zone

@@ -3,6 +3,7 @@
 module Invasion.Message (module Invasion.Message) where
 
 import Invasion.Game (ActionWindowTrigger)
+import Invasion.Modifier (Modifier, ModifierScope)
 import Invasion.Player (Drawing, EliminationReason)
 import Invasion.Prelude
 import Invasion.Types
@@ -106,10 +107,41 @@ data Message where
     -- ^ Like 'PlayUnit' but skips the cost check / payment and pulls
     -- from hand. Used by effects that explicitly bypass the resource
     -- system.
+  PutUnitIntoPlayFromDiscard :: PlayerKey -> CardCode -> ZoneKind -> Message
+    -- ^ Same as 'PutUnitIntoPlay' but pulls the card from the
+    -- player's discard pile instead of their hand.
+  -- Scoped modifiers
+  InstallModifier :: Ref Target -> Modifier -> Message
+    -- ^ Add a 'Modifier' to the named target. Modifiers stack; multiple
+    -- @GainPower n@ entries sum.
+  ClearScopedModifiers :: ModifierScope -> Message
+    -- ^ Drop every modifier matching the given scope (e.g. clear all
+    -- 'UntilEndOfTurn' modifiers at end of turn).
+  ScheduleAttackerSacrifice :: Message
+    -- ^ Schedule a 'PESacrificeAttackersThisPhase' end-of-phase
+    -- effect for the current battlefield phase. Used by Reckless
+    -- Attack.
   -- Damage shuffling (Valkia)
   MoveAllDamage :: UnitKey -> UnitKey -> Message
     -- ^ Move all damage on 'fromKey' to 'toKey'. Source unit ends with
     -- 0 damage; destination accumulates.
+  -- Legends
+  PlayLegend :: PlayerKey -> CardCode -> Message
+    -- ^ Play a legend from hand directly onto the controller's capital
+    -- board. Pays cost, removes the card from hand, emits
+    -- 'LegendEnteredPlay'. Refused if the controller already has a
+    -- legend in play.
+  LegendEnteredPlay :: PlayerKey -> UnitKey -> Message
+    -- ^ A legend has just entered play. Hook point for legend-side
+    -- 'receive' bodies; Game itself just narrates.
+  DealDamageToLegend :: UnitKey -> Int -> Message
+    -- ^ Apply N damage to a target legend. If accumulated damage
+    -- meets or exceeds the legend's printed HP, the engine queues
+    -- 'DestroyLegend'.
+  DestroyLegend :: UnitKey -> Message
+    -- ^ Remove a legend from play; its card goes to the controller's
+    -- discard. Triggers 'LegendLeftPlay'.
+  LegendLeftPlay :: PlayerKey -> UnitKey -> CardCode -> Message
   -- Combat sequence
   BeginCombat :: PlayerKey -> ZoneKind -> [UnitKey] -> Message
     -- ^ Declare an attack: 'PlayerKey' is the attacker, 'ZoneKind' is

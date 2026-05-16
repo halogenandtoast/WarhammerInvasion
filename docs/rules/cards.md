@@ -8,6 +8,7 @@
 | **Support** | Yes | Buildings, weapons, attachments. Once played, persists until destroyed. |
 | **Tactic** | No | Single-shot. Played from hand, effect resolves, goes to discard. |
 | **Quest** | Yes | Long-term pursuits. Played into quest zone; units may be sent on it. |
+| **Legend** | Yes | Hero-class card. Played directly onto the capital board (not into a zone). Contributes power to all three zones. See [Legends](#legends). |
 | **Draft format** | n/a | Only used during the [Draft variant](#draft-variant); never goes in a normal deck. |
 
 **Attachments**: a support card attached to another card is **sacrificed** if
@@ -85,6 +86,52 @@ When a player plays a unit during the Capital phase, they may play it
 Only **one unit** can quest on a given quest card at a time. If the
 questing unit leaves play, the quest stays but accumulated tokens are lost
 to the pool. Tokens on a quest can only be spent on that quest's effect.
+
+## Legends
+
+Legends are their own card type. They are shuffled into a player's deck
+like any other card, but when played they go **directly onto the capital
+board**, not into a zone.
+
+### Playing a legend
+
+- Playing a legend counts as the controller **taking an action**, with
+  two restrictions:
+  - It must be played during the **owner's Capital phase**.
+  - It **cannot be played in response** to another action.
+- The legend's **loyalty icons must match** a loyalty icon on the
+  controller's capital board. A capital without the matching loyalty
+  cannot play that legend at all.
+- Each player may control **at most one legend in play at a time**.
+  While a legend is in play, its controller cannot play another legend
+  until the one in play leaves play.
+
+### What legends are (and aren't)
+
+Legends are **not** units, supports, or tactics. Card effects that target
+those types **do not** affect a legend (e.g. a unit-targeting removal
+tactic can never remove a legend). Legends can still be **attacked in
+combat** — see [combat.md](./combat.md).
+
+### Anatomy
+
+A legend has a cost, loyalty icons, hit points, and power. Its power is
+**split across the three zones** (kingdom / quest / battlefield) —
+the per-zone breakdown is printed on the card.
+
+- **Kingdom phase** — the legend contributes its kingdom-zone power as
+  resources, as if it were located in the kingdom zone.
+- **Quest phase** — the legend contributes its quest-zone power as card
+  draws, as if it were located in the quest zone.
+- **Battlefield phase** — the legend may use its battlefield-zone power
+  to **attack and defend as though it were a unit in the battlefield**.
+  It can deal and receive combat damage like a unit (but still cannot be
+  targeted by unit-targeting card effects).
+
+### Damage and destruction
+
+If a legend has applied damage **equal to or greater than its hit
+points**, it is **destroyed** — same threshold as a unit.
 
 ## Draft variant
 

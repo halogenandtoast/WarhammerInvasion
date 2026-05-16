@@ -67,7 +67,7 @@ export type Phase = 'KingdomPhase' | 'QuestPhase' | 'CapitalPhase' | 'Battlefiel
 
 export type ZoneKind = 'KingdomZone' | 'QuestZone' | 'BattlefieldZone'
 
-export type CardKind = 'Unit' | 'Support' | 'Quest' | 'Tactic' | 'DraftFormat'
+export type CardKind = 'Unit' | 'Support' | 'Quest' | 'Tactic' | 'Legend' | 'DraftFormat'
 
 // Mirror of Invasion.Types.Number: either Fixed n or Variable.
 export type EngineNumber =
@@ -127,6 +127,18 @@ export interface EngineQuest {
   controller: PlayerKey
   cardDef: EngineCardDef
   tokens: number
+}
+
+// A legend in play. Legends live on their controller's capital board
+// (not inside a zone) but the engine still carries a `zone` tag for
+// rendering / attack-routing parity with units. Each player may have at
+// most one legend in play at a time.
+export interface EngineLegend {
+  key: number
+  controller: PlayerKey
+  zone: ZoneKind
+  cardDef: EngineCardDef
+  damage: number
 }
 
 export interface EngineZone {
@@ -239,6 +251,7 @@ export interface EngineGame {
   units: EngineUnit[]
   supports: EngineSupport[]
   quests: EngineQuest[]
+  legends: EngineLegend[]
   nextUnitKey: number
 }
 

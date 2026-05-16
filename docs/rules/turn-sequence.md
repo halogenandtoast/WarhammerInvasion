@@ -49,6 +49,11 @@ In any order, the active player may:
   [cards.md](./cards.md)). On play, the controller chooses which of their
   three zones it enters (subject to any zone-restriction keyword on the
   card).
+- Play a **legend** from hand directly onto their capital board, paying
+  its total cost. Restricted: cannot be played in response to another
+  action, cannot be played outside the Capital phase, and the controller
+  may have only one legend in play at a time. See
+  [cards.md](./cards.md) — Legends.
 - Play **one** card face-down as a **development** (per turn).
 - Trigger any abilities they have available.
 
