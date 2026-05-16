@@ -4,6 +4,105 @@ app:
     primary_label: Primary
     rules: Rules
     cards: Cards
+    decks: Decks
+    login: Sign in
+    register: Sign up
+    logout: Sign out
+
+auth:
+  fields:
+    email: Email
+    email_placeholder: "name{'@'}example.com"
+    password: Password
+    password_hint: At least 8 characters.
+    display_name: Display name
+    display_name_placeholder: How others will see you
+  login:
+    eyebrow: Welcome back
+    heading: Sign in
+    lead: Pick up where you left off — your decks are waiting.
+    submit: Sign in
+    submitting: Signing in…
+    no_account: "Don't have an account?"
+    go_register: Create one
+  register:
+    eyebrow: Get started
+    heading: Create an account
+    lead: An account lets you save decks across devices.
+    submit: Create account
+    submitting: Creating…
+    have_account: Already have an account?
+    go_login: Sign in
+  errors:
+    invalid_credentials: Email or password is incorrect.
+    invalid_email: That email doesn't look right.
+    email_in_use: An account with that email already exists.
+    password_too_short: Password must be at least 8 characters.
+    password_too_long: Password is too long.
+    invalid_display_name: Display name can only contain letters, numbers, spaces, and . _ - ' characters.
+    network: Couldn't reach the server. Check your connection and try again.
+
+decks:
+  faction:
+    unset: Neutral / unset
+    order: Order
+    destruction: Destruction
+  list:
+    eyebrow: Your collection
+    heading: Decks
+    lead: Build a 50–100 card deck for one faction. Order and Destruction can't share a deck.
+    new: New deck
+    cancel_new: Cancel
+    name_label: Deck name
+    name_placeholder: e.g. Dwarven Engineers
+    faction_label: Faction
+    create: Create deck
+    creating: Creating…
+    loading: Loading decks…
+    empty: No decks yet. Hit "New deck" to start building.
+    size_under: "{size} cards — need {min} minimum"
+    size_over: "{size} cards — over {max} limit"
+    size_ok: "{size} cards"
+    updated_at: "Updated {date}"
+    confirm_delete: "Delete \"{name}\"? This can't be undone."
+    delete: Delete
+    delete_aria: "Delete deck {name}"
+
+deck_edit:
+  loading: Loading deck…
+  untitled: Untitled deck
+  back: Back to decks
+  delete: Delete deck
+  confirm_delete: "Delete \"{name}\"? This can't be undone."
+  name_aria: Deck name
+  browser_label: Card browser
+  panel_label: Deck summary
+  search_placeholder: Search by name, trait, or text
+  search_aria: Search cards
+  type_label: Card type
+  race_label: Race
+  cost_label: Cost
+  faction_label: Faction
+  any_type: Any type
+  any_race: Any race
+  any_cost: Any cost
+  show_other_faction: Show other faction
+  result_count: "{count} cards"
+  no_image: no image
+  plus_aria: "Add {name}"
+  minus_aria: "Remove {name}"
+  cost_curve: Cost curve
+  by_type: By type
+  by_race: By race
+  deck_list: Deck list
+  deck_empty: No cards in the deck yet. Click + on a card to add it.
+  show_deck: "Deck ({count})"
+  hide_deck: Hide deck
+  save:
+    pending: Saving soon…
+    saving: Saving…
+    saved: Saved
+    error: Save failed
 
 rules:
   page_title: Rules
