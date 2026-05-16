@@ -263,7 +263,11 @@ export interface EngineGame {
   currentPlayer: PlayerKey
   turn: number
   phase: Phase | null
+  // Top of the action-window stack (denormalized; see actionWindowStack).
   actionWindow: EngineActionWindow | null
+  // Full stack — combat sub-step windows sit on top of the
+  // BattlefieldActionWindow they opened inside of.
+  actionWindowStack: EngineActionWindow[]
   modifiers: unknown
   lifecycle: GameLifecycle
   log: LogEntry[]
@@ -272,7 +276,44 @@ export interface EngineGame {
   quests: EngineQuest[]
   legends: EngineLegend[]
   nextUnitKey: number
+  // The engine pauses while this is set. The seated player named in
+  // `prompt.player` is expected to reply with GameResolvePrompt.
+  pendingPrompt: EnginePrompt | null
 }
+
+// Wire-side mirror of Invasion.Game.Prompt.
+export interface EnginePrompt {
+  player: PlayerKey
+  kind: PromptKind
+  callback: unknown // engine-internal tag; the client only renders kind
+}
+
+export type PromptKind =
+  | {
+      tag: 'ChooseUnits'
+      filterSpec: PromptFilter
+      minPick: number
+      maxPick: number
+      description: string
+    }
+  | {
+      tag: 'ChooseSacrifice'
+      zone: ZoneKind
+      optional: boolean
+      description: string
+    }
+  | { tag: 'ChooseYesNo'; description: string }
+
+export type PromptFilter =
+  | { tag: 'AnyOwnUnit' }
+  | { tag: 'OwnUnitsFromHandByRace'; contents: Race }
+  | { tag: 'OwnUnitsFromDiscardByRace'; contents: Race }
+  | { tag: 'OwnUnitsFromHandOrDiscardByRace'; contents: Race }
+
+export type PromptResultWire =
+  | { tag: 'PromptUnitsWire'; unitKeys: number[] }
+  | { tag: 'PromptBoolWire'; yes: boolean }
+  | { tag: 'PromptNoneWire' }
 
 // Derived helpers — keep alongside the wire types so they stay in sync.
 export function zoneHitPoints(z: EngineZone): number {
@@ -339,6 +380,7 @@ export type GameIn =
       zone: ZoneKind | null
       target: number | null
     }
+  | { tag: 'GameResolvePrompt'; result: PromptResultWire }
   | { tag: 'GameLeave' }
 
 export type GameOut =

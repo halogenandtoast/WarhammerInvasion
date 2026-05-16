@@ -166,6 +166,27 @@ function playCard(cardKey: number, zone: ZoneKind | null = null, target: number 
   socket?.send({ tag: 'GamePlayCard', cardKey, zone, target })
 }
 
+function resolvePromptUnits(unitKeys: number[]) {
+  socket?.send({
+    tag: 'GameResolvePrompt',
+    result: { tag: 'PromptUnitsWire', unitKeys },
+  })
+}
+
+function resolvePromptBool(yes: boolean) {
+  socket?.send({
+    tag: 'GameResolvePrompt',
+    result: { tag: 'PromptBoolWire', yes },
+  })
+}
+
+function resolvePromptNone() {
+  socket?.send({
+    tag: 'GameResolvePrompt',
+    result: { tag: 'PromptNoneWire' },
+  })
+}
+
 export const game = {
   status: computed(() => _status.value),
   gameId: computed(() => _gameId.value),
@@ -184,5 +205,8 @@ export const game = {
   startGame,
   passPriority,
   playCard,
+  resolvePromptUnits,
+  resolvePromptBool,
+  resolvePromptNone,
   leaveGame,
 }

@@ -221,6 +221,14 @@ data Message where
   CancelAllBattlefieldDamageThisTurn :: Message
     -- ^ Master Rune of Valaya. Suppress all subsequent damage assigned
     -- during this battlefield phase by clearing combat resolution.
+  CancelAssignedDamageOnUnit :: UnitKey -> Int -> Message
+    -- ^ Defenders of the Faith. Reduce cancellable damage staged
+    -- against the named unit by up to N (floor 0). No-op outside
+    -- combat or if the unit has no pending assignment.
+  CancelAllAssignedDamage :: Message
+    -- ^ Master Rune of Valaya. Clear every pending damage assignment
+    -- on the in-flight combat (units AND spillover-to-zone). No-op
+    -- outside combat.
   -- Hand interaction
   DiscardRandomFromHand :: PlayerKey -> Message
     -- ^ Discard one card chosen at random from the player's hand.

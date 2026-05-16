@@ -1136,6 +1136,32 @@ instance Run Game where
       -- turn" suppression flag, so this is a best-effort approximation.
       modify \gx -> gx {combat = Nothing}
       logIt LogSystem "log.combat.cancelled" []
+    CancelAssignedDamageOnUnit ukey raw -> do
+      let cap = max 0 raw
+      modify \gx -> case gx.combat of
+        Nothing -> gx
+        Just cs ->
+          let pa' =
+                map
+                  ( \pd -> case pd.target of
+                      PDUnit k
+                        | k == ukey ->
+                            pd {cancellable = max 0 (pd.cancellable - cap)}
+                      _ -> pd
+                  )
+                  cs.pendingAssignments
+              cs' = (cs {pendingAssignments = pa'}) :: CombatState
+           in gx {combat = Just cs'}
+      logIt LogSystem
+        "log.damage.cancelled_pending"
+        [("amount", T.pack (show cap))]
+    CancelAllAssignedDamage -> do
+      modify \gx -> case gx.combat of
+        Nothing -> gx
+        Just cs ->
+          let cs' = (cs {pendingAssignments = []}) :: CombatState
+           in gx {combat = Just cs'}
+      logIt LogSystem "log.damage.cancelled_all" []
     DiscardRandomFromHand pk -> do
       g <- get
       let player = lookupPlayer pk g
@@ -1223,6 +1249,7 @@ instance Run Game where
                   , attackers = eligible
                   , defenders = autoDefenders
                   , attackerPowerPenalty = penalty
+                  , pendingAssignments = []
                   }
           modify \gx ->
             (setPlayer attacker attackerAfterRune gx)
@@ -1294,23 +1321,23 @@ instance Run Game where
         Nothing -> pure ()
         Just cs -> assignCombatDamage g cs
       openAutoCombatWindow AfterAssignCombatDamage
-    AdvanceCombatToApply ->
-      -- Step 5: damage actually lands. With the current pipeline
-      -- DealDamageToUnit is the apply, and we queued it in step 4,
-      -- so this window is just the response window. EndCombat
-      -- triggers from CloseActionWindow(AfterApplyCombatDamage).
+    AdvanceCombatToApply -> do
+      -- Step 5: commit the staged damage and open the post-apply
+      -- response window. Cancellation effects had their chance to
+      -- mutate the pending list during the AfterAssign window.
+      commitPendingCombatDamage
       openAutoCombatWindow AfterApplyCombatDamage
     ResolveCombat -> do
       -- Legacy entry-point: the staged 5-step flow does this work
-      -- via AdvanceCombatToAssign (which queues damage) + window
-      -- closes (which advance to apply + end). Calling ResolveCombat
-      -- directly still works — it just runs assign + skips straight
-      -- to EndCombat without opening the response window.
+      -- via AdvanceCombatToAssign + CloseActionWindow advances.
+      -- Calling ResolveCombat directly runs assign + commit + ends
+      -- without opening the response windows.
       g <- get
       case g.combat of
         Nothing -> pure ()
         Just cs -> do
           assignCombatDamage g cs
+          commitPendingCombatDamage
           send EndCombat
     EndCombat -> do
       g <- get
@@ -2062,11 +2089,12 @@ zoneAuraBonus g pk zone =
         , s.zone == zone
         ]
 
--- | Compute and queue per-defender / per-attacker damage assignments
--- for the in-flight combat. Spillover to the targeted zone goes out
--- via 'DealDamageToZone'. Scout post-combat discards queue here too,
--- but they read damage state AFTER the queued damage applies (the
--- queue is FIFO).
+-- | Compute and STAGE damage assignments for the in-flight combat
+-- without yet committing them. The pending list lives on
+-- 'CombatState.pendingAssignments'; cancellation effects (Defenders
+-- of the Faith, Master Rune of Valaya) can mutate it during the
+-- AfterAssignCombatDamage window. 'commitPendingCombatDamage' is the
+-- counterpart that turns each entry into a real DealDamage message.
 assignCombatDamage :: Game -> CombatState -> StateT Game GameT ()
 assignCombatDamage g cs = do
   let attackerUnits = [u | k <- cs.attackers, Just u <- [findUnit k g]]
@@ -2075,30 +2103,103 @@ assignCombatDamage g cs = do
         splitDamage g cs.attackingPlayer attackerUnits
       (defenderCanc, defenderUncanc) =
         splitDamage g cs.defendingPlayer defenderUnits
-  (cRem, uRem) <-
-    applyDamageToUnitsSplit g attackerCanc attackerUncanc defenderUnits
-  let toZone = cRem + uRem
-  when (toZone > 0) $
-    send (DealDamageToZone cs.defendingPlayer cs.targetZone toZone)
-  _ <- applyDamageToUnitsSplit g defenderCanc defenderUncanc attackerUnits
+      defenderAssignments =
+        allocateDamage g attackerCanc attackerUncanc defenderUnits
+      attackerAssignments =
+        allocateDamage g defenderCanc defenderUncanc attackerUnits
+      (defenderUnitAssignments, defenderSpillover) = defenderAssignments
+      (attackerUnitAssignments, _attackerSpillover) = attackerAssignments
+      zoneEntry =
+        let leftover = defenderSpillover
+         in if leftover > 0
+              then
+                [ PendingDamage
+                    { target = PDZone cs.defendingPlayer cs.targetZone
+                    , cancellable = leftover
+                    , uncancellable = 0
+                    }
+                ]
+              else []
+      pendings =
+        zoneEntry
+          <> map toPending defenderUnitAssignments
+          <> map toPending attackerUnitAssignments
+      toPending (ukey, canc, uncanc) =
+        PendingDamage {target = PDUnit ukey, cancellable = canc, uncancellable = uncanc}
+      cs' = (cs {pendingAssignments = pendings}) :: CombatState
+  modify \gx -> gx {combat = Just cs'}
   logIt LogSystem
-    "log.combat.resolved"
+    "log.combat.assigned"
     [ ("attacker_damage", T.pack (show (attackerCanc + attackerUncanc)))
     , ("defender_damage", T.pack (show (defenderCanc + defenderUncanc)))
     ]
-  -- Scout: every surviving Scout participant on each side forces the
-  -- opposite controller to discard one card at random. We queue
-  -- DiscardRandomFromHand for each scout; the discards process AFTER
-  -- the queued damage messages, so they see the post-damage state.
-  let scoutOf u = Scout `elem` u.cardDef.keywords
-      attackerScouts = filter scoutOf attackerUnits
-      defenderScouts = filter scoutOf defenderUnits
-  traverse_
-    (\_ -> send (DiscardRandomFromHand cs.defendingPlayer))
-    attackerScouts
-  traverse_
-    (\_ -> send (DiscardRandomFromHand cs.attackingPlayer))
-    defenderScouts
+
+-- | Convert the in-flight 'pendingAssignments' into actual damage
+-- messages. Clears the pending list. Also queues Scout post-combat
+-- discards.
+commitPendingCombatDamage :: StateT Game GameT ()
+commitPendingCombatDamage = do
+  g <- get
+  case g.combat of
+    Nothing -> pure ()
+    Just cs -> do
+      traverse_ commitOne cs.pendingAssignments
+      modify \gx -> case gx.combat of
+        Just c -> gx {combat = Just (c {pendingAssignments = []} :: CombatState)}
+        Nothing -> gx
+      -- Scout: queue post-damage discards now (they fire after the
+      -- damage messages flush via the FIFO queue).
+      let attackerUnits = [u | k <- cs.attackers, Just u <- [findUnit k g]]
+          defenderUnits = [u | k <- cs.defenders, Just u <- [findUnit k g]]
+          scoutOf u = Scout `elem` u.cardDef.keywords
+          attackerScouts = filter scoutOf attackerUnits
+          defenderScouts = filter scoutOf defenderUnits
+      traverse_
+        (\_ -> send (DiscardRandomFromHand cs.defendingPlayer))
+        attackerScouts
+      traverse_
+        (\_ -> send (DiscardRandomFromHand cs.attackingPlayer))
+        defenderScouts
+  where
+    commitOne pd = case pd.target of
+      PDUnit k -> do
+        when (pd.cancellable > 0) (send (DealDamageToUnit k pd.cancellable))
+        when (pd.uncancellable > 0)
+          (send (DealDamageToUnitUncancellable k pd.uncancellable))
+      PDZone owner z ->
+        send (DealDamageToZone owner z (pd.cancellable + pd.uncancellable))
+
+-- | Allocate a (cancellable, uncancellable) damage budget across a
+-- list of recipients (in order), respecting Toughness on each one.
+-- Returns the per-recipient (cancellable, uncancellable) tuples plus
+-- the leftover cancellable+uncancellable that would have spilled
+-- past the last recipient.
+allocateDamage
+  :: Game
+  -> Int
+  -- ^ cancellable budget
+  -> Int
+  -- ^ uncancellable budget
+  -> [UnitDetails]
+  -> ([(UnitKey, Int, Int)], Int)
+allocateDamage g = go []
+  where
+    go acc 0 0 _ = (reverse acc, 0)
+    go acc cAvail uAvail [] = (reverse acc, cAvail + uAvail)
+    go acc cAvail uAvail (u : rest) =
+      let Damage existing = u.damage
+          slack = max 0 (u.effectiveMaxHP - existing)
+          tough = totalToughness g u
+          cancellableUsed = min cAvail (slack + tough)
+          landingFromCancellable = max 0 (cancellableUsed - tough)
+          slackAfterCancellable = slack - landingFromCancellable
+          uncancellableUsed = min uAvail slackAfterCancellable
+          entry = (u.key, cancellableUsed, uncancellableUsed)
+       in go
+            (entry : acc)
+            (cAvail - cancellableUsed)
+            (uAvail - uncancellableUsed)
+            rest
 
 -- | Open a combat sub-step window and immediately enqueue the two
 -- passes that close it. Real client interaction (Defenders of the
@@ -2162,6 +2263,46 @@ dispatchPromptCallback cb result = case (cb, result) of
         send (DestroyUnit u.key)
       _ -> pure ()
   (CallbackBloodthirsterSacrifice _ _, PickNone) -> pure ()
+  (CallbackSkulltakerPayToAttach skullKey deadCode, PickBool True) -> do
+    g <- get
+    case findUnit skullKey g of
+      Nothing -> pure ()
+      Just self -> do
+        let owner = lookupPlayer self.controller g
+            Resources r = owner.resources
+        when (r >= 1) $ do
+          let owner' = owner {resources = Resources (r - 1)}
+          modify (setPlayer self.controller owner')
+          send (AttachExperience self.key deadCode)
+  (CallbackSkulltakerPayToAttach _ _, PickBool False) -> pure ()
+  (CallbackHorrorOfTzeentchDiscard horrorKey, PickBool True) -> do
+    g <- get
+    case findUnit horrorKey g of
+      Nothing -> pure ()
+      Just self -> do
+        let owner = lookupPlayer self.controller g
+        when (not (null owner.hand)) $ do
+          send (DiscardRandomFromHand self.controller)
+          send
+            ( RequestPrompt Prompt
+                { player = self.controller
+                , kind =
+                    ChooseUnits
+                      { filterSpec = AnyOwnUnit
+                      , minPick = 1
+                      , maxPick = 1
+                      , description =
+                          "Choose a target unit to take 2 damage."
+                      }
+                , callback = CallbackHorrorOfTzeentchTarget horrorKey
+                }
+            )
+  (CallbackHorrorOfTzeentchDiscard _, PickBool False) -> pure ()
+  (CallbackHorrorOfTzeentchTarget _, PickUnits (target : _)) -> do
+    g <- get
+    case findUnit target g of
+      Just _ -> send (DealDamageToUnit target 2)
+      Nothing -> pure ()
   _ -> pure ()
 
 -- | Fire post-combat "when this unit damages an enemy" effects. Read

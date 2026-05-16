@@ -17,6 +17,7 @@ import type {
 import { priorityHolder } from '../api/protocol'
 import SeatBody from './SeatBody'
 import PlayView from './PlayView.vue'
+import PromptPanel from '../components/PromptPanel.vue'
 
 const props = defineProps<{
   gameId: string
@@ -563,6 +564,11 @@ function formatTime(at: string): string {
            chat, sorted chronologically. Chat lines are highlighted so
            they stand out against the engine's transcript. -->
       <aside class="side-panel">
+        <PromptPanel
+          v-if="engine && engine.pendingPrompt"
+          :engine="engine"
+          :seat="mySeatKey"
+        />
         <section class="messages-panel" :aria-label="t('game.messages.heading')">
           <header class="panel-head">
             <h2>{{ t('game.messages.heading') }}</h2>

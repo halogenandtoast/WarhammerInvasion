@@ -134,6 +134,10 @@ data PromptKind
       }
     -- ^ Pick one of your own units in the named zone to sacrifice.
     -- 'optional' lets the player skip if no eligible target exists.
+  | ChooseYesNo
+      { description :: Text
+      }
+    -- ^ Simple boolean choice — for "you may pay X to do Y" gates.
   deriving stock Show
 
 -- | Predicate describing which units a 'ChooseUnits' prompt accepts.
@@ -163,6 +167,16 @@ data PromptCallback
     -- ^ (Sacrificing player, Bloodthirster's UnitKey). Result: one
     -- of the sacrificing player's units in the Bloodthirster's
     -- corresponding zone (or none if no eligible unit exists).
+  | CallbackSkulltakerPayToAttach UnitKey CardCode
+    -- ^ (Skulltaker's key, the departing enemy unit's CardCode).
+    -- Result: PickBool — if True and the controller can afford 1
+    -- resource, debit and attach as an experience.
+  | CallbackHorrorOfTzeentchDiscard UnitKey
+    -- ^ Horror of Tzeentch's UnitKey. Result: PickBool — if True,
+    -- queue the follow-up CallbackHorrorOfTzeentchTarget prompt.
+  | CallbackHorrorOfTzeentchTarget UnitKey
+    -- ^ Same horror, after the player committed to discarding.
+    -- Result: a single chosen enemy unit to take 2 damage.
   deriving stock Show
 
 -- | A scheduled effect that fires at a specific trigger.
@@ -186,8 +200,29 @@ data CombatState = CombatState
     -- ^ Per-attacker power penalty for this combat. Currently set
     -- by Rune of Fortitude (core-013) when the attacker can't afford
     -- the 1-per-attacker tax.
+  , pendingAssignments :: [PendingDamage]
+    -- ^ Damage tokens placed during the Assign step (step 4) but not
+    -- yet committed. Cancellation effects (Defenders of the Faith,
+    -- Master Rune of Valaya) mutate this list during the
+    -- AfterAssignCombatDamage window; AdvanceCombatToApply converts
+    -- each entry into a real DealDamageToUnit / DealDamageToZone
+    -- message.
   }
   deriving stock Show
+
+-- | A single placed-but-not-applied damage assignment.
+data PendingDamage = PendingDamage
+  { target :: PendingTarget
+  , cancellable :: Int
+  , uncancellable :: Int
+  }
+  deriving stock Show
+
+-- | Targets a 'PendingDamage' entry can name.
+data PendingTarget
+  = PDUnit UnitKey
+  | PDZone PlayerKey ZoneKind
+  deriving stock (Show, Eq)
 
 -- | A single line in the game-event transcript. The engine appends
 -- entries as it processes messages; the frontend renders them in the
@@ -317,6 +352,8 @@ data PromptResult
     -- ^ List of chosen unit keys (in-play, in-hand, or in-discard
     -- depending on the prompt). The engine validates against the
     -- prompt's filter / bounds before firing the callback.
+  | PickBool Bool
+    -- ^ Yes/No answer for 'ChooseYesNo'.
   | PickNone
     -- ^ Player declined / no eligible target.
   deriving stock Show
@@ -375,6 +412,8 @@ mconcat
       ''LogCategory
   , deriveToJSON defaultOptions ''LogEntry
   , deriveToJSON defaultOptions ''PendingEffect
+  , deriveToJSON defaultOptions ''PendingTarget
+  , deriveToJSON defaultOptions ''PendingDamage
   , deriveToJSON defaultOptions ''CombatState
   , deriveToJSON defaultOptions ''PromptFilter
   , deriveToJSON defaultOptions ''PromptKind

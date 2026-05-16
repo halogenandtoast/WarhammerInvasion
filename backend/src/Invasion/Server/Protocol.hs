@@ -26,6 +26,7 @@ module Invasion.Server.Protocol
   , GameIn (..)
   , GameOut (..)
   , ZoneTarget (..)
+  , PromptResultWire (..)
   ) where
 
 import Data.Aeson (FromJSON, ToJSON, Value)
@@ -200,8 +201,22 @@ data GameIn
       , target :: Maybe UnitKey
       , targetZone :: Maybe ZoneTarget
       }
+  | -- | Resolve the engine's currently-pending prompt. The server
+    -- validates that the sender's seat matches the prompt's player.
+    GameResolvePrompt
+      { result :: PromptResultWire
+      }
   | -- | Drop this user from the seat, broadcast to the other seat.
     GameLeave
+  deriving stock (Show, Generic)
+
+-- | Wire-side mirror of the engine's typed 'PromptResult'. The server
+-- converts before applying so the engine stays decoupled from the
+-- on-wire shape.
+data PromptResultWire
+  = PromptUnitsWire { unitKeys :: [UnitKey] }
+  | PromptBoolWire { yes :: Bool }
+  | PromptNoneWire
   deriving stock (Show, Generic)
 
 -- | Zone reference for action targets that point at a capital zone.
@@ -237,6 +252,7 @@ mconcat
   , deriveJSON defaultOptions ''LobbyIn
   , deriveJSON defaultOptions ''LobbyOut
   , deriveJSON defaultOptions ''ZoneTarget
+  , deriveJSON defaultOptions ''PromptResultWire
   , deriveJSON defaultOptions ''GameIn
   , deriveJSON defaultOptions ''GameOut
   ]

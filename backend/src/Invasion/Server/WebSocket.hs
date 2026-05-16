@@ -57,12 +57,14 @@ import Invasion.Engine
       , PlaySupport
       , PlayTactic
       , PlayUnit
+      , ResolvePrompt
       , Setup
       , TriggerCardAction
       )
   , applyMessage
   , newGame
   )
+import Invasion.Game (Prompt (..), PromptResult (..))
 import Invasion.Engine qualified as Engine
 import Invasion.Game (Game (..))
 import Invasion.Player (Player (..))
@@ -538,6 +540,30 @@ handleGameIn env slot user = \case
               writeTVar slot.engine (Just g')
               v <- gameViewSTM slot (Just user)
               broadcastGameWithView slot v
+  GameResolvePrompt {result} -> do
+    mGame <- readTVarIO slot.engine
+    case mGame of
+      Nothing -> sendGameError slot user "game_not_started"
+      Just g -> do
+        seatKey <- atomically do
+          sm <- readTVar slot.seats
+          pure $ findSeatFor user sm
+        case seatKey >>= seatKeyToPlayerKey of
+          Nothing -> sendGameError slot user "not_seated"
+          Just pk -> case g.pendingPrompt of
+            Nothing -> sendGameError slot user "no_pending_prompt"
+            Just p
+              | p.player /= pk -> sendGameError slot user "not_your_prompt"
+              | otherwise -> do
+                  let engineResult = case result of
+                        PromptUnitsWire {unitKeys = ks} -> PickUnits ks
+                        PromptBoolWire {yes = b} -> PickBool b
+                        PromptNoneWire -> PickNone
+                  g' <- applyMessage g (ResolvePrompt engineResult)
+                  atomically do
+                    writeTVar slot.engine (Just g')
+                    v <- gameViewSTM slot (Just user)
+                    broadcastGameWithView slot v
   GameLeave -> do
     sts <- readTVarIO slot.status
     -- A "leave" while playing ends the game — but only if the leaver

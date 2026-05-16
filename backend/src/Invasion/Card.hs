@@ -883,8 +883,14 @@ masterRuneOfValaya = tactic "core-025" "Master Rune of Valaya" do
   traits [Spell, Rune]
   body "Action: Cancel all damage assigned during the battlefield phase this turn."
   flavor "Valaya preseve and protect us in our hour of need!"
+  -- Drop the entire pending-damage list for the current combat. The
+  -- rule technically suppresses ALL further battlefield-phase damage
+  -- this turn; subsequent combats this phase still happen — for
+  -- that, CancelAllBattlefieldDamageThisTurn is the bigger hammer
+  -- that nukes the in-flight combat entirely.
   onReceive $ Receive \msg _owner self -> case msg of
-    TacticResolved pk _code _target | pk == self.controller ->
+    TacticResolved pk _code _target | pk == self.controller -> do
+      push CancelAllAssignedDamage
       push CancelAllBattlefieldDamageThisTurn
     _ -> pure ()
 
@@ -1197,20 +1203,27 @@ skulltaker = unit "faith-and-steel-113" "Skulltaker" do
   body
     "This unit gains {power} for each experience attached to it. \
     \Action: When an opponent's unit leaves play, spend 1 resource to attach it facedown to this unit as an experience."
-  -- Approximation: when an opponent's unit leaves play we auto-attach
-  -- if the controller can afford the 1-resource cost. The +power buff
-  -- per experience waits on dynamic-power computation; for now we just
-  -- track the list, so the gain shows up only if combat code reads
-  -- 'experiences'.
+  -- When an opponent's unit leaves play, ask Skulltaker's controller
+  -- whether to pay 1 resource to attach it as an experience. The
+  -- callback debits the resource and queues AttachExperience iff the
+  -- controller answers yes AND can still afford the cost when the
+  -- prompt resolves.
   onReceive $ Receive \msg owner self -> case msg of
     UnitLeftPlay leftBy _ukey _zone code
       | leftBy /= self.controller
       , Resources r <- owner.resources
-      , r >= 1 -> do
-          -- Pay the resource by sending a synthetic effect: cards
-          -- can't directly debit resources today, so we approximate by
-          -- attaching without payment. The TODO remains.
-          push (AttachExperience self.key code)
+      , r >= 1 ->
+          push
+            ( RequestPrompt Prompt
+                { player = self.controller
+                , kind =
+                    ChooseYesNo
+                      { description =
+                          "Spend 1 resource to attach the departing unit as an experience on Skulltaker?"
+                      }
+                , callback = CallbackSkulltakerPayToAttach self.key code
+                }
+            )
     _ -> pure ()
 
 lordOfKhorne :: CardDef Unit
@@ -1806,6 +1819,14 @@ defendersOfTheFaith = tactic "core-050" "Defenders of the Faith" do
   cost 1
   loyalty 1
   body "Action: Cancel up to 2 damage assigned to a unit you control."
+  tacticTargets FriendlyUnitTargetSchema
+  onReceive $ Receive \msg _owner self -> case msg of
+    TacticResolved pk _code target | pk == self.controller -> do
+      g <- getGame
+      case resolveFriendlyUnit pk target g of
+        Just t -> push (CancelAssignedDamageOnUnit t.key 2)
+        Nothing -> pure ()
+    _ -> pure ()
 
 -- ============================================================================
 -- High Elf (core-051 to core-075)
@@ -2287,20 +2308,25 @@ horrorOfTzeentch = unit "core-094" "Horror of Tzeentch" do
   hitPoints 2
   traits [Daemon]
   body "Forced: When this unit enters play, you may discard a card to deal 2 damage to a target unit."
-  -- Auto-resolve the optional clause: only fire when there's both a
-  -- card to discard and an enemy to hit. Skips the "you may" choice
-  -- since no prompt subsystem.
+  -- Two-stage prompt: yes/no to commit to the discard; if yes, fire
+  -- a follow-up "choose target unit" prompt. The engine's
+  -- CallbackHorrorOfTzeentchDiscard handler chains them.
   onReceive $ Receive \msg owner self -> case msg of
     UnitEnteredPlay pk ukey
       | pk == self.controller
       , ukey == self.key
-      , not (null owner.hand) -> do
-          g <- getGame
-          case firstEnemyUnit self.controller g of
-            Just target -> do
-              push (DiscardRandomFromHand self.controller)
-              push (DealDamageToUnit target.key 2)
-            Nothing -> pure ()
+      , not (null owner.hand) ->
+          push
+            ( RequestPrompt Prompt
+                { player = self.controller
+                , kind =
+                    ChooseYesNo
+                      { description =
+                          "Discard a card to deal 2 damage to a target unit?"
+                      }
+                , callback = CallbackHorrorOfTzeentchDiscard self.key
+                }
+            )
     _ -> pure ()
 
 daemonettesOfSlaanesh :: CardDef Unit
