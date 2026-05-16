@@ -71,11 +71,17 @@ dependencies:
 - cryptonite
 - memory
 - base64-bytestring
+# Realtime
+- websockets
+- wai-websockets
+- stm
+- async
 # Misc
 - cookie
 - case-insensitive
 - vector
 - path-pieces
+- network-uri
 
 ghc-options:
 - -Wall

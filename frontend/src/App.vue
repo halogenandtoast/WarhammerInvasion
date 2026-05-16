@@ -8,6 +8,8 @@ import Register from './views/Register.vue'
 import Decks from './views/Decks.vue'
 import DeckEdit from './views/DeckEdit.vue'
 import DeckView from './views/DeckView.vue'
+import Lobby from './views/Lobby.vue'
+import Game from './views/Game.vue'
 import { auth } from './stores/auth'
 
 type Route =
@@ -18,6 +20,8 @@ type Route =
   | { name: 'decks' }
   | { name: 'deck-view'; id: string }
   | { name: 'deck-edit'; id: string }
+  | { name: 'lobby' }
+  | { name: 'game'; id: string; inviteToken: string | null; password: string | null }
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -27,6 +31,18 @@ function parseRoute(): Route {
   if (hash === 'login') return { name: 'login' }
   if (hash === 'register') return { name: 'register' }
   if (hash === 'decks') return { name: 'decks' }
+  if (hash === 'lobby') return { name: 'lobby' }
+  const gameMatch = /^games\/([\w-]+)(?:\?(.*))?$/.exec(hash)
+  if (gameMatch) {
+    const id = gameMatch[1]
+    const qs = new URLSearchParams(gameMatch[2] ?? '')
+    return {
+      name: 'game',
+      id,
+      inviteToken: qs.get('t'),
+      password: qs.get('password'),
+    }
+  }
   const edit = /^decks\/([\w-]+)\/edit$/.exec(hash)
   if (edit) return { name: 'deck-edit', id: edit[1] }
   const view = /^decks\/([\w-]+)$/.exec(hash)
@@ -59,13 +75,17 @@ async function doLogout() {
   navigate('#/login')
 }
 
-// Public nav: always visible. Decks shows up once signed in.
-const navItems = computed<{ id: string; href: string; key: 'rules' | 'cards' | 'decks' }[]>(() => {
-  const base: { id: string; href: string; key: 'rules' | 'cards' | 'decks' }[] = [
+// Public nav: always visible. Decks/Play show up once signed in.
+type NavKey = 'rules' | 'cards' | 'decks' | 'play'
+const navItems = computed<{ id: string; href: string; key: NavKey }[]>(() => {
+  const base: { id: string; href: string; key: NavKey }[] = [
     { id: 'rules', href: '#/', key: 'rules' },
     { id: 'cards', href: '#/cards', key: 'cards' },
   ]
-  if (auth.isAuthenticated.value) base.push({ id: 'decks', href: '#/decks', key: 'decks' })
+  if (auth.isAuthenticated.value) {
+    base.push({ id: 'play', href: '#/lobby', key: 'play' })
+    base.push({ id: 'decks', href: '#/decks', key: 'decks' })
+  }
   return base
 })
 
@@ -95,6 +115,25 @@ const view = computed(() => {
         return { component: Login, props: {} }
       }
       return { component: DeckEdit, props: { deckId: route.value.id } }
+    case 'lobby':
+      if (!auth.isAuthenticated.value && auth.ready.value) {
+        navigate('#/login')
+        return { component: Login, props: {} }
+      }
+      return { component: Lobby, props: {} }
+    case 'game':
+      if (!auth.isAuthenticated.value && auth.ready.value) {
+        navigate('#/login')
+        return { component: Login, props: {} }
+      }
+      return {
+        component: Game,
+        props: {
+          gameId: route.value.id,
+          inviteToken: route.value.inviteToken,
+          password: route.value.password,
+        },
+      }
     default:
       return { component: Rules, props: {} }
   }
@@ -109,6 +148,7 @@ const isActive = (key: string): boolean => {
       route.value.name === 'deck-view' ||
       route.value.name === 'deck-edit'
     )
+  if (key === 'play') return route.value.name === 'lobby' || route.value.name === 'game'
   return false
 }
 
@@ -125,7 +165,11 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
   <div class="app-shell">
     <nav class="topnav" :aria-label="t('app.nav.primary_label')">
       <div class="topnav-inner">
-        <a class="brand" href="#" @click="navClick($event, '#/')">
+        <a
+          class="brand"
+          :href="auth.isAuthenticated.value ? '#/lobby' : '#'"
+          @click="navClick($event, auth.isAuthenticated.value ? '#/lobby' : '#/')"
+        >
           <span class="brand-mark" aria-hidden="true">⚔</span>
           <span class="brand-text">{{ t('app.brand') }}</span>
         </a>

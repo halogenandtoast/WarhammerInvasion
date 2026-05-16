@@ -42,6 +42,7 @@ import Data.UUID.V4 (nextRandom)
 import Database.Esqueleto.Experimental qualified as E
 import Database.Persist qualified as P
 import Database.Persist.Sql (Entity (..), SqlPersistT)
+import Control.Concurrent (forkIO)
 import Invasion.Auth.Jwt
   ( JwtClaims (..)
   , JwtError (..)
@@ -54,6 +55,8 @@ import Invasion.DB (DbPool, runDB)
 import Invasion.Engine (runSetup)
 import Invasion.Model
 import Invasion.Prelude
+import Invasion.Server.Lobby (LobbyState)
+import Invasion.Server.WebSocket (WsEnv (..), idleSweeperLoop, wsMiddleware)
 import Network.HTTP.Types.Status
   ( Status
   , status200
@@ -79,6 +82,7 @@ data App = App
   , accessTtl :: NominalDiffTime
   , refreshTtl :: NominalDiffTime
   , cookieSecure :: Bool
+  , lobby :: LobbyState
   }
 
 mkYesod "App" [parseRoutes|
@@ -503,4 +507,10 @@ runServer :: App -> Int -> IO ()
 runServer app port = do
   putStrLn $ "Yesod server listening on http://localhost:" <> show port
   waiApp <- toWaiApp app
-  run port (logStdoutDev waiApp)
+  let wsEnv = WsEnv
+        { lobby = app.lobby
+        , dbPool = app.dbPool
+        , jwtSecret = app.jwtSecret
+        }
+  _ <- forkIO (idleSweeperLoop wsEnv)
+  run port (logStdoutDev (wsMiddleware wsEnv waiApp))

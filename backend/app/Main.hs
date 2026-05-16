@@ -7,6 +7,7 @@ import Invasion.Auth.Jwt (JwtSecret (..))
 import Invasion.DB (closePool, openPool)
 import Invasion.Prelude
 import Invasion.Server (App (..), runServer)
+import Invasion.Server.Lobby (newLobbyState)
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
@@ -23,6 +24,7 @@ main = do
   refreshTtl <- envSeconds "WHI_JWT_REFRESH_TTL_SECONDS" (60 * 60 * 24 * 30)
   cookieSecure <- envBool "WHI_COOKIE_SECURE" False
   bracket (openPool (BS8.pack (T.unpack dbUrl)) poolSize) closePool $ \pool -> do
+    lobby <- newLobbyState
     let app =
           App
             { dbPool = pool
@@ -30,6 +32,7 @@ main = do
             , accessTtl = accessTtl
             , refreshTtl = refreshTtl
             , cookieSecure = cookieSecure
+            , lobby = lobby
             }
     runServer app port
 

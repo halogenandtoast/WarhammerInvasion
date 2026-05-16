@@ -5,6 +5,7 @@ app:
     rules: Rules
     cards: Cards
     decks: Decks
+    play: Play
     login: Sign in
     register: Sign up
     logout: Sign out
@@ -694,6 +695,124 @@ rules:
     unique_card_def: Marked with a banner before its title. A player may not control more than one copy at a time.
     zone_term: Zone
     zone_def: "One of Kingdom, Quest, Battlefield. Each player has three, each at 8 base HP."
+
+lobby:
+  page_title: Play
+  eyebrow: Multiplayer
+  heading: Lobby
+  lead: Chat with players in the hall, host a game, or jump into a public one.
+  status:
+    idle: Not connected
+    connecting: Connecting…
+    open: Connected
+    closed: Disconnected — retrying
+  chat:
+    heading: Hall chat
+    placeholder: Say something to the hall…
+    send: Send
+    empty: No messages yet. Be the first to say hello.
+    user_joined_label: "{name} is online"
+  users:
+    heading: "Online ({count})"
+  games:
+    heading: "Open games"
+    none: No public games yet. Host one to start the fun.
+    host_button: Host a game
+    cancel_host: Cancel
+    new_form:
+      name_label: Game name
+      name_placeholder: e.g. Friday night brawl
+      visibility_label: Who can join
+      public: Public
+      public_help: Listed in the lobby. Anyone signed in can join.
+      private: Private
+      private_help: Hidden from the lobby. Joiners need the link or a password.
+      password_label: Password (optional)
+      password_placeholder: Leave blank to require the link
+      password_help: If you set a password, friends can join via this lobby without the link.
+      submit: Create game
+      submitting: Creating…
+    card:
+      host_by: "Hosted by {name}"
+      private_badge: Private
+      public_badge: Public
+      password_badge: Password
+      seats_label: "{filled}/2 seated"
+      status_waiting: Waiting
+      status_playing: In progress
+      status_ended: Ended
+      join: Join
+      resume: Open
+      password_prompt: "Enter password for {name}"
+      cancel: Cancel
+      join_password: Join with password
+  errors:
+    network: Lost the connection to the lobby. Trying again…
+    name_too_short: Give the game a name.
+    name_too_long: Game name is too long.
+    invalid_password: Password must be 1–60 characters.
+    game_not_found: That game has already ended.
+    game_is_private: That game is private; ask the host for a link or password.
+    game_full: That game already has two players.
+    wrong_password: Wrong password.
+
+game:
+  page_title: Game
+  back_to_lobby: Back to lobby
+  eyebrow: Game
+  hosted_by: "Hosted by {name}"
+  waiting_heading: Waiting room
+  playing_heading: Game in progress
+  ended_heading: Game ended
+  invite:
+    heading: Share this game
+    link_label: Invite link
+    copy: Copy link
+    copied: Copied!
+    password_label: Password
+    no_password: No password set
+  seat:
+    heading_player1: Player 1
+    heading_player2: Player 2
+    empty: Waiting for a second player…
+    host_tag: Host
+    you_tag: You
+    deck_pending: Pick a deck
+    deck_picker_label: Load one of your decks
+    deck_picker_placeholder: Choose a deck…
+    deck_clear: Clear deck
+    deck_no_decks: You don't have any decks yet. Build one first.
+    deck_too_small: "Deck only has {size} cards — needs at least 50."
+    deck_summary:
+      size: "{count} cards"
+      capital: "Capital: {name}"
+      no_capital: No capital chosen
+  controls:
+    start: Start game
+    start_disabled_not_host: Only the host can start.
+    start_disabled_not_ready: Waiting for both decks…
+    start_disabled_started: Game has already started.
+    leave: Leave game
+    confirm_leave: Leaving will end the game for both players. Continue?
+  chat:
+    heading: Game chat
+    placeholder: Say something to your opponent…
+    empty: No messages yet.
+    send: Send
+  errors:
+    not_seated: You're not seated in this game.
+    deck_not_found: That deck no longer exists.
+    deck_not_owned: That isn't your deck.
+    not_host: Only the host can start the game.
+    not_ready: Both seats need a loaded deck before starting.
+    already_started: This game has already started.
+    forbidden: This game requires a link or password to join.
+    closed_left: You left the game.
+    closed_unknown: The game ended.
+  invite_join:
+    heading: Join this game
+    lead: You're joining via an invite link. Connecting…
+    password_lead: This game is private. Enter the password to join.
 
 cards:
   page_title: Card Database
