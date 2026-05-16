@@ -72,7 +72,6 @@ const costs = computed(() => {
 const cycleCounts = computed(() => {
   const counts: Record<string, number> = {}
   for (const c of allCards.value) {
-    if (!includeStubs.value && c.stub) continue
     counts[c.cycle] = (counts[c.cycle] ?? 0) + 1
   }
   return counts
@@ -80,8 +79,6 @@ const cycleCounts = computed(() => {
 const setCounts = computed(() => {
   const counts: Record<string, number> = {}
   for (const c of allCards.value) {
-    if (!includeStubs.value && c.stub) continue
-    if (selectedCycle.value !== 'all' && c.cycle !== selectedCycle.value) continue
     counts[c.set] = (counts[c.set] ?? 0) + 1
   }
   return counts
