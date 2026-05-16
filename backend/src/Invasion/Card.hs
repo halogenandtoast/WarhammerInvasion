@@ -5,6 +5,8 @@ module Invasion.Card (module Invasion.Card) where
 
 import Control.Monad.State.Strict
 import Data.Aeson
+import Data.Aeson.Key qualified as AesonKey
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Invasion.CardDef
@@ -39,6 +41,34 @@ instance ToJSON SomeCardDef where
   toJSON (QuestCardDef card) = toJSON card
   toJSON (TacticCardDef card) = toJSON card
   toJSON (LegendCardDef card) = toJSON card
+
+-- | A card instance: a definition paired with the stable 'UnitKey' that
+-- identifies this specific copy across the entire game. The same key is
+-- minted when the card is shuffled into the deck, carried through the
+-- hand, into play (as a 'UnitDetails' / 'SupportDetails' / …), and back
+-- into discard if the card leaves play. Keys never recycle.
+--
+-- The frontend uses the key as a CSS view-transition name so a card
+-- visually morphs from one location to another as state updates.
+data Card = Card
+  { key :: UnitKey
+  , def :: SomeCardDef
+  }
+  deriving stock Show
+
+-- | Flatten the card definition into a JSON object and splice in the
+-- 'key' field, so the wire shape is the existing 'CardDef' surface
+-- (code, title, traits, …) plus a stable integer key. Falls back to a
+-- tagged object if the inner JSON is somehow not an object (defensive;
+-- 'CardDef' always serializes as one today).
+instance ToJSON Card where
+  toJSON c = case toJSON c.def of
+    Object o -> Object (KeyMap.insert (AesonKey.fromString "key") (toJSON c.key) o)
+    other -> object ["key" .= c.key, "def" .= other]
+
+-- | Convenience: lift a definition to a 'Card' with the given key.
+mkCard :: UnitKey -> SomeCardDef -> Card
+mkCard k d = Card {key = k, def = d}
 
 newtype CardBuilder k a = CardBuilder (State (CardDef k) a)
   deriving newtype (Functor, Applicative, Monad, MonadState (CardDef k))
@@ -238,6 +268,134 @@ allCards =
     , ("cataclysm-037", SupportCardDef riftOfChaos)
     , ("days-of-blood-018", TacticCardDef recklessAttack)
     , ("the-ruinous-hordes-082", QuestCardDef dominionOfChaos)
+    -- ----------------------------------------------------------------------
+    -- Empire (core-026 to core-050)
+    , ("core-026", UnitCardDef spearmenOfWissenland)
+    , ("core-027", UnitCardDef stateTroops)
+    , ("core-028", UnitCardDef templarOfSigmar)
+    , ("core-029", UnitCardDef witchHunter)
+    , ("core-030", UnitCardDef greatswordsOfNuln)
+    , ("core-031", UnitCardDef knightsPanther)
+    , ("core-032", UnitCardDef reiksguard)
+    , ("core-033", UnitCardDef rieklandMarksmen)
+    , ("core-034", UnitCardDef thyrusGorman)
+    , ("core-035", UnitCardDef karlFranz)
+    , ("core-036", UnitCardDef volkmarTheGrim)
+    , ("core-037", UnitCardDef mariusLeitdorf)
+    , ("core-038", UnitCardDef lectorOfSigmar)
+    , ("core-039", UnitCardDef imperialEngineers)
+    , ("core-040", UnitCardDef pegasusKnights)
+    , ("core-041", SupportCardDef theImperialCrown)
+    , ("core-042", SupportCardDef hammerOfSigmar)
+    , ("core-043", SupportCardDef bannerOfSigmar)
+    , ("core-044", SupportCardDef altdorf)
+    , ("core-045", QuestCardDef defendingTheEmpire)
+    , ("core-046", TacticCardDef forSigmar)
+    , ("core-047", TacticCardDef sigmarsWrath)
+    , ("core-048", TacticCardDef counterCharge)
+    , ("core-049", TacticCardDef battleOfTheReik)
+    , ("core-050", TacticCardDef defendersOfTheFaith)
+    -- ----------------------------------------------------------------------
+    -- High Elf (core-051 to core-075)
+    , ("core-051", UnitCardDef phoenixGuard)
+    , ("core-052", UnitCardDef whiteLionsOfChrace)
+    , ("core-053", UnitCardDef swordmastersOfHoeth)
+    , ("core-054", UnitCardDef highElfArchers)
+    , ("core-055", UnitCardDef seaGuardOfLothern)
+    , ("core-056", UnitCardDef silverHelms)
+    , ("core-057", UnitCardDef dragonPrincesOfCaledor)
+    , ("core-058", UnitCardDef princeTyrion)
+    , ("core-059", UnitCardDef teclis)
+    , ("core-060", UnitCardDef eltharionTheGrim)
+    , ("core-061", UnitCardDef korhil)
+    , ("core-062", UnitCardDef loremasterOfHoeth)
+    , ("core-063", UnitCardDef mageOfTheWhiteTower)
+    , ("core-064", UnitCardDef spearmenOfLothern)
+    , ("core-065", UnitCardDef reaverKnights)
+    , ("core-066", SupportCardDef lighthouseOfLothern)
+    , ("core-067", SupportCardDef bannerOfAvelorn)
+    , ("core-068", SupportCardDef bowOfAvelorn)
+    , ("core-069", SupportCardDef hoethsWisdom)
+    , ("core-070", QuestCardDef theWhiteTower)
+    , ("core-071", TacticCardDef voiceOfCommand)
+    , ("core-072", TacticCardDef dragonBreath)
+    , ("core-073", TacticCardDef magicOfTheOldOnes)
+    , ("core-074", TacticCardDef battleMagic)
+    , ("core-075", TacticCardDef sacredIncantations)
+    -- ----------------------------------------------------------------------
+    -- Chaos (fill the core-083..core-102 gaps)
+    , ("core-083", UnitCardDef tzeentchSorcerer)
+    , ("core-084", UnitCardDef slaaneshiMarauders)
+    , ("core-085", UnitCardDef plaguebearersOfNurgle)
+    , ("core-086", UnitCardDef festeringNurglings)
+    , ("core-088", UnitCardDef archaonTheEverchosen)
+    , ("core-089", UnitCardDef chaosKnights)
+    , ("core-090", UnitCardDef chaosWarriors)
+    , ("core-091", UnitCardDef maraudersOfTheNorth)
+    , ("core-093", UnitCardDef chaosSorcerer)
+    , ("core-094", UnitCardDef horrorOfTzeentch)
+    , ("core-095", UnitCardDef daemonettesOfSlaanesh)
+    , ("core-096", UnitCardDef beastsOfNurgle)
+    , ("core-097", UnitCardDef chaosSpawn)
+    , ("core-098", SupportCardDef eyeOfTzeentch)
+    , ("core-099", SupportCardDef theIronTower)
+    , ("core-100", SupportCardDef pyreOfTcharzanek)
+    , ("core-101", TacticCardDef tidesOfChaos)
+    , ("core-102", TacticCardDef doomOfTheEmpire)
+    -- ----------------------------------------------------------------------
+    -- Orc (core-106 to core-130)
+    , ("core-106", UnitCardDef grimgorIronhide)
+    , ("core-107", UnitCardDef skarsnik)
+    , ("core-108", UnitCardDef gorbadIronclaw)
+    , ("core-109", UnitCardDef orcBigUns)
+    , ("core-110", UnitCardDef blackOrcs)
+    , ("core-111", UnitCardDef savageOrcs)
+    , ("core-112", UnitCardDef orcBoyz)
+    , ("core-113", UnitCardDef boarBoyz)
+    , ("core-114", UnitCardDef nightGoblins)
+    , ("core-115", UnitCardDef goblinWolfRiders)
+    , ("core-116", UnitCardDef squigHoppers)
+    , ("core-117", UnitCardDef orcShaman)
+    , ("core-118", UnitCardDef trolls)
+    , ("core-119", UnitCardDef forestGoblinSpiderRiders)
+    , ("core-120", UnitCardDef snotlings)
+    , ("core-121", SupportCardDef daBadMoon)
+    , ("core-122", SupportCardDef choppa)
+    , ("core-123", SupportCardDef bigBossesBanner)
+    , ("core-124", SupportCardDef daMorksEye)
+    , ("core-125", SupportCardDef orcWarmachine)
+    , ("core-126", QuestCardDef greenskinRush)
+    , ("core-127", TacticCardDef waaagh)
+    , ("core-128", TacticCardDef crushEm)
+    , ("core-129", TacticCardDef runEmDown)
+    , ("core-130", TacticCardDef daBigStomp)
+    -- ----------------------------------------------------------------------
+    -- Dark Elf (core-131 to core-155)
+    , ("core-131", UnitCardDef malekith)
+    , ("core-132", UnitCardDef morathi)
+    , ("core-133", UnitCardDef croneHellebron)
+    , ("core-134", UnitCardDef lokhirFellheart)
+    , ("core-135", UnitCardDef witchElves)
+    , ("core-136", UnitCardDef blackGuardOfNaggarond)
+    , ("core-137", UnitCardDef executioners)
+    , ("core-138", UnitCardDef corsairs)
+    , ("core-139", UnitCardDef coldOneKnights)
+    , ("core-140", UnitCardDef darkRiders)
+    , ("core-141", UnitCardDef darkSorceress)
+    , ("core-142", UnitCardDef assassinsOfKhaine)
+    , ("core-143", UnitCardDef repeaterCrossbowmen)
+    , ("core-144", UnitCardDef bloodwrackMedusa)
+    , ("core-145", UnitCardDef blackDragon)
+    , ("core-146", UnitCardDef manticore)
+    , ("core-147", SupportCardDef cauldronOfBlood)
+    , ("core-148", SupportCardDef theBlackArk)
+    , ("core-149", SupportCardDef whipOfAgony)
+    , ("core-150", SupportCardDef druchiiBanner)
+    , ("core-151", SupportCardDef witchbrew)
+    , ("core-152", QuestCardDef slaughterAtLustria)
+    , ("core-153", TacticCardDef khainesEmbrace)
+    , ("core-154", TacticCardDef murderousProwess)
+    , ("core-155", TacticCardDef coldBloodedSlaughter)
     ]
 
 -- TODO: re-implement the "+2 power while >= 2 developments in this zone"
@@ -928,13 +1086,17 @@ ironThroneroom = support "the-inevitable-city-013" "Iron Throneroom" do
           -- the controller's hand snapshot (taken pre-receive); 'owner'
           -- carries that hand.
           when (self.tokens == 1) $ do
-            let chaosUnits =
-                  [ cd.code
-                  | UnitCardDef cd <- owner.hand
+            -- Walk by card-instance so we forward the in-hand 'UnitKey'
+            -- (not the code) to 'PutUnitIntoPlay'. The engine no longer
+            -- mints fresh keys at play-time; the card already has one.
+            let chaosKeys =
+                  [ c.key
+                  | c <- owner.hand
+                  , UnitCardDef cd <- pure c.def
                   , Chaos `elem` cd.races
                   ]
-                picks = take 3 chaosUnits
-            traverse_ (\c -> push (PutUnitIntoPlay self.controller c KingdomZone)) picks
+                picks = take 3 chaosKeys
+            traverse_ (\k -> push (PutUnitIntoPlay self.controller k KingdomZone)) picks
     _ -> pure ()
 
 raidingCamps :: CardDef Quest
@@ -990,14 +1152,15 @@ recklessAttack = tactic "days-of-blood-018" "Reckless Attack" do
     TacticResolved pk _code | pk == self.controller -> do
       g <- getGame
       let pickFromDiscard =
-            [ cd.code
-            | UnitCardDef cd <- owner.discard
+            [ c.key
+            | c <- owner.discard
+            , UnitCardDef cd <- pure c.def
             , Chaos `elem` cd.races
             ]
       case (g.combat, pickFromDiscard) of
-        (Just cs, (c : _))
+        (Just cs, (k : _))
           | cs.attackingPlayer == pk -> do
-              push (PutUnitIntoPlayFromDiscard pk c BattlefieldZone)
+              push (PutUnitIntoPlayFromDiscard pk k BattlefieldZone)
               push ScheduleAttackerSacrifice
         _ -> pure ()
     _ -> pure ()
@@ -1030,4 +1193,1248 @@ dominionOfChaos = quest "the-ruinous-hordes-082" "Dominion of Chaos" do
               -- message yet).
             _ -> pure ()
     _ -> pure ()
+
+-- ============================================================================
+-- Empire (core-026 to core-050)
+-- ============================================================================
+
+spearmenOfWissenland :: CardDef Unit
+spearmenOfWissenland = unit "core-026" "Spearmen of Wissenland" do
+  race Empire
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Warrior
+  body "Battlefield. This unit gains {power} while defending."
+
+stateTroops :: CardDef Unit
+stateTroops = unit "core-027" "State Troops" do
+  race Empire
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Warrior
+  flavor "The backbone of the Empire's vast standing army."
+
+templarOfSigmar :: CardDef Unit
+templarOfSigmar = unit "core-028" "Templar of Sigmar" do
+  race Empire
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  traits [Warrior, Priest]
+  body "Battlefield. Your other Warrior units gain {power} while in this zone."
+
+witchHunter :: CardDef Unit
+witchHunter = unit "core-029" "Witch Hunter" do
+  race Empire
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Warrior
+  body "Forced: When this unit enters play, destroy one target corrupted unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key -> do
+      g <- getGame
+      case filter (\u -> u.corrupted && u.controller /= self.controller) g.units of
+        (target : _) -> push (DestroyUnit target.key)
+        [] -> pure ()
+    _ -> pure ()
+
+greatswordsOfNuln :: CardDef Unit
+greatswordsOfNuln = unit "core-030" "Greatswords of Nuln" do
+  race Empire
+  cost 4
+  loyalty 2
+  power 3
+  hitPoints 3
+  traits [Warrior, Elite]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+knightsPanther :: CardDef Unit
+knightsPanther = unit "core-031" "Knights Panther" do
+  race Empire
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 3
+  traits [Warrior, Cavalry]
+  body "Battlefield. Action: When this unit attacks, it gains {power}{power} for this attack."
+
+reiksguard :: CardDef Unit
+reiksguard = unit "core-032" "Reiksguard" do
+  race Empire
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 4
+  traits [Warrior, Cavalry, Elite]
+  body "Battlefield. Toughness 1."
+  toughness 1
+
+rieklandMarksmen :: CardDef Unit
+rieklandMarksmen = unit "core-033" "Riekland Marksmen" do
+  race Empire
+  cost 3
+  loyalty 1
+  power 2
+  hitPoints 1
+  trait Warrior
+  body "Action: Spend 1 resource to deal 1 damage to target unit."
+
+thyrusGorman :: CardDef Unit
+thyrusGorman = unit "core-034" "Thyrus Gorman" do
+  unique
+  race Empire
+  cost 3
+  loyalty 3
+  power 2
+  hitPoints 2
+  traits [Hero, Sorcerer]
+  body
+    "Limit one Hero per zone.\n\
+    \Action: Spend 2 resources to deal 2 damage to target unit."
+
+karlFranz :: CardDef Unit
+karlFranz = unit "core-035" "Karl Franz" do
+  unique
+  race Empire
+  cost 7
+  loyalty 5
+  power 4
+  hitPoints 6
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Your other Empire units gain {power}."
+
+volkmarTheGrim :: CardDef Unit
+volkmarTheGrim = unit "core-036" "Volkmar the Grim" do
+  unique
+  race Empire
+  cost 5
+  loyalty 3
+  power 2
+  hitPoints 4
+  traits [Hero, Priest]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: At the beginning of your turn, heal 2 damage from your capital."
+
+mariusLeitdorf :: CardDef Unit
+mariusLeitdorf = unit "core-037" "Marius Leitdorf" do
+  unique
+  race Empire
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 3
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: After this unit enters play, draw a card."
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key ->
+      push (Draw (Drawing StandardDraw self.controller))
+    _ -> pure ()
+
+lectorOfSigmar :: CardDef Unit
+lectorOfSigmar = unit "core-038" "Lector of Sigmar" do
+  race Empire
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Priest
+  body "Kingdom. While in your kingdom, your capital gains +1 hit points in each zone."
+
+imperialEngineers :: CardDef Unit
+imperialEngineers = unit "core-039" "Imperial Engineers" do
+  race Empire
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Engineer
+  body "Forced: When this unit enters play, draw a card."
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key ->
+      push (Draw (Drawing StandardDraw self.controller))
+    _ -> pure ()
+
+pegasusKnights :: CardDef Unit
+pegasusKnights = unit "core-040" "Pegasus Knights" do
+  race Empire
+  cost 5
+  loyalty 2
+  power 3
+  hitPoints 3
+  traits [Warrior, Cavalry]
+  body "Battlefield. This unit can attack the turn it enters play."
+
+theImperialCrown :: CardDef Support
+theImperialCrown = support "core-041" "The Imperial Crown" do
+  unique
+  race Empire
+  cost 3
+  loyalty 4
+  power 2
+  trait CapitalCenter
+  body "Kingdom. Your Empire heroes cost 1 less to play."
+
+hammerOfSigmar :: CardDef Support
+hammerOfSigmar = support "core-042" "The Hammer of Sigmar" do
+  race Empire
+  cost 2
+  loyalty 2
+  traits [Attachment, Weapon]
+  body "Attach to a target Empire unit. Attached unit gains {power}{power}; its damage cannot be cancelled."
+
+bannerOfSigmar :: CardDef Support
+bannerOfSigmar = support "core-043" "Banner of Sigmar" do
+  race Empire
+  cost 1
+  loyalty 2
+  trait Attachment
+  body "Attach to a target unit. Attached unit gains {power}."
+
+altdorf :: CardDef Support
+altdorf = support "core-044" "Altdorf" do
+  unique
+  race Empire
+  cost 2
+  loyalty 2
+  power 1
+  trait Building
+  body "Kingdom. While in play, non-combat damage to your capital is reduced by 1 (minimum 0)."
+
+defendingTheEmpire :: CardDef Quest
+defendingTheEmpire = quest "core-045" "Defending the Empire" do
+  race Empire
+  cost 0
+  loyalty 2
+  body
+    "Quest. Forced: At the beginning of your turn, place 1 resource token on this card if a unit is questing here.\n\
+    \Action: Spend 3 resource tokens from this card to heal all damage on your capital."
+
+forSigmar :: CardDef Tactic
+forSigmar = tactic "core-046" "For Sigmar!" do
+  race Empire
+  cost 2
+  loyalty 1
+  body "Action: Each of your units gains {power} until the end of the turn."
+
+sigmarsWrath :: CardDef Tactic
+sigmarsWrath = tactic "core-047" "Sigmar's Wrath" do
+  race Empire
+  cost 3
+  loyalty 2
+  body "Action: Deal 3 damage to target unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    TacticResolved pk _code | pk == self.controller -> do
+      g <- getGame
+      case firstEnemyUnit self.controller g of
+        Just target -> push (DealDamageToUnit target.key 3)
+        Nothing -> pure ()
+    _ -> pure ()
+
+counterCharge :: CardDef Tactic
+counterCharge = tactic "core-048" "Counter-charge" do
+  race Empire
+  cost 1
+  loyalty 2
+  body "Play during combat. Action: Target defending unit gains {power}{power} until the end of the turn."
+
+battleOfTheReik :: CardDef Tactic
+battleOfTheReik = tactic "core-049" "Battle of the Reik" do
+  race Empire
+  cost 2
+  loyalty 2
+  body "Action: Deal 1 damage to each attacking and each defending unit."
+
+defendersOfTheFaith :: CardDef Tactic
+defendersOfTheFaith = tactic "core-050" "Defenders of the Faith" do
+  race Empire
+  cost 1
+  loyalty 1
+  body "Action: Cancel up to 2 damage assigned to a unit you control."
+
+-- ============================================================================
+-- High Elf (core-051 to core-075)
+-- ============================================================================
+
+phoenixGuard :: CardDef Unit
+phoenixGuard = unit "core-051" "Phoenix Guard" do
+  race HighElf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 4
+  traits [Warrior, Elite]
+  body "Battlefield. Toughness 1."
+  toughness 1
+
+whiteLionsOfChrace :: CardDef Unit
+whiteLionsOfChrace = unit "core-052" "White Lions of Chrace" do
+  race HighElf
+  cost 4
+  loyalty 2
+  power 3
+  hitPoints 3
+  traits [Warrior, Elite]
+  body "Battlefield. Damage dealt by this unit cannot be cancelled."
+  keyword DamageCannotBeCancelled
+
+swordmastersOfHoeth :: CardDef Unit
+swordmastersOfHoeth = unit "core-053" "Swordmasters of Hoeth" do
+  race HighElf
+  cost 5
+  loyalty 3
+  power 4
+  hitPoints 3
+  traits [Warrior, Elite]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+highElfArchers :: CardDef Unit
+highElfArchers = unit "core-054" "High Elf Archers" do
+  race HighElf
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 1
+  trait Warrior
+  body "Action: Spend 1 resource to deal 1 damage to target unit."
+
+seaGuardOfLothern :: CardDef Unit
+seaGuardOfLothern = unit "core-055" "Sea Guard of Lothern" do
+  race HighElf
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Warrior
+
+silverHelms :: CardDef Unit
+silverHelms = unit "core-056" "Silver Helms" do
+  race HighElf
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  traits [Warrior, Cavalry]
+
+dragonPrincesOfCaledor :: CardDef Unit
+dragonPrincesOfCaledor = unit "core-057" "Dragon Princes of Caledor" do
+  race HighElf
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 3
+  traits [Warrior, Cavalry, Elite]
+  body "Battlefield. Damage dealt by this unit cannot be cancelled."
+  keyword DamageCannotBeCancelled
+
+princeTyrion :: CardDef Unit
+princeTyrion = unit "core-058" "Prince Tyrion" do
+  unique
+  race HighElf
+  cost 6
+  loyalty 5
+  power 4
+  hitPoints 5
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Battlefield. Damage dealt by this unit cannot be cancelled."
+  keyword DamageCannotBeCancelled
+
+teclis :: CardDef Unit
+teclis = unit "core-059" "Teclis" do
+  unique
+  race HighElf
+  cost 6
+  loyalty 5
+  power 2
+  hitPoints 4
+  traits [Hero, Sorcerer]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: After this unit enters play, draw 2 cards."
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key -> do
+      push (Draw (Drawing StandardDraw self.controller))
+      push (Draw (Drawing StandardDraw self.controller))
+    _ -> pure ()
+
+eltharionTheGrim :: CardDef Unit
+eltharionTheGrim = unit "core-060" "Eltharion the Grim" do
+  unique
+  race HighElf
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 4
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: When an opponent's unit enters play, deal 1 damage to that unit."
+
+korhil :: CardDef Unit
+korhil = unit "core-061" "Korhil" do
+  unique
+  race HighElf
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 3
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Battlefield. This unit gains {power} for each other White Lion unit you control."
+
+loremasterOfHoeth :: CardDef Unit
+loremasterOfHoeth = unit "core-062" "Loremaster of Hoeth" do
+  race HighElf
+  cost 4
+  loyalty 2
+  power 1
+  hitPoints 3
+  traits [Sorcerer]
+  body "Forced: When this unit enters play, draw a card."
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key ->
+      push (Draw (Drawing StandardDraw self.controller))
+    _ -> pure ()
+
+mageOfTheWhiteTower :: CardDef Unit
+mageOfTheWhiteTower = unit "core-063" "Mage of the White Tower" do
+  race HighElf
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Sorcerer
+  body "Quest. Action: Spend 2 resources to look at the top 3 cards of your deck."
+
+spearmenOfLothern :: CardDef Unit
+spearmenOfLothern = unit "core-064" "Spearmen of Lothern" do
+  race HighElf
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Warrior
+
+reaverKnights :: CardDef Unit
+reaverKnights = unit "core-065" "Reaver Knights" do
+  race HighElf
+  cost 3
+  loyalty 1
+  power 2
+  hitPoints 1
+  traits [Warrior, Cavalry]
+  body "Scout."
+  scout
+
+lighthouseOfLothern :: CardDef Support
+lighthouseOfLothern = support "core-066" "The Lighthouse of Lothern" do
+  unique
+  race HighElf
+  cost 3
+  loyalty 4
+  power 2
+  trait CapitalCenter
+  body "Quest. Your quest zone gains +1 power."
+
+bannerOfAvelorn :: CardDef Support
+bannerOfAvelorn = support "core-067" "Banner of Avelorn" do
+  race HighElf
+  cost 2
+  loyalty 2
+  trait Attachment
+  body "Attach to a target High Elf unit. Attached unit gains {power}{power}."
+
+bowOfAvelorn :: CardDef Support
+bowOfAvelorn = support "core-068" "Bow of Avelorn" do
+  race HighElf
+  cost 1
+  loyalty 2
+  traits [Attachment, Weapon]
+  body "Attach to a target High Elf unit. Action: Sacrifice this card to deal 2 damage to target unit."
+
+hoethsWisdom :: CardDef Support
+hoethsWisdom = support "core-069" "Hoeth's Wisdom" do
+  race HighElf
+  cost 2
+  loyalty 1
+  trait Building
+  body "Kingdom. Forced: At the beginning of your turn, draw a card."
+
+theWhiteTower :: CardDef Quest
+theWhiteTower = quest "core-070" "The White Tower" do
+  race HighElf
+  cost 0
+  loyalty 2
+  body
+    "Quest. Forced: At the beginning of your turn, place 1 resource token here if a unit is questing here.\n\
+    \Action: Spend 3 tokens to draw 3 cards."
+
+voiceOfCommand :: CardDef Tactic
+voiceOfCommand = tactic "core-071" "Voice of Command" do
+  race HighElf
+  cost 2
+  loyalty 2
+  traits [Spell]
+  body "Action: Target unit gains {power}{power} until the end of the turn."
+
+dragonBreath :: CardDef Tactic
+dragonBreath = tactic "core-072" "Dragon Breath" do
+  race HighElf
+  cost 3
+  loyalty 3
+  traits [Spell]
+  body "Action: Deal 2 damage to each enemy unit in target zone."
+
+magicOfTheOldOnes :: CardDef Tactic
+magicOfTheOldOnes = tactic "core-073" "Magic of the Old Ones" do
+  race HighElf
+  cost 1
+  loyalty 1
+  traits [Spell]
+  body "Action: Draw 2 cards."
+  onReceive $ Receive \msg _owner self -> case msg of
+    TacticResolved pk _code | pk == self.controller -> do
+      push (Draw (Drawing StandardDraw self.controller))
+      push (Draw (Drawing StandardDraw self.controller))
+    _ -> pure ()
+
+battleMagic :: CardDef Tactic
+battleMagic = tactic "core-074" "Battle Magic" do
+  race HighElf
+  cost 2
+  loyalty 2
+  traits [Spell]
+  body "Action: Deal 2 damage to target unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    TacticResolved pk _code | pk == self.controller -> do
+      g <- getGame
+      case firstEnemyUnit self.controller g of
+        Just target -> push (DealDamageToUnit target.key 2)
+        Nothing -> pure ()
+    _ -> pure ()
+
+sacredIncantations :: CardDef Tactic
+sacredIncantations = tactic "core-075" "Sacred Incantations" do
+  race HighElf
+  cost 1
+  loyalty 2
+  traits [Spell]
+  body "Action: Cancel a target tactic that is being played."
+
+-- ============================================================================
+-- Chaos (fill core-083..core-102 gaps)
+-- ============================================================================
+
+tzeentchSorcerer :: CardDef Unit
+tzeentchSorcerer = unit "core-083" "Tzeentch Sorcerer" do
+  race Chaos
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 2
+  traits [Sorcerer]
+  body "Action: Spend 2 resources to deal 1 damage to a target unit and draw a card."
+
+slaaneshiMarauders :: CardDef Unit
+slaaneshiMarauders = unit "core-084" "Slaaneshi Marauders" do
+  race Chaos
+  cost 2
+  loyalty 1
+  power 2
+  hitPoints 1
+  traits [Warrior]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+plaguebearersOfNurgle :: CardDef Unit
+plaguebearersOfNurgle = unit "core-085" "Plaguebearers of Nurgle" do
+  race Chaos
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 4
+  trait Daemon
+  body "Forced: When this unit damages an enemy unit in combat, corrupt that unit."
+
+festeringNurglings :: CardDef Unit
+festeringNurglings = unit "core-086" "Festering Nurglings" do
+  race Chaos
+  cost 1
+  loyalty 1
+  power 1
+  hitPoints 1
+  traits [Creature]
+  body "Forced: When this unit leaves play, corrupt target enemy unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    DestroyUnit ukey | ukey == self.key -> do
+      g <- getGame
+      case firstEnemyUnit self.controller g of
+        Just target -> push (CorruptUnit target.key)
+        Nothing -> pure ()
+    _ -> pure ()
+
+archaonTheEverchosen :: CardDef Unit
+archaonTheEverchosen = unit "core-088" "Archaon the Everchosen" do
+  unique
+  race Chaos
+  cost 7
+  loyalty 5
+  power 4
+  hitPoints 6
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: When this unit attacks, corrupt one defending unit."
+
+chaosKnights :: CardDef Unit
+chaosKnights = unit "core-089" "Chaos Knights" do
+  race Chaos
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 4
+  traits [Warrior, Cavalry, Elite]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+chaosWarriors :: CardDef Unit
+chaosWarriors = unit "core-090" "Chaos Warriors" do
+  race Chaos
+  cost 4
+  loyalty 2
+  power 3
+  hitPoints 3
+  traits [Warrior, Elite]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+maraudersOfTheNorth :: CardDef Unit
+maraudersOfTheNorth = unit "core-091" "Marauders of the North" do
+  race Chaos
+  cost 2
+  loyalty 1
+  power 2
+  hitPoints 1
+  trait Warrior
+
+chaosSorcerer :: CardDef Unit
+chaosSorcerer = unit "core-093" "Chaos Sorcerer" do
+  race Chaos
+  cost 4
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Sorcerer
+  body "Quest. Action: Spend 2 resources to corrupt target enemy unit."
+
+horrorOfTzeentch :: CardDef Unit
+horrorOfTzeentch = unit "core-094" "Horror of Tzeentch" do
+  race Chaos
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  traits [Daemon]
+  body "Forced: When this unit enters play, you may discard a card to deal 2 damage to a target unit."
+
+daemonettesOfSlaanesh :: CardDef Unit
+daemonettesOfSlaanesh = unit "core-095" "Daemonettes of Slaanesh" do
+  race Chaos
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  traits [Daemon]
+  body "Battlefield. This unit cannot be assigned more than 1 damage per turn."
+
+beastsOfNurgle :: CardDef Unit
+beastsOfNurgle = unit "core-096" "Beasts of Nurgle" do
+  race Chaos
+  cost 4
+  loyalty 2
+  power 1
+  hitPoints 5
+  traits [Creature, Daemon]
+  body "Forced: When this unit damages an enemy unit, corrupt that unit."
+
+chaosSpawn :: CardDef Unit
+chaosSpawn = unit "core-097" "Chaos Spawn" do
+  race Chaos
+  cost 2
+  loyalty 1
+  power 2
+  hitPoints 3
+  trait Creature
+  body "Forced: At the end of your turn, deal 1 damage to this unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    EndTurn k | k == self.controller -> push (DealDamageToUnit self.key 1)
+    _ -> pure ()
+
+eyeOfTzeentch :: CardDef Support
+eyeOfTzeentch = support "core-098" "Eye of Tzeentch" do
+  race Chaos
+  cost 2
+  loyalty 2
+  traits [Attachment, Spell]
+  body "Attach to a target Chaos unit. Attached unit gains {power}; you may draw a card whenever it attacks."
+
+theIronTower :: CardDef Support
+theIronTower = support "core-099" "The Iron Tower" do
+  unique
+  race Chaos
+  cost 3
+  loyalty 4
+  power 2
+  trait CapitalCenter
+  body "Battlefield. Your Chaos units gain {power} while in this zone."
+
+pyreOfTcharzanek :: CardDef Support
+pyreOfTcharzanek = support "core-100" "Pyre of Tchar'zanek" do
+  race Chaos
+  cost 2
+  loyalty 2
+  trait Building
+  body "Kingdom. Forced: At the beginning of your turn, deal 1 damage to a target zone."
+
+tidesOfChaos :: CardDef Tactic
+tidesOfChaos = tactic "core-101" "Tides of Chaos" do
+  race Chaos
+  cost 2
+  loyalty 2
+  body "Action: Corrupt target unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    TacticResolved pk _code | pk == self.controller -> do
+      g <- getGame
+      case firstEnemyUnit self.controller g of
+        Just target -> push (CorruptUnit target.key)
+        Nothing -> pure ()
+    _ -> pure ()
+
+doomOfTheEmpire :: CardDef Tactic
+doomOfTheEmpire = tactic "core-102" "Doom of the Empire" do
+  race Chaos
+  cost 3
+  loyalty 3
+  body "Action: Deal 2 damage to target zone."
+
+-- ============================================================================
+-- Orc (core-106 to core-130)
+-- ============================================================================
+
+grimgorIronhide :: CardDef Unit
+grimgorIronhide = unit "core-106" "Grimgor Ironhide" do
+  unique
+  race Orc
+  cost 6
+  loyalty 5
+  power 4
+  hitPoints 5
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Battlefield. Your other Orc units gain {power} while attacking."
+
+skarsnik :: CardDef Unit
+skarsnik = unit "core-107" "Skarsnik" do
+  unique
+  race Orc
+  cost 4
+  loyalty 3
+  power 2
+  hitPoints 3
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: After this unit enters play, search the top 3 cards of your deck for a Goblin unit and put it into play. Shuffle your deck."
+
+gorbadIronclaw :: CardDef Unit
+gorbadIronclaw = unit "core-108" "Gorbad Ironclaw" do
+  unique
+  race Orc
+  cost 5
+  loyalty 4
+  power 3
+  hitPoints 4
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: When this unit damages a zone, deal 1 additional damage to that zone."
+
+orcBigUns :: CardDef Unit
+orcBigUns = unit "core-109" "Orc Big 'Uns" do
+  race Orc
+  cost 4
+  loyalty 2
+  power 3
+  hitPoints 3
+  traits [Warrior, Elite]
+
+blackOrcs :: CardDef Unit
+blackOrcs = unit "core-110" "Black Orcs" do
+  race Orc
+  cost 5
+  loyalty 3
+  power 4
+  hitPoints 4
+  traits [Warrior, Elite]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+savageOrcs :: CardDef Unit
+savageOrcs = unit "core-111" "Savage Orcs" do
+  race Orc
+  cost 3
+  loyalty 1
+  power 3
+  hitPoints 2
+  trait Warrior
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+orcBoyz :: CardDef Unit
+orcBoyz = unit "core-112" "Orc Boyz" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 2
+  hitPoints 1
+  trait Warrior
+
+boarBoyz :: CardDef Unit
+boarBoyz = unit "core-113" "Boar Boyz" do
+  race Orc
+  cost 3
+  loyalty 2
+  power 3
+  hitPoints 2
+  traits [Warrior, Cavalry]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+nightGoblins :: CardDef Unit
+nightGoblins = unit "core-114" "Night Goblins" do
+  race Orc
+  cost 1
+  loyalty 1
+  power 1
+  hitPoints 1
+  trait Warrior
+
+goblinWolfRiders :: CardDef Unit
+goblinWolfRiders = unit "core-115" "Goblin Wolf Riders" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 2
+  hitPoints 1
+  traits [Warrior, Cavalry]
+  body "Scout."
+  scout
+
+squigHoppers :: CardDef Unit
+squigHoppers = unit "core-116" "Squig Hoppers" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 2
+  hitPoints 1
+  trait Creature
+
+orcShaman :: CardDef Unit
+orcShaman = unit "core-117" "Orc Shaman" do
+  race Orc
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Sorcerer
+  body "Action: Spend 2 resources to deal 2 damage to a target unit; deal 1 damage to this unit."
+
+trolls :: CardDef Unit
+trolls = unit "core-118" "Trolls" do
+  race Orc
+  cost 4
+  loyalty 2
+  power 3
+  hitPoints 4
+  trait Creature
+  body "Forced: At the beginning of your turn, heal 1 damage from this unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    BeginTurn k | k == self.controller -> push (HealUnit self.key 1)
+    _ -> pure ()
+
+forestGoblinSpiderRiders :: CardDef Unit
+forestGoblinSpiderRiders = unit "core-119" "Forest Goblin Spider Riders" do
+  race Orc
+  cost 3
+  loyalty 1
+  power 2
+  hitPoints 2
+  traits [Warrior, Cavalry]
+  body "Scout."
+  scout
+
+snotlings :: CardDef Unit
+snotlings = unit "core-120" "Snotlings" do
+  race Orc
+  cost 0
+  loyalty 1
+  power 1
+  hitPoints 1
+  trait Creature
+
+daBadMoon :: CardDef Support
+daBadMoon = support "core-121" "Da Bad Moon" do
+  unique
+  race Orc
+  cost 3
+  loyalty 4
+  power 2
+  trait CapitalCenter
+  body "Battlefield. Your other Orc units gain {power} while attacking."
+
+choppa :: CardDef Support
+choppa = support "core-122" "Choppa" do
+  race Orc
+  cost 1
+  loyalty 1
+  traits [Attachment, Weapon]
+  body "Attach to a target Orc unit. Attached unit gains {power}{power}."
+
+bigBossesBanner :: CardDef Support
+bigBossesBanner = support "core-123" "Big Boss's Banner" do
+  race Orc
+  cost 2
+  loyalty 2
+  trait Attachment
+  body "Attach to a target Orc unit. While attached unit is attacking, your other Orc attackers gain {power}."
+
+daMorksEye :: CardDef Support
+daMorksEye = support "core-124" "Da Mork's Eye" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 1
+  trait Building
+  body "Kingdom. Forced: At the beginning of your turn, deal 1 damage to one target enemy zone."
+
+orcWarmachine :: CardDef Support
+orcWarmachine = support "core-125" "Orc Warmachine" do
+  race Orc
+  cost 3
+  loyalty 2
+  trait Siege
+  body "Battlefield. Action: Sacrifice a unit to deal 2 damage to a target zone."
+
+greenskinRush :: CardDef Quest
+greenskinRush = quest "core-126" "Greenskin Rush" do
+  race Orc
+  cost 0
+  loyalty 2
+  body
+    "Quest. Forced: At the beginning of your turn, place 1 resource token here if a unit is questing here.\n\
+    \Action: Spend 2 tokens to put a Goblin unit from your hand into play."
+
+waaagh :: CardDef Tactic
+waaagh = tactic "core-127" "Waaagh!" do
+  race Orc
+  cost 2
+  loyalty 2
+  body "Action: Each of your Orc units gains {power}{power} until the end of the turn."
+
+crushEm :: CardDef Tactic
+crushEm = tactic "core-128" "Crush 'Em" do
+  race Orc
+  cost 1
+  loyalty 1
+  body "Action: Target unit gains {power}{power}{power} until the end of the turn; sacrifice it at end of turn."
+
+runEmDown :: CardDef Tactic
+runEmDown = tactic "core-129" "Run 'Em Down" do
+  race Orc
+  cost 2
+  loyalty 1
+  body "Action: Deal 1 damage to each enemy unit in target zone."
+
+daBigStomp :: CardDef Tactic
+daBigStomp = tactic "core-130" "Da Big Stomp" do
+  race Orc
+  cost 3
+  loyalty 2
+  body "Action: Destroy target support card or development."
+
+-- ============================================================================
+-- Dark Elf (core-131 to core-155)
+-- ============================================================================
+
+malekith :: CardDef Unit
+malekith = unit "core-131" "Malekith" do
+  unique
+  race DarkElf
+  cost 7
+  loyalty 5
+  power 4
+  hitPoints 6
+  traits [Hero, Sorcerer]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: When this unit damages an enemy unit, corrupt that unit."
+
+morathi :: CardDef Unit
+morathi = unit "core-132" "Morathi" do
+  unique
+  race DarkElf
+  cost 5
+  loyalty 4
+  power 2
+  hitPoints 4
+  traits [Hero, Sorcerer]
+  body
+    "Limit one Hero per zone.\n\
+    \Action: Spend 2 resources to corrupt one target unit."
+
+croneHellebron :: CardDef Unit
+croneHellebron = unit "core-133" "Crone Hellebron" do
+  unique
+  race DarkElf
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 3
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Battlefield. This unit gains {power} for each Witch Elf unit you control."
+
+lokhirFellheart :: CardDef Unit
+lokhirFellheart = unit "core-134" "Lokhir Fellheart" do
+  unique
+  race DarkElf
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 3
+  traits [Hero, Warrior]
+  body
+    "Limit one Hero per zone.\n\
+    \Forced: When this unit damages an enemy zone, draw a card."
+
+witchElves :: CardDef Unit
+witchElves = unit "core-135" "Witch Elves" do
+  race DarkElf
+  cost 3
+  loyalty 2
+  power 3
+  hitPoints 1
+  trait Warrior
+  body "Battlefield only. Damage dealt by this unit cannot be cancelled."
+  keyword BattlefieldOnly
+  keyword DamageCannotBeCancelled
+
+blackGuardOfNaggarond :: CardDef Unit
+blackGuardOfNaggarond = unit "core-136" "Black Guard of Naggarond" do
+  race DarkElf
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 4
+  traits [Warrior, Elite]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+executioners :: CardDef Unit
+executioners = unit "core-137" "Executioners" do
+  race DarkElf
+  cost 4
+  loyalty 2
+  power 4
+  hitPoints 2
+  traits [Warrior, Elite]
+  body "Battlefield only. Damage dealt by this unit cannot be cancelled."
+  keyword BattlefieldOnly
+  keyword DamageCannotBeCancelled
+
+corsairs :: CardDef Unit
+corsairs = unit "core-138" "Corsairs" do
+  race DarkElf
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Warrior
+  body "Forced: When this unit damages an enemy zone, draw a card."
+
+coldOneKnights :: CardDef Unit
+coldOneKnights = unit "core-139" "Cold One Knights" do
+  race DarkElf
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 3
+  traits [Warrior, Cavalry, Elite]
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+darkRiders :: CardDef Unit
+darkRiders = unit "core-140" "Dark Riders" do
+  race DarkElf
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  traits [Warrior, Cavalry]
+  body "Scout."
+  scout
+
+darkSorceress :: CardDef Unit
+darkSorceress = unit "core-141" "Dark Sorceress" do
+  race DarkElf
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Sorcerer
+  body "Action: Spend 2 resources to deal 2 damage to a target unit."
+
+assassinsOfKhaine :: CardDef Unit
+assassinsOfKhaine = unit "core-142" "Assassins of Khaine" do
+  race DarkElf
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 1
+  trait Warrior
+  body "Forced: When this unit enters play, destroy one target unit with 1 hit point."
+
+repeaterCrossbowmen :: CardDef Unit
+repeaterCrossbowmen = unit "core-143" "Repeater Crossbowmen" do
+  race DarkElf
+  cost 3
+  loyalty 1
+  power 2
+  hitPoints 2
+  trait Warrior
+  body "Action: Spend 1 resource to deal 1 damage to a target unit."
+
+bloodwrackMedusa :: CardDef Unit
+bloodwrackMedusa = unit "core-144" "Bloodwrack Medusa" do
+  race DarkElf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 3
+  trait Creature
+  body "Forced: When this unit enters play, deal 1 damage to each enemy unit in target zone."
+
+blackDragon :: CardDef Unit
+blackDragon = unit "core-145" "Black Dragon" do
+  race DarkElf
+  cost 6
+  loyalty 3
+  power 4
+  hitPoints 5
+  trait Creature
+  body "Battlefield. Damage dealt by this unit cannot be cancelled."
+  keyword DamageCannotBeCancelled
+
+manticore :: CardDef Unit
+manticore = unit "core-146" "Manticore" do
+  race DarkElf
+  cost 5
+  loyalty 2
+  power 4
+  hitPoints 3
+  trait Creature
+  body "Battlefield only."
+  keyword BattlefieldOnly
+
+cauldronOfBlood :: CardDef Support
+cauldronOfBlood = support "core-147" "Cauldron of Blood" do
+  unique
+  race DarkElf
+  cost 3
+  loyalty 4
+  power 2
+  trait CapitalCenter
+  body "Battlefield. Your Witch Elf units gain {power}."
+
+theBlackArk :: CardDef Support
+theBlackArk = support "core-148" "The Black Ark" do
+  unique
+  race DarkElf
+  cost 3
+  loyalty 3
+  power 1
+  trait Building
+  body "Kingdom. Forced: At the beginning of your turn, draw a card."
+
+whipOfAgony :: CardDef Support
+whipOfAgony = support "core-149" "Whip of Agony" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  traits [Attachment, Weapon]
+  body "Attach to a target Dark Elf unit. Attached unit gains {power}{power}."
+
+druchiiBanner :: CardDef Support
+druchiiBanner = support "core-150" "Druchii Banner" do
+  race DarkElf
+  cost 1
+  loyalty 1
+  trait Attachment
+  body "Attach to a target unit. Attached unit gains {power}; opponents pay 1 additional resource to target it."
+
+witchbrew :: CardDef Support
+witchbrew = support "core-151" "Witchbrew" do
+  race DarkElf
+  cost 1
+  loyalty 1
+  trait Attachment
+  body "Attach to a target Dark Elf unit. Action: Sacrifice this card to give attached unit {power}{power}{power} until the end of the turn."
+
+slaughterAtLustria :: CardDef Quest
+slaughterAtLustria = quest "core-152" "Slaughter at Lustria" do
+  race DarkElf
+  cost 0
+  loyalty 2
+  body
+    "Quest. Forced: At the beginning of your turn, place 1 token here if a unit is questing here.\n\
+    \Action: Spend 3 tokens to corrupt up to 2 target units."
+
+khainesEmbrace :: CardDef Tactic
+khainesEmbrace = tactic "core-153" "Khaine's Embrace" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  body "Action: Destroy target unit with 2 or fewer hit points."
+
+murderousProwess :: CardDef Tactic
+murderousProwess = tactic "core-154" "Murderous Prowess" do
+  race DarkElf
+  cost 1
+  loyalty 2
+  body "Action: Each of your Dark Elf units gains {power} until the end of the turn."
+
+coldBloodedSlaughter :: CardDef Tactic
+coldBloodedSlaughter = tactic "core-155" "Cold Blooded Slaughter" do
+  race DarkElf
+  cost 3
+  loyalty 3
+  body "Action: Deal damage equal to your hand size to a target unit."
 

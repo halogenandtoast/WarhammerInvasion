@@ -362,24 +362,25 @@ instance Run Game where
         [("player", playerParam k), ("count", T.pack (show n))]
     QuestDraw k ->
       logIt LogSystem "log.quest.draw" [("player", playerParam k)]
-    PlayUnit pk code zone -> do
+    PlayUnit pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
-      case takeUnitFromHand code player of
+      case takeUnitFromHand cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard) -> case cardDef.cost of
           Variable -> pure ()
           Fixed printed ->
             let n = effectiveUnitCost g cardDef printed
             in when (player.resources >= Resources n) $ do
-              let UnitKey nextN = g.nextUnitKey
-                  unitKey = UnitKey nextN
-                  paidPlayer =
+              -- Reuse the card's existing key as its in-play UnitKey.
+              -- This is what lets the frontend's view-transition map a
+              -- hand card to its zone landing spot.
+              let paidPlayer =
                     playerWithoutCard
                       {resources = player.resources - Resources n}
                   unitDetails =
                     UnitDetails
-                      { key = unitKey
+                      { key = cardKey
                       , controller = pk
                       , zone
                       , cardDef
@@ -393,7 +394,6 @@ instance Run Game where
               modify \gx ->
                 (setPlayer pk paidPlayer gx)
                   { units = unitDetails : gx.units
-                  , nextUnitKey = UnitKey (nextN + 1)
                   }
               logIt LogPlayerAction
                 "log.unit.played"
@@ -401,7 +401,7 @@ instance Run Game where
                 , ("card", T.pack cardDef.title)
                 , ("cost", T.pack (show n))
                 ]
-              send (UnitEnteredPlay pk unitKey)
+              send (UnitEnteredPlay pk cardKey)
     UnitEnteredPlay pk _key ->
       -- The card's own 'receive' fires via 'dispatchToInPlayUnits'.
       -- Game just narrates.
@@ -450,15 +450,22 @@ instance Run Game where
         Nothing -> pure ()
         Just u -> do
           -- Remove the unit and all its attachments. Each card lands in
-          -- its OWN controller's discard pile (attachments may be
-          -- controlled by either side — Branded by Khorne is the
-          -- canonical hostile attachment).
+          -- its OWN controller's discard pile carrying the same key it
+          -- had in play, so the frontend's view-transition continues to
+          -- track the same card visually from board to pile.
+          --
+          -- Attachments may be controlled by either side — Branded by
+          -- Khorne is the canonical hostile attachment.
           let dropUnitCard pl =
-                pl {discard = UnitCardDef u.cardDef : pl.discard}
+                pl {discard = mkCard u.key (UnitCardDef u.cardDef) : pl.discard}
               dropSupport gx attach =
                 let owner = lookupPlayer attach.controller gx
                     owner' =
-                      owner {discard = SupportCardDef attach.cardDef : owner.discard}
+                      owner
+                        { discard =
+                            mkCard attach.key (SupportCardDef attach.cardDef)
+                              : owner.discard
+                        }
                  in setPlayer attach.controller owner' gx
               gAfterUnit =
                 let owner = lookupPlayer u.controller g
@@ -497,22 +504,20 @@ instance Run Game where
             "log.unit.cleansed"
             [("card", T.pack u.cardDef.title)]
         _ -> pure ()
-    PlayAttachment pk code targetKey -> do
+    PlayAttachment pk cardKey targetKey -> do
       g <- get
       let player = lookupPlayer pk g
-      case (takeSupportFromHand code player, findUnit targetKey g) of
+      case (takeSupportFromHand cardKey player, findUnit targetKey g) of
         (Just (cardDef, playerWithoutCard), Just host) -> case cardDef.cost of
           Variable -> pure ()
           Fixed n ->
             when (player.resources >= Resources n) $ do
-              let UnitKey nextN = g.nextUnitKey
-                  attachmentKey = UnitKey nextN
-                  paidPlayer =
+              let paidPlayer =
                     playerWithoutCard
                       {resources = player.resources - Resources n}
                   attachment =
                     SupportDetails
-                      { key = attachmentKey
+                      { key = cardKey
                       , controller = pk
                       , zone = host.zone
                       , cardDef
@@ -525,7 +530,6 @@ instance Run Game where
               modify \gx ->
                 (setPlayer pk paidPlayer gx)
                   { units = replaceUnit host' gx.units
-                  , nextUnitKey = UnitKey (nextN + 1)
                   }
               logIt LogPlayerAction
                 "log.attachment.played"
@@ -534,29 +538,27 @@ instance Run Game where
                 , ("target", T.pack host.cardDef.title)
                 , ("cost", T.pack (show n))
                 ]
-              send (SupportEnteredPlay pk attachmentKey)
+              send (SupportEnteredPlay pk cardKey)
         _ -> pure ()
     SupportEnteredPlay _pk _key ->
       -- 'dispatchToInPlayUnits' walks attachments via their host; any
       -- bespoke reaction lives in the support card's 'receive'.
       pure ()
-    PlaySupport pk code zone -> do
+    PlaySupport pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
-      case takeSupportFromHand code player of
+      case takeSupportFromHand cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard) -> case cardDef.cost of
           Variable -> pure ()
           Fixed n ->
             when (player.resources >= Resources n) $ do
-              let UnitKey nextN = g.nextUnitKey
-                  supportKey = UnitKey nextN
-                  paidPlayer =
+              let paidPlayer =
                     playerWithoutCard
                       {resources = player.resources - Resources n}
                   support =
                     SupportDetails
-                      { key = supportKey
+                      { key = cardKey
                       , controller = pk
                       , zone
                       , cardDef
@@ -566,7 +568,6 @@ instance Run Game where
               modify \gx ->
                 (setPlayer pk paidPlayer gx)
                   { supports = support : gx.supports
-                  , nextUnitKey = UnitKey (nextN + 1)
                   }
               logIt LogPlayerAction
                 "log.support.played"
@@ -574,24 +575,22 @@ instance Run Game where
                 , ("card", T.pack cardDef.title)
                 , ("cost", T.pack (show n))
                 ]
-              send (SupportEnteredPlay pk supportKey)
-    PlayQuest pk code -> do
+              send (SupportEnteredPlay pk cardKey)
+    PlayQuest pk cardKey -> do
       g <- get
       let player = lookupPlayer pk g
-      case takeQuestFromHand code player of
+      case takeQuestFromHand cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard) -> case cardDef.cost of
           Variable -> pure ()
           Fixed n ->
             when (player.resources >= Resources n) $ do
-              let UnitKey nextN = g.nextUnitKey
-                  questKey = UnitKey nextN
-                  paidPlayer =
+              let paidPlayer =
                     playerWithoutCard
                       {resources = player.resources - Resources n}
                   quest =
                     QuestDetails
-                      { key = questKey
+                      { key = cardKey
                       , controller = pk
                       , cardDef
                       , tokens = 0
@@ -599,7 +598,6 @@ instance Run Game where
               modify \gx ->
                 (setPlayer pk paidPlayer gx)
                   { quests = quest : gx.quests
-                  , nextUnitKey = UnitKey (nextN + 1)
                   }
               logIt LogPlayerAction
                 "log.quest.played"
@@ -607,7 +605,7 @@ instance Run Game where
                 , ("card", T.pack cardDef.title)
                 , ("cost", T.pack (show n))
                 ]
-              send (QuestEnteredPlay pk questKey)
+              send (QuestEnteredPlay pk cardKey)
     QuestEnteredPlay _pk _key ->
       -- Per-card reactions fire via dispatch (see
       -- 'dispatchToInPlayUnits' which now also walks 'Game.supports'
@@ -646,7 +644,10 @@ instance Run Game where
         Just s -> do
           let owner = lookupPlayer s.controller g
               owner' =
-                owner {discard = SupportCardDef s.cardDef : owner.discard}
+                owner
+                  { discard =
+                      mkCard s.key (SupportCardDef s.cardDef) : owner.discard
+                  }
           modify \gx ->
             (setPlayer s.controller owner' gx)
               {supports = filter (\v -> v.key /= skey) gx.supports}
@@ -669,16 +670,13 @@ instance Run Game where
             [ ("card", T.pack u.cardDef.title)
             , ("count", T.pack (show (length u'.experiences)))
             ]
-    PlayTactic pk code -> do
+    PlayTactic pk cardKey -> do
       g <- get
       let player = lookupPlayer pk g
-          isLimited = Limited `elem` (case Map.lookup code allCards of
-            Just (TacticCardDef cd) -> cd.keywords
-            _ -> [])
-      case takeTacticFromHand code player of
+      case takeTacticFromHand cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard)
-          | isLimited && g.limitedPlayedThisTurn ->
+          | Limited `elem` cardDef.keywords && g.limitedPlayedThisTurn ->
               -- A Limited card has already been played this turn;
               -- silently refuse.
               pure ()
@@ -686,11 +684,13 @@ instance Run Game where
               Variable -> pure ()
               Fixed n ->
                 when (player.resources >= Resources n) $ do
-                  let paidPlayer =
+                  let isLimited = Limited `elem` cardDef.keywords
+                      paidPlayer =
                         playerWithoutCard
                           { resources = player.resources - Resources n
                           , discard =
-                              TacticCardDef cardDef : playerWithoutCard.discard
+                              mkCard cardKey (TacticCardDef cardDef)
+                                : playerWithoutCard.discard
                           }
                   modify (setPlayer pk paidPlayer)
                   when isLimited $
@@ -701,7 +701,7 @@ instance Run Game where
                     , ("card", T.pack cardDef.title)
                     , ("cost", T.pack (show n))
                     ]
-                  send (TacticResolved pk code)
+                  send (TacticResolved pk cardDef.code)
     TacticResolved pk code -> do
       g <- get
       case Map.lookup code allCards of
@@ -843,19 +843,17 @@ instance Run Game where
     EndCombat -> do
       modify \gx -> gx {combat = Nothing}
       logIt LogSystem "log.combat.ends" []
-    PutUnitIntoPlay pk code zone -> do
+    PutUnitIntoPlay pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
-      case takeUnitFromHand code player of
+      case takeUnitFromHand cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard) -> do
           -- Skip cost; same wiring as 'PlayUnit' but no resource debit
           -- and no Variable-cost gate.
-          let UnitKey nextN = g.nextUnitKey
-              unitKey = UnitKey nextN
-              unitDetails =
+          let unitDetails =
                 UnitDetails
-                  { key = unitKey
+                  { key = cardKey
                   , controller = pk
                   , zone
                   , cardDef
@@ -869,25 +867,22 @@ instance Run Game where
           modify \gx ->
             (setPlayer pk playerWithoutCard gx)
               { units = unitDetails : gx.units
-              , nextUnitKey = UnitKey (nextN + 1)
               }
           logIt LogSystem
             "log.unit.summoned_free"
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
             ]
-          send (UnitEnteredPlay pk unitKey)
-    PutUnitIntoPlayFromDiscard pk code zone -> do
+          send (UnitEnteredPlay pk cardKey)
+    PutUnitIntoPlayFromDiscard pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
-      case takeUnitFromDiscard code player of
+      case takeUnitFromDiscard cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard) -> do
-          let UnitKey nextN = g.nextUnitKey
-              unitKey = UnitKey nextN
-              unitDetails =
+          let unitDetails =
                 UnitDetails
-                  { key = unitKey
+                  { key = cardKey
                   , controller = pk
                   , zone
                   , cardDef
@@ -901,7 +896,6 @@ instance Run Game where
           modify \gx ->
             (setPlayer pk playerWithoutCard gx)
               { units = unitDetails : gx.units
-              , nextUnitKey = UnitKey (nextN + 1)
               -- If a combat is in progress with this player as
               -- attacker, also add the fresh unit to its attackers
               -- list (Reckless Attack relies on this).
@@ -909,14 +903,14 @@ instance Run Game where
                   Just cs
                     | cs.attackingPlayer == pk ->
                         Just
-                          ( cs {attackers = unitKey : cs.attackers}
+                          ( cs {attackers = cardKey : cs.attackers}
                             :: CombatState
                           )
                   other -> other
               , attackersThisPhase =
                   case gx.combat of
                     Just cs
-                      | cs.attackingPlayer == pk -> unitKey : gx.attackersThisPhase
+                      | cs.attackingPlayer == pk -> cardKey : gx.attackersThisPhase
                     _ -> gx.attackersThisPhase
               }
           logIt LogSystem
@@ -924,7 +918,7 @@ instance Run Game where
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
             ]
-          send (UnitEnteredPlay pk unitKey)
+          send (UnitEnteredPlay pk cardKey)
     InstallModifier target modifier -> do
       modify \g ->
         g
@@ -970,7 +964,7 @@ instance Run Game where
             when (dstDmg + srcDmg >= dst.effectiveMaxHP) $
               send (DestroyUnit toKey)
         _ -> pure ()
-    PlayLegend pk code -> do
+    PlayLegend pk cardKey -> do
       g <- get
       -- One legend per player at a time. If one is already in play for
       -- this player, silently refuse.
@@ -978,20 +972,18 @@ instance Run Game where
         Just _ -> pure ()
         Nothing -> do
           let player = lookupPlayer pk g
-          case takeLegendFromHand code player of
+          case takeLegendFromHand cardKey player of
             Nothing -> pure ()
             Just (cardDef, playerWithoutCard) -> case cardDef.cost of
               Variable -> pure ()
               Fixed n ->
                 when (player.resources >= Resources n) $ do
-                  let UnitKey nextN = g.nextUnitKey
-                      legendKey = UnitKey nextN
-                      paidPlayer =
+                  let paidPlayer =
                         playerWithoutCard
                           {resources = player.resources - Resources n}
                       legendDetails =
                         LegendDetails
-                          { key = legendKey
+                          { key = cardKey
                           , controller = pk
                           , zone = BattlefieldZone
                           , cardDef
@@ -1000,7 +992,6 @@ instance Run Game where
                   modify \gx ->
                     (setPlayer pk paidPlayer gx)
                       { legends = legendDetails : gx.legends
-                      , nextUnitKey = UnitKey (nextN + 1)
                       }
                   logIt LogPlayerAction
                     "log.legend.played"
@@ -1008,7 +999,7 @@ instance Run Game where
                     , ("card", T.pack cardDef.title)
                     , ("cost", T.pack (show n))
                     ]
-                  send (LegendEnteredPlay pk legendKey)
+                  send (LegendEnteredPlay pk cardKey)
     LegendEnteredPlay pk _key ->
       logIt LogSystem "log.legend.entered_play" [("player", playerParam pk)]
     DealDamageToLegend lkey amount -> do
@@ -1037,7 +1028,10 @@ instance Run Game where
         Just l -> do
           let owner = lookupPlayer l.controller g
               owner' =
-                owner {discard = LegendCardDef l.cardDef : owner.discard}
+                owner
+                  { discard =
+                      mkCard l.key (LegendCardDef l.cardDef) : owner.discard
+                  }
           modify \gx ->
             (setPlayer l.controller owner' gx)
               {legends = filter (\v -> v.key /= lkey) gx.legends}
@@ -1057,25 +1051,38 @@ shouldSkipFirstTurnPhase phase g =
     && g.currentPlayer == g.firstPlayer
     && (phase == QuestPhase || phase == BattlefieldPhase)
 
-newPlayer :: PlayerKey -> Deck -> Either DeckLoadError Player
-newPlayer k cs = do
-  (race, cards) <- loadDeck cs
-  pure $
-    Player
-      { key = k
-      , state = IdlePlayer
-      , capital = newCapital
-      , resources = Resources 0
-      , hand = []
-      , deck = cards
-      , discard = []
-      , race
-      }
+-- | Wrap a list of bare card definitions into 'Card's with sequential
+-- keys minted starting from the given counter. Returns the next-free
+-- key plus the wrapped cards (in input order). Used at game-init to
+-- stamp every starting-deck card with a stable identity that survives
+-- through hand, play, and discard.
+mintCards :: UnitKey -> [SomeCardDef] -> (UnitKey, [Card])
+mintCards (UnitKey n0) = go n0 []
+  where
+    go n acc [] = (UnitKey n, reverse acc)
+    go n acc (d : rest) = go (n + 1) (mkCard (UnitKey n) d : acc) rest
+
+newPlayer :: PlayerKey -> Race -> [Card] -> Player
+newPlayer k race cards =
+  Player
+    { key = k
+    , state = IdlePlayer
+    , capital = newCapital
+    , resources = Resources 0
+    , hand = []
+    , deck = cards
+    , discard = []
+    , race
+    }
 
 newGame :: Deck -> Deck -> Either DeckLoadError Game
 newGame deck1 deck2 = do
-  player1 <- newPlayer Player1 deck1
-  player2 <- newPlayer Player2 deck2
+  (race1, defs1) <- loadDeck deck1
+  (race2, defs2) <- loadDeck deck2
+  let (afterP1, cards1) = mintCards (UnitKey 0) defs1
+      (nextKey, cards2) = mintCards afterP1 defs2
+      player1 = newPlayer Player1 race1 cards1
+      player2 = newPlayer Player2 race2 cards2
   pure $
     Game
       { player1
@@ -1092,7 +1099,7 @@ newGame deck1 deck2 = do
       , supports = []
       , quests = []
       , legends = []
-      , nextUnitKey = UnitKey 0
+      , nextUnitKey = nextKey
       , pendingEndOfTurn = []
       , combat = Nothing
       , attackersThisPhase = []
@@ -1114,45 +1121,42 @@ setPlayer Player2 p g = g {player2 = p}
 -- hand. Returns 'Nothing' if no such card exists in hand (or if the
 -- matching card isn't a unit). Preserves hand order for the remaining
 -- cards.
-takeUnitFromHand :: CardCode -> Player -> Maybe (CardDef Unit, Player)
-takeUnitFromHand code p = go p.hand []
+takeUnitFromHand :: UnitKey -> Player -> Maybe (CardDef Unit, Player)
+takeUnitFromHand k p = go p.hand []
   where
-    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Unit, Player)
+    go :: [Card] -> [Card] -> Maybe (CardDef Unit, Player)
     go [] _ = Nothing
-    go (s : rest) acc = case s of
-      UnitCardDef cd
-        | cd.code == code ->
-            Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (s : acc)
+    go (c : rest) acc = case (c.key == k, c.def) of
+      (True, UnitCardDef cd) ->
+        Just (cd, p {hand = reverse acc ++ rest})
+      _ -> go rest (c : acc)
 
 -- 'findUnit' is exported by 'Invasion.Card' for use in card receive
 -- bodies; we reuse it here.
 
--- | Pull a Support card matching the given 'CardCode' out of a player's
+-- | Pull a Support card matching the given 'UnitKey' out of a player's
 -- hand. Mirror of 'takeUnitFromHand'.
-takeSupportFromHand :: CardCode -> Player -> Maybe (CardDef Support, Player)
-takeSupportFromHand code p = go p.hand []
+takeSupportFromHand :: UnitKey -> Player -> Maybe (CardDef Support, Player)
+takeSupportFromHand k p = go p.hand []
   where
-    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Support, Player)
+    go :: [Card] -> [Card] -> Maybe (CardDef Support, Player)
     go [] _ = Nothing
-    go (s : rest) acc = case s of
-      SupportCardDef cd
-        | cd.code == code ->
-            Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (s : acc)
+    go (c : rest) acc = case (c.key == k, c.def) of
+      (True, SupportCardDef cd) ->
+        Just (cd, p {hand = reverse acc ++ rest})
+      _ -> go rest (c : acc)
 
--- | Pull a Quest card matching the given 'CardCode' out of a player's
+-- | Pull a Quest card matching the given 'UnitKey' out of a player's
 -- hand.
-takeQuestFromHand :: CardCode -> Player -> Maybe (CardDef Quest, Player)
-takeQuestFromHand code p = go p.hand []
+takeQuestFromHand :: UnitKey -> Player -> Maybe (CardDef Quest, Player)
+takeQuestFromHand k p = go p.hand []
   where
-    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Quest, Player)
+    go :: [Card] -> [Card] -> Maybe (CardDef Quest, Player)
     go [] _ = Nothing
-    go (s : rest) acc = case s of
-      QuestCardDef cd
-        | cd.code == code ->
-            Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (s : acc)
+    go (c : rest) acc = case (c.key == k, c.def) of
+      (True, QuestCardDef cd) ->
+        Just (cd, p {hand = reverse acc ++ rest})
+      _ -> go rest (c : acc)
 
 -- | Fire one scheduled effect by translating it into messages.
 firePendingEffect :: PendingEffect -> StateT Game GameT ()
@@ -1314,47 +1318,44 @@ experiencePowerBonus u = case u.cardDef.code of
   CardCode "faith-and-steel-113" -> length u.experiences
   _ -> 0
 
--- | Pull a Unit card matching the given 'CardCode' out of a player's
+-- | Pull a Unit card matching the given 'UnitKey' out of a player's
 -- discard pile. Used by Reckless Attack-style resurrection effects.
-takeUnitFromDiscard :: CardCode -> Player -> Maybe (CardDef Unit, Player)
-takeUnitFromDiscard code p = go p.discard []
+takeUnitFromDiscard :: UnitKey -> Player -> Maybe (CardDef Unit, Player)
+takeUnitFromDiscard k p = go p.discard []
   where
-    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Unit, Player)
+    go :: [Card] -> [Card] -> Maybe (CardDef Unit, Player)
     go [] _ = Nothing
-    go (s : rest) acc = case s of
-      UnitCardDef cd
-        | cd.code == code ->
-            Just (cd, p {discard = reverse acc ++ rest})
-      _ -> go rest (s : acc)
+    go (c : rest) acc = case (c.key == k, c.def) of
+      (True, UnitCardDef cd) ->
+        Just (cd, p {discard = reverse acc ++ rest})
+      _ -> go rest (c : acc)
 
--- | Pull a Tactic card matching the given 'CardCode' out of a player's
+-- | Pull a Tactic card matching the given 'UnitKey' out of a player's
 -- hand.
-takeTacticFromHand :: CardCode -> Player -> Maybe (CardDef Tactic, Player)
-takeTacticFromHand code p = go p.hand []
+takeTacticFromHand :: UnitKey -> Player -> Maybe (CardDef Tactic, Player)
+takeTacticFromHand k p = go p.hand []
   where
-    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Tactic, Player)
+    go :: [Card] -> [Card] -> Maybe (CardDef Tactic, Player)
     go [] _ = Nothing
-    go (s : rest) acc = case s of
-      TacticCardDef cd
-        | cd.code == code ->
-            Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (s : acc)
+    go (c : rest) acc = case (c.key == k, c.def) of
+      (True, TacticCardDef cd) ->
+        Just (cd, p {hand = reverse acc ++ rest})
+      _ -> go rest (c : acc)
 
 -- 'findSupport' / 'findQuest' / 'findLegend' are exported from
 -- 'Invasion.Card'.
 
 -- | Pull a Legend card matching the given 'CardCode' out of a player's
 -- hand.
-takeLegendFromHand :: CardCode -> Player -> Maybe (CardDef Legend, Player)
-takeLegendFromHand code p = go p.hand []
+takeLegendFromHand :: UnitKey -> Player -> Maybe (CardDef Legend, Player)
+takeLegendFromHand k p = go p.hand []
   where
-    go :: [SomeCardDef] -> [SomeCardDef] -> Maybe (CardDef Legend, Player)
+    go :: [Card] -> [Card] -> Maybe (CardDef Legend, Player)
     go [] _ = Nothing
-    go (s : rest) acc = case s of
-      LegendCardDef cd
-        | cd.code == code ->
-            Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (s : acc)
+    go (c : rest) acc = case (c.key == k, c.def) of
+      (True, LegendCardDef cd) ->
+        Just (cd, p {hand = reverse acc ++ rest})
+      _ -> go rest (c : acc)
 
 -- | Printed HP for a legend card definition. Mirrors
 -- 'unitPrintedHPFromDef'; 'Variable' falls back to 1 for now.

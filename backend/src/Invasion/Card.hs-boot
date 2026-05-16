@@ -1,4 +1,4 @@
-module Invasion.Card (SomeCardDef) where
+module Invasion.Card (SomeCardDef, Card) where
 
 import Invasion.Prelude
 import Data.Aeson
@@ -6,3 +6,7 @@ import Data.Aeson
 data SomeCardDef
 instance Show SomeCardDef
 instance ToJSON SomeCardDef
+
+data Card
+instance Show Card
+instance ToJSON Card

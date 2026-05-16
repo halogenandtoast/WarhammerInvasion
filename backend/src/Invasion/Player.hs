@@ -5,7 +5,7 @@ module Invasion.Player (module Invasion.Player) where
 import Data.Aeson (ToJSON)
 import Data.Aeson.TH
 import Invasion.Capital
-import {-# SOURCE #-} Invasion.Card
+import {-# SOURCE #-} Invasion.Card (Card)
 import Invasion.Prelude
 import Invasion.Types
 
@@ -21,9 +21,9 @@ data Player = Player
   , state :: PlayerState
   , capital :: Capital
   , resources :: Resources
-  , hand :: [SomeCardDef]
-  , deck :: [SomeCardDef]
-  , discard :: [SomeCardDef]
+  , hand :: [Card]
+  , deck :: [Card]
+  , discard :: [Card]
   , race :: Race
   }
   deriving stock Show

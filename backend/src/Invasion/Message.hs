@@ -33,8 +33,14 @@ data Message where
   OpenActionWindow :: ActionWindowTrigger -> Message
   PassPriority :: PlayerKey -> Message
   CloseActionWindow :: Message
-  -- Card play
-  PlayUnit :: PlayerKey -> CardCode -> ZoneKind -> Message
+  -- Card play.
+  --
+  -- These reference a card-instance by its stable 'UnitKey' (the same
+  -- key the card has carried since deck-init). The engine looks the
+  -- card up in the named player's hand, verifies its kind matches the
+  -- constructor, and reuses the key as the new in-play unit / support /
+  -- quest / legend identity. No fresh key is minted on play.
+  PlayUnit :: PlayerKey -> UnitKey -> ZoneKind -> Message
   UnitEnteredPlay :: PlayerKey -> UnitKey -> Message
   -- Damage / destroy
   DealDamageToUnit :: UnitKey -> Int -> Message
@@ -55,19 +61,20 @@ data Message where
     -- ^ Clear the corrupted flag (used by the kingdom-phase restoration
     -- step and by future cleanse effects).
   -- Attachments
-  PlayAttachment :: PlayerKey -> CardCode -> UnitKey -> Message
+  PlayAttachment :: PlayerKey -> UnitKey -> UnitKey -> Message
     -- ^ Play a Support card from hand as an attachment to a target
-    -- unit. Pays cost, removes the card from hand, and emits
-    -- 'SupportEnteredPlay'.
+    -- unit. First 'UnitKey' is the support card in hand; second is the
+    -- target unit already in play. Pays cost, removes the card from
+    -- hand, and emits 'SupportEnteredPlay'.
   SupportEnteredPlay :: PlayerKey -> UnitKey -> Message
     -- ^ A support card (attached or free-standing) has just entered
     -- play. The support's 'attachedTo' field distinguishes the two
     -- cases.
   -- Free-standing supports + quests
-  PlaySupport :: PlayerKey -> CardCode -> ZoneKind -> Message
+  PlaySupport :: PlayerKey -> UnitKey -> ZoneKind -> Message
     -- ^ Play a non-attachment Support card from hand into one of your
     -- zones. Pays cost, removes the card, emits 'SupportEnteredPlay'.
-  PlayQuest :: PlayerKey -> CardCode -> Message
+  PlayQuest :: PlayerKey -> UnitKey -> Message
     -- ^ Play a Quest from hand. Emits 'QuestEnteredPlay'.
   QuestEnteredPlay :: PlayerKey -> UnitKey -> Message
     -- ^ A Quest has just entered play. The fresh key references the
@@ -88,7 +95,7 @@ data Message where
     -- ^ Pin a card (by code) as an "experience" on a host unit. Used by
     -- Skulltaker; the host card text reads 'experiences' to scale.
   -- Tactics
-  PlayTactic :: PlayerKey -> CardCode -> Message
+  PlayTactic :: PlayerKey -> UnitKey -> Message
     -- ^ Play a Tactic from hand: pay cost, send to discard, fire the
     -- tactic's 'receive' once with 'TacticResolved'.
   TacticResolved :: PlayerKey -> CardCode -> Message
@@ -103,11 +110,11 @@ data Message where
     -- ^ Add N damage tokens to a capital zone. May burn the zone (and
     -- a second burn eliminates the player).
   -- Free unit summons (Iron Throneroom payoff, Reckless Attack, …).
-  PutUnitIntoPlay :: PlayerKey -> CardCode -> ZoneKind -> Message
+  PutUnitIntoPlay :: PlayerKey -> UnitKey -> ZoneKind -> Message
     -- ^ Like 'PlayUnit' but skips the cost check / payment and pulls
     -- from hand. Used by effects that explicitly bypass the resource
-    -- system.
-  PutUnitIntoPlayFromDiscard :: PlayerKey -> CardCode -> ZoneKind -> Message
+    -- system. The 'UnitKey' is the in-hand card's stable key.
+  PutUnitIntoPlayFromDiscard :: PlayerKey -> UnitKey -> ZoneKind -> Message
     -- ^ Same as 'PutUnitIntoPlay' but pulls the card from the
     -- player's discard pile instead of their hand.
   -- Scoped modifiers
@@ -126,7 +133,7 @@ data Message where
     -- ^ Move all damage on 'fromKey' to 'toKey'. Source unit ends with
     -- 0 damage; destination accumulates.
   -- Legends
-  PlayLegend :: PlayerKey -> CardCode -> Message
+  PlayLegend :: PlayerKey -> UnitKey -> Message
     -- ^ Play a legend from hand directly onto the controller's capital
     -- board. Pays cost, removes the card from hand, emits
     -- 'LegendEnteredPlay'. Refused if the controller already has a

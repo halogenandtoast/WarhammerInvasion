@@ -43,7 +43,7 @@ import Invasion.Auth.Jwt
   , JwtSecret
   , verifyJwt
   )
-import Invasion.Card (SomeCardDef (..), allCards)
+import Invasion.Card (Card (..), SomeCardDef (..))
 import Invasion.CardDef (CardDef (..), Trait (Attachment))
 import Invasion.DB (DbPool, runDB)
 import Invasion.Engine
@@ -62,6 +62,8 @@ import Invasion.Engine
   , newGame
   )
 import Invasion.Engine qualified as Engine
+import Invasion.Game (Game (..))
+import Invasion.Player (Player (..))
 import Invasion.Model
 import Invasion.Prelude
 import Invasion.Server.Lobby
@@ -456,7 +458,7 @@ handleGameIn env slot user = \case
               writeTVar slot.engine (Just g')
               v <- gameViewSTM slot user
               broadcastGameWithView slot v
-  GamePlayCard {card, zone, target} -> do
+  GamePlayCard {cardKey, zone, target} -> do
     mGame <- readTVarIO slot.engine
     case mGame of
       Nothing -> sendGameError slot user "game_not_started"
@@ -466,9 +468,9 @@ handleGameIn env slot user = \case
           pure $ findSeatFor user sm
         case seatKey >>= seatKeyToPlayerKey of
           Nothing -> sendGameError slot user "not_seated"
-          Just pk -> case Map.lookup card allCards of
-            Nothing -> sendGameError slot user "card_unknown"
-            Just someCard -> case playMessageFor pk card zone target someCard of
+          Just pk -> case findHandCard pk cardKey g of
+            Nothing -> sendGameError slot user "card_not_in_hand"
+            Just someCard -> case playMessageFor pk cardKey zone target someCard of
               Left code -> sendGameError slot user code
               Right msg -> do
                 g' <- applyMessage g msg
@@ -507,31 +509,41 @@ seatKeyToPlayerKey = \case
   "Player2" -> Just Player2
   _ -> Nothing
 
+-- | Find the card instance in a player's hand by its 'UnitKey'.
+findHandCard :: PlayerKey -> UnitKey -> Game -> Maybe SomeCardDef
+findHandCard pk k g =
+  let player = case pk of
+        Player1 -> g.player1
+        Player2 -> g.player2
+   in case [c.def | c <- player.hand, c.key == k] of
+        (d : _) -> Just d
+        [] -> Nothing
+
 -- | Choose the engine 'Message' that corresponds to the player's
 -- 'GamePlayCard' request, based on the card's static kind. Returns a
 -- protocol error code if the request doesn't carry the data the kind
 -- needs (e.g. attachments must include a target unit).
 playMessageFor
   :: PlayerKey
-  -> CardCode
+  -> UnitKey
   -> Maybe ZoneKind
   -> Maybe UnitKey
   -> SomeCardDef
   -> Either Text Message
-playMessageFor pk code mZone mTarget = \case
+playMessageFor pk cardKey mZone mTarget = \case
   UnitCardDef _ -> case mZone of
-    Just z -> Right (PlayUnit pk code z)
+    Just z -> Right (PlayUnit pk cardKey z)
     Nothing -> Left "zone_required"
   SupportCardDef cd
     | Attachment `elem` cd.traits -> case mTarget of
-        Just t -> Right (PlayAttachment pk code t)
+        Just t -> Right (PlayAttachment pk cardKey t)
         Nothing -> Left "target_required"
     | otherwise -> case mZone of
-        Just z -> Right (PlaySupport pk code z)
+        Just z -> Right (PlaySupport pk cardKey z)
         Nothing -> Left "zone_required"
-  QuestCardDef _ -> Right (PlayQuest pk code)
-  TacticCardDef _ -> Right (PlayTactic pk code)
-  LegendCardDef _ -> Right (PlayLegend pk code)
+  QuestCardDef _ -> Right (PlayQuest pk cardKey)
+  TacticCardDef _ -> Right (PlayTactic pk cardKey)
+  LegendCardDef _ -> Right (PlayLegend pk cardKey)
 
 sendGameError :: GameSlot -> UserInfo -> Text -> IO ()
 sendGameError slot user code = atomically do
@@ -561,7 +573,11 @@ engineDeckFromDb :: Deck -> Either Text Engine.Deck
 engineDeckFromDb d = do
   race <- case deckCapital d of
     Just "dwarf" -> Right Dwarf
+    Just "empire" -> Right Empire
+    Just "high_elf" -> Right HighElf
     Just "chaos" -> Right Chaos
+    Just "orc" -> Right Orc
+    Just "dark_elf" -> Right DarkElf
     Just _ -> Left "unsupported_capital"
     Nothing -> Left "missing_capital"
   let cards =

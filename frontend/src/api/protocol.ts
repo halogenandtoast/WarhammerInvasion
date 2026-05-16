@@ -100,6 +100,18 @@ export interface EngineCardDef {
   unique: boolean
 }
 
+// A specific card instance (Invasion.Card.Card). Every card in deck,
+// hand, discard, or play carries the same stable `key` from setup
+// through the end of the game. The frontend uses this key as its CSS
+// view-transition name so a card visually morphs as it moves between
+// surfaces (hand → zone → discard).
+//
+// On the wire, the backend flattens the card definition's fields onto
+// the same object as `key`, so EngineCard extends EngineCardDef.
+export interface EngineCard extends EngineCardDef {
+  key: number
+}
+
 // In-play unit (Invasion.Entity.UnitDetails). 'key' is the engine's
 // 'UnitKey', written as a bare integer on the wire.
 export interface EngineUnit {
@@ -201,9 +213,12 @@ export interface EnginePlayer {
   // Hand cards carry the full card-def payload so the UI can render the
   // art and decide what kind of "play" action to send. Deck/discard only
   // need their lengths for piles, but the same payload arrives there too.
-  hand: EngineCardDef[]
-  deck: EngineCardDef[]
-  discard: EngineCardDef[]
+  // Each card carries the stable `key` that the engine uses to identify
+  // this specific copy — pass it back in `GamePlayCard` to disambiguate
+  // duplicates in hand.
+  hand: EngineCard[]
+  deck: EngineCard[]
+  discard: EngineCard[]
   race: Race
 }
 
@@ -307,8 +322,11 @@ export type GameIn =
   | { tag: 'GameStart' }
   | { tag: 'GamePassPriority' }
   | {
+      // Play a specific card instance from this seat's hand. `cardKey`
+      // is the engine's stable identity for that card (the same `key`
+      // value carried on each EngineCard).
       tag: 'GamePlayCard'
-      card: string
+      cardKey: number
       zone: ZoneKind | null
       target: number | null
     }

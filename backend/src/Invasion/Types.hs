@@ -52,7 +52,7 @@ nextPhase = \case
   CapitalPhase -> Just BattlefieldPhase
   BattlefieldPhase -> Nothing
 
-data Race = Dwarf | Chaos
+data Race = Dwarf | Empire | HighElf | Chaos | Orc | DarkElf
   deriving stock (Show, Eq)
 
 

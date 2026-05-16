@@ -166,17 +166,17 @@ data GameIn
     -- 'PlayerKey' from the sender's seat; if it isn't this player's
     -- priority the engine will silently ignore the message.
     GamePassPriority
-  | -- | Play a card from the sender's hand. The server looks the card up
-    -- in 'allCards', derives the right engine message from its kind, and
-    -- forwards it to the engine.
+  | -- | Play a card from the sender's hand. The card is identified by
+    -- its stable 'UnitKey' (the same key the frontend sees on the card
+    -- it clicked) so duplicates in hand are addressed unambiguously.
     --
     --   * Unit / Support (non-attachment): 'zone' picks which zone the
     --     card enters. Required for those kinds; ignored otherwise.
     --   * Support (attachment trait): 'target' picks the host unit's
     --     'UnitKey'. Required for attachments; ignored otherwise.
-    --   * Quest / Tactic: neither 'zone' nor 'target' is read.
+    --   * Quest / Tactic / Legend: neither 'zone' nor 'target' is read.
     GamePlayCard
-      { card :: CardCode
+      { cardKey :: UnitKey
       , zone :: Maybe ZoneKind
       , target :: Maybe UnitKey
       }

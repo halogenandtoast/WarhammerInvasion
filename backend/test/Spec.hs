@@ -9,7 +9,7 @@
 module Main (main) where
 
 import Invasion.Capital (Capital (..), Damage (..), Zone (..))
-import Invasion.Card (SomeCardDef (..))
+import Invasion.Card (Card (..), SomeCardDef (..))
 import Invasion.CardDef (CardDef (..))
 import Invasion.Engine
 import Invasion.Entity (UnitDetails (..))
@@ -108,10 +108,10 @@ main = do
     Nothing -> do
       putStrLn "  FAIL active hand has no affordable Unit; can't exercise PlayUnit"
       exitFailure
-    Just (cardCode, cardCost) -> do
+    Just (cardKey, cardCode, cardCost) -> do
       let handBefore = length preP.hand
           Resources resBefore = preP.resources
-      g5 <- applyMessage g4 (PlayUnit g4.currentPlayer cardCode KingdomZone)
+      g5 <- applyMessage g4 (PlayUnit g4.currentPlayer cardKey KingdomZone)
       let postP = activePlayer g5
       check "PlayUnit: hand size decreased by 1"
         (length postP.hand == handBefore - 1)
@@ -131,13 +131,13 @@ main = do
         (unitOk (\_ z _ -> z == KingdomZone) "zone")
       check "PlayUnit: card code carried through"
         (unitOk (\_ _ c -> c == cardCode) "code")
-      check "PlayUnit: nextUnitKey bumped"
-        (g5.nextUnitKey == UnitKey 1)
+      check "PlayUnit: in-play unit reuses the in-hand card key"
+        (case g5.units of [u] -> u.key == cardKey; _ -> False)
 
       -- DealDamageToUnit: apply 1 damage and check the unit's damage
       -- counter advanced (or the unit was destroyed if HP=1).
-      g6 <- applyMessage g5 (DealDamageToUnit (UnitKey 0) 1)
-      case [u | u@UnitDetails {key = UnitKey 0} <- g6.units] of
+      g6 <- applyMessage g5 (DealDamageToUnit cardKey 1)
+      case [u | u <- g6.units, u.key == cardKey] of
         [UnitDetails {damage = dmg}] ->
           check "DealDamageToUnit: damage recorded"
             (dmg == Damage 1)
@@ -145,7 +145,7 @@ main = do
           check "DealDamageToUnit: 1-HP unit destroyed"
             (null g6.units)
         _ -> do
-          putStrLn "  FAIL multiple units share UnitKey 0"
+          putStrLn "  FAIL multiple units share the played card key"
           exitFailure
 
       -- DestroyUnit: nuke whatever's left in play and confirm it moves
@@ -153,7 +153,7 @@ main = do
       let discardBefore = length (activePlayer g6).discard
       g7 <- case g6.units of
         [] -> pure g6 -- already gone above
-        _ -> applyMessage g6 (DestroyUnit (UnitKey 0))
+        _ -> applyMessage g6 (DestroyUnit cardKey)
       check "DestroyUnit: no units in play after"
         (null g7.units)
       check "DestroyUnit: card lands in controller's discard"
@@ -180,8 +180,8 @@ main = do
   -- if one is in hand. Otherwise skip the rest of this smoke.
   case findPlayableUnit (activePlayer gB) of
     Nothing -> putStrLn "  skip combat smoke (no playable unit)"
-    Just (code, _) -> do
-      gC <- applyMessage gB (PlayUnit gB.currentPlayer code BattlefieldZone)
+    Just (cardKey, _, _) -> do
+      gC <- applyMessage gB (PlayUnit gB.currentPlayer cardKey BattlefieldZone)
       -- BeginCombat attacker against opponent's battlefield. Auto-pick
       -- the attacker we just placed.
       let attackerKeys =
@@ -215,16 +215,17 @@ inactivePlayer g = case g.currentPlayer of
   Player2 -> g.player1
 
 -- | Find the first Unit in a player's hand whose Fixed cost is within
--- that player's current resources. Returns the card's code and cost.
-findPlayableUnit :: Player -> Maybe (CardCode, Int)
+-- that player's current resources. Returns the card's in-hand key,
+-- printed code, and printed cost.
+findPlayableUnit :: Player -> Maybe (UnitKey, CardCode, Int)
 findPlayableUnit p =
   let Resources budget = p.resources
   in go p.hand budget
   where
     go [] _ = Nothing
-    go (s : rest) budget = case s of
+    go (Card {key, def} : rest) budget = case def of
       UnitCardDef CardDef {code, cost} -> case cost of
-        Fixed n | n <= budget -> Just (code, n)
+        Fixed n | n <= budget -> Just (key, code, n)
         _ -> go rest budget
       _ -> go rest budget
 
