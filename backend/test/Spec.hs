@@ -214,9 +214,10 @@ inactivePlayer g = case g.currentPlayer of
   Player1 -> g.player2
   Player2 -> g.player1
 
--- | Find the first Unit in a player's hand whose Fixed cost is within
--- that player's current resources. Returns the card's in-hand key,
--- printed code, and printed cost.
+-- | Find the first Unit in a player's hand whose total cost (printed +
+-- loyalty surcharge, accounting for the player's capital race symbol)
+-- is within that player's current resources. Returns the card's
+-- in-hand key, printed code, and total effective cost.
 findPlayableUnit :: Player -> Maybe (UnitKey, CardCode, Int)
 findPlayableUnit p =
   let Resources budget = p.resources
@@ -224,9 +225,19 @@ findPlayableUnit p =
   where
     go [] _ = Nothing
     go (Card {key, def} : rest) budget = case def of
-      UnitCardDef CardDef {code, cost} -> case cost of
-        Fixed n | n <= budget -> Just (key, code, n)
-        _ -> go rest budget
+      UnitCardDef cardDef ->
+        let printed = case cardDef.cost of
+              Fixed n -> n
+              Variable -> 1000
+            -- Capital provides one race symbol; no other in-play cards
+            -- exist at this point in the smoke, so it's the only
+            -- discount available.
+            symbolMatch = if p.race `elem` cardDef.races then 1 else 0
+            loyaltySurcharge = max 0 (cardDef.loyalty - symbolMatch)
+            total = printed + loyaltySurcharge
+         in if total <= budget
+              then Just (key, cardDef.code, total)
+              else go rest budget
       _ -> go rest budget
 
 check :: String -> Bool -> IO ()

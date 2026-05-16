@@ -22,7 +22,7 @@ import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Queue
 import System.Random.Shuffle
 
@@ -212,6 +212,7 @@ instance Run Game where
           , limitedPlayedThisTurn = False
           , unitsDiscardedThisTurn = 0
           , damageTakenThisTurn = mempty
+          , damagedInCurrentCombat = []
           }
       t <- gets (.turn)
       logIt LogTurn
@@ -301,15 +302,17 @@ instance Run Game where
         _ -> pure ()
     CloseActionWindow -> do
       g <- get
+      let trigger = (.trigger) <$> g.actionWindow
       modify \gx -> gx {actionWindow = Nothing}
       logIt LogSystem "log.window.close" []
-      -- For the basic phase structure (no combat sub-steps yet) every
-      -- action window is the final step of its phase. When combat is
-      -- implemented this branch will dispatch on aw.trigger to advance
-      -- to the next combat sub-step instead.
-      case g.phase of
-        Just p -> send (EndPhase p)
-        Nothing -> pure ()
+      -- Phase windows end their phase. Combat sub-step windows
+      -- aren't opened today (see BeginCombat comment); when they
+      -- land, each trigger should dispatch to its AdvanceCombatTo*
+      -- counterpart here.
+      case trigger of
+        _ -> case g.phase of
+          Just p -> send (EndPhase p)
+          Nothing -> pure ()
     Eliminate k reason -> do
       -- A player whose elimination is being processed loses immediately;
       -- the other player wins. If both somehow become eliminated, the
@@ -505,6 +508,10 @@ instance Run Game where
                 { units = replaceUnit u' gx.units
                 , damageTakenThisTurn =
                     Map.insertWith (+) ukey landing gx.damageTakenThisTurn
+                , damagedInCurrentCombat =
+                    if isJust gx.combat && ukey `notElem` gx.damagedInCurrentCombat
+                      then ukey : gx.damagedInCurrentCombat
+                      else gx.damagedInCurrentCombat
                 }
             logIt LogSystem
               "log.unit.damaged"
@@ -533,6 +540,10 @@ instance Run Game where
                 { units = replaceUnit u' gx.units
                 , damageTakenThisTurn =
                     Map.insertWith (+) ukey landing gx.damageTakenThisTurn
+                , damagedInCurrentCombat =
+                    if isJust gx.combat && ukey `notElem` gx.damagedInCurrentCombat
+                      then ukey : gx.damagedInCurrentCombat
+                      else gx.damagedInCurrentCombat
                 }
             logIt LogSystem
               "log.unit.damaged"
@@ -655,37 +666,40 @@ instance Run Game where
         (Just (cardDef, playerWithoutCard), Just host)
           | not (canPlayCard pk cardDef g) -> pure ()
           | otherwise -> case cardDef.cost of
-          Variable -> pure ()
-          Fixed n ->
-            when (player.resources >= Resources n) $ do
-              markPlayedLimited cardDef
-              let paidPlayer =
-                    playerWithoutCard
-                      {resources = player.resources - Resources n}
-                  attachment =
-                    SupportDetails
-                      { key = cardKey
-                      , controller = pk
-                      , zone = host.zone
-                      , cardDef
-                      , attachedTo = Just targetKey
-                      , tokens = 0
+              Variable -> pure ()
+              Fixed _ -> do
+                let baseCost = effectiveTotalCost g pk cardDef
+                    targetTax = extraTargetTax pk (TargetUnit targetKey) g
+                    n = baseCost + targetTax
+                when (player.resources >= Resources n) $ do
+                  markPlayedLimited cardDef
+                  let paidPlayer =
+                        playerWithoutCard
+                          {resources = player.resources - Resources n}
+                      attachment =
+                        SupportDetails
+                          { key = cardKey
+                          , controller = pk
+                          , zone = host.zone
+                          , cardDef
+                          , attachedTo = Just targetKey
+                          , tokens = 0
+                          }
+                      host' =
+                        (host {attachments = attachment : host.attachments})
+                          :: UnitDetails
+                  modify \gx ->
+                    (setPlayer pk paidPlayer gx)
+                      { units = replaceUnit host' gx.units
                       }
-                  host' =
-                    (host {attachments = attachment : host.attachments})
-                      :: UnitDetails
-              modify \gx ->
-                (setPlayer pk paidPlayer gx)
-                  { units = replaceUnit host' gx.units
-                  }
-              logIt LogPlayerAction
-                "log.attachment.played"
-                [ ("player", playerParam pk)
-                , ("card", T.pack cardDef.title)
-                , ("target", T.pack host.cardDef.title)
-                , ("cost", T.pack (show n))
-                ]
-              send (SupportEnteredPlay pk cardKey)
+                  logIt LogPlayerAction
+                    "log.attachment.played"
+                    [ ("player", playerParam pk)
+                    , ("card", T.pack cardDef.title)
+                    , ("target", T.pack host.cardDef.title)
+                    , ("cost", T.pack (show n))
+                    ]
+                  send (SupportEnteredPlay pk cardKey)
         _ -> pure ()
     SupportEnteredPlay _pk _key ->
       -- 'dispatchToInPlayUnits' walks attachments via their host; any
@@ -699,33 +713,34 @@ instance Run Game where
         Just (cardDef, playerWithoutCard)
           | not (canPlayCard pk cardDef g) -> pure ()
           | otherwise -> case cardDef.cost of
-          Variable -> pure ()
-          Fixed n ->
-            when (player.resources >= Resources n) $ do
-              markPlayedLimited cardDef
-              let paidPlayer =
-                    playerWithoutCard
-                      {resources = player.resources - Resources n}
-                  support =
-                    SupportDetails
-                      { key = cardKey
-                      , controller = pk
-                      , zone
-                      , cardDef
-                      , attachedTo = Nothing
-                      , tokens = 0
+              Variable -> pure ()
+              Fixed _ -> do
+                let n = effectiveTotalCost g pk cardDef
+                when (player.resources >= Resources n) $ do
+                  markPlayedLimited cardDef
+                  let paidPlayer =
+                        playerWithoutCard
+                          {resources = player.resources - Resources n}
+                      support =
+                        SupportDetails
+                          { key = cardKey
+                          , controller = pk
+                          , zone
+                          , cardDef
+                          , attachedTo = Nothing
+                          , tokens = 0
+                          }
+                  modify \gx ->
+                    (setPlayer pk paidPlayer gx)
+                      { supports = support : gx.supports
                       }
-              modify \gx ->
-                (setPlayer pk paidPlayer gx)
-                  { supports = support : gx.supports
-                  }
-              logIt LogPlayerAction
-                "log.support.played"
-                [ ("player", playerParam pk)
-                , ("card", T.pack cardDef.title)
-                , ("cost", T.pack (show n))
-                ]
-              send (SupportEnteredPlay pk cardKey)
+                  logIt LogPlayerAction
+                    "log.support.played"
+                    [ ("player", playerParam pk)
+                    , ("card", T.pack cardDef.title)
+                    , ("cost", T.pack (show n))
+                    ]
+                  send (SupportEnteredPlay pk cardKey)
     PlaySupportFromDeck pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
@@ -759,32 +774,33 @@ instance Run Game where
         Just (cardDef, playerWithoutCard)
           | not (canPlayCard pk cardDef g) -> pure ()
           | otherwise -> case cardDef.cost of
-          Variable -> pure ()
-          Fixed n ->
-            when (player.resources >= Resources n) $ do
-              markPlayedLimited cardDef
-              let paidPlayer =
-                    playerWithoutCard
-                      {resources = player.resources - Resources n}
-                  quest =
-                    QuestDetails
-                      { key = cardKey
-                      , controller = pk
-                      , cardDef
-                      , tokens = 0
-                      , questingUnit = Nothing
+              Variable -> pure ()
+              Fixed _ -> do
+                let n = effectiveTotalCost g pk cardDef
+                when (player.resources >= Resources n) $ do
+                  markPlayedLimited cardDef
+                  let paidPlayer =
+                        playerWithoutCard
+                          {resources = player.resources - Resources n}
+                      quest =
+                        QuestDetails
+                          { key = cardKey
+                          , controller = pk
+                          , cardDef
+                          , tokens = 0
+                          , questingUnit = Nothing
+                          }
+                  modify \gx ->
+                    (setPlayer pk paidPlayer gx)
+                      { quests = quest : gx.quests
                       }
-              modify \gx ->
-                (setPlayer pk paidPlayer gx)
-                  { quests = quest : gx.quests
-                  }
-              logIt LogPlayerAction
-                "log.quest.played"
-                [ ("player", playerParam pk)
-                , ("card", T.pack cardDef.title)
-                , ("cost", T.pack (show n))
-                ]
-              send (QuestEnteredPlay pk cardKey)
+                  logIt LogPlayerAction
+                    "log.quest.played"
+                    [ ("player", playerParam pk)
+                    , ("card", T.pack cardDef.title)
+                    , ("cost", T.pack (show n))
+                    ]
+                  send (QuestEnteredPlay pk cardKey)
     QuestEnteredPlay _pk _key ->
       -- Per-card reactions fire via dispatch (see
       -- 'dispatchToInPlayUnits' which now also walks 'Game.supports'
@@ -837,6 +853,27 @@ instance Run Game where
             ]
           send (SupportLeftPlay s.controller skey s.cardDef.code)
     SupportLeftPlay _pk _skey _code -> pure ()
+    DestroyQuest qkey -> do
+      g <- get
+      case findQuest qkey g of
+        Nothing -> pure ()
+        Just q -> do
+          let owner = lookupPlayer q.controller g
+              owner' =
+                owner
+                  { discard =
+                      mkCard q.key (QuestCardDef q.cardDef) : owner.discard
+                  }
+          modify \gx ->
+            (setPlayer q.controller owner' gx)
+              {quests = filter (\v -> v.key /= qkey) gx.quests}
+          logIt LogSystem
+            "log.quest.destroyed"
+            [ ("player", playerParam q.controller)
+            , ("card", T.pack q.cardDef.title)
+            ]
+          send (QuestLeftPlay q.controller qkey q.cardDef.code)
+    QuestLeftPlay _pk _qkey _code -> pure ()
     AttachExperience hostKey expCode -> do
       g <- get
       case findUnit hostKey g of
@@ -863,7 +900,10 @@ instance Run Game where
               pure ()
           | otherwise -> case cardDef.cost of
               Variable -> pure ()
-              Fixed n ->
+              Fixed _ -> do
+                let baseCost = effectiveTotalCost g pk cardDef
+                    targetTax = extraTargetTax pk target g
+                    n = baseCost + targetTax
                 when (player.resources >= Resources n) $ do
                   markPlayedLimited cardDef
                   let paidPlayer =
@@ -896,19 +936,21 @@ instance Run Game where
         Nothing -> pure ()
         Just src -> case actionAt src idx of
           Nothing -> pure ()
-          Just (name, cost, schema) -> do
+          Just (name, baseCost, schema) -> do
             let player = lookupPlayer pk g
+                tax = extraTargetTax pk target g
+                totalCost = baseCost + tax
             when (validateActionSource pk src) $
-              when (player.resources >= Resources cost) $
+              when (player.resources >= Resources totalCost) $
                 when (validateTarget pk schema target g) $ do
-                  let paid = player {resources = player.resources - Resources cost}
+                  let paid = player {resources = player.resources - Resources totalCost}
                   modify (setPlayer pk paid)
                   logIt LogPlayerAction
                     "log.action.triggered"
                     [ ("player", playerParam pk)
                     , ("card", T.pack (actionSourceTitle src))
                     , ("action", name)
-                    , ("cost", T.pack (show cost))
+                    , ("cost", T.pack (show totalCost))
                     ]
                   fireAction src idx pk target
     DeferDamageToUnitUntilEoT ukey n -> do
@@ -1108,6 +1150,33 @@ instance Run Game where
                 , u.zone == zone
                 , not u.corrupted
                 ]
+              -- Rune of Fortitude (core-013): each unit attacking
+              -- this zone loses 1 power unless its controller pays 1
+              -- per attacker. All-or-nothing approximation here: if
+              -- the attacker can afford the full tax, pay it and the
+              -- penalty stays at 0; otherwise leave the resources
+              -- intact and impose -1 per attacker for this combat.
+              runeHere =
+                any
+                  ( \s ->
+                      s.controller == defender
+                        && s.zone == zone
+                        && s.cardDef.code == CardCode "core-013"
+                  )
+                  g.supports
+              attackerPlayer = lookupPlayer attacker g
+              Resources attackerRes = attackerPlayer.resources
+              runeCost = length eligible
+              (paidRune, penalty) =
+                if runeHere
+                  then if attackerRes >= runeCost
+                    then (True, 0)
+                    else (False, 1)
+                  else (False, 0)
+              attackerAfterRune =
+                if paidRune
+                  then attackerPlayer {resources = Resources (attackerRes - runeCost)}
+                  else attackerPlayer
               combatState =
                 CombatState
                   { attackingPlayer = attacker
@@ -1115,18 +1184,41 @@ instance Run Game where
                   , targetZone = zone
                   , attackers = eligible
                   , defenders = autoDefenders
+                  , attackerPowerPenalty = penalty
                   }
           modify \gx ->
-            gx
+            (setPlayer attacker attackerAfterRune gx)
               { combat = Just combatState
               , attackersThisPhase = eligible <> gx.attackersThisPhase
+              , damagedInCurrentCombat = []
               }
           logIt LogPlayerAction
             "log.combat.begins"
             [ ("attacker", playerParam attacker)
             , ("zone", zoneParam zone)
             ]
+          when paidRune $
+            logIt LogSystem
+              "log.combat.rune_paid"
+              [("amount", T.pack (show runeCost))]
+          when (penalty > 0) $
+            logIt LogSystem
+              "log.combat.rune_penalty"
+              [("amount", T.pack (show penalty))]
+          -- TODO: rules-correct flow opens an action window after
+          -- each of the 5 combat steps (DeclareCombatTarget,
+          -- DeclareAttackers, DeclareDefenders, AssignDamage,
+          -- ApplyDamage). The window-stacking machinery isn't there
+          -- yet — auto-attack cards (Vicious Marauder) already fire
+          -- inside an open BattlefieldActionWindow, and combat
+          -- windows would clobber it. For now the engine threads
+          -- BeginCombat → DeclareDefenders → ResolveCombat
+          -- directly; Counterstrike, Scout, Rune of Fortitude, and
+          -- per-source corruption all still trigger at the right
+          -- conceptual steps.
           send (DeclareDefenders autoDefenders)
+    AdvanceCombatToAttackers -> pure ()
+    AdvanceCombatToDefenders -> pure ()
     DeclareDefenders defs -> do
       modify \gx -> case gx.combat of
         Just cs -> gx {combat = Just (cs {defenders = defs} :: CombatState)}
@@ -1134,7 +1226,7 @@ instance Run Game where
       -- Fire Counterstrike: each defending unit with Counterstrike N
       -- immediately deals N uncancellable damage to one attacker of
       -- the defender's choice (auto-pick the first attacker still in
-      -- play). Triggers before regular combat damage.
+      -- play). Triggers in step 3, before regular damage assigns.
       g <- get
       case g.combat of
         Just cs -> do
@@ -1156,6 +1248,8 @@ instance Run Game where
             defenderUnits
         Nothing -> pure ()
       send ResolveCombat
+    AdvanceCombatToAssign -> pure ()
+    AdvanceCombatToApply -> pure ()
     ResolveCombat -> do
       g <- get
       case g.combat of
@@ -1215,7 +1309,17 @@ instance Run Game where
             defenderScouts
           send EndCombat
     EndCombat -> do
-      modify \gx -> gx {combat = Nothing}
+      g <- get
+      -- Fire post-damage "when this unit damages an enemy" effects
+      -- now that every queued combat-damage message has flushed.
+      case g.combat of
+        Just cs -> firePerSourceCombatEffects g cs
+        Nothing -> pure ()
+      modify \gx ->
+        gx
+          { combat = Nothing
+          , damagedInCurrentCombat = []
+          }
       logIt LogSystem "log.combat.ends" []
     PutUnitIntoPlay pk cardKey zone -> do
       g <- get
@@ -1352,7 +1456,8 @@ instance Run Game where
               | not (canPlayCard pk cardDef g) -> pure ()
               | otherwise -> case cardDef.cost of
                   Variable -> pure ()
-                  Fixed n ->
+                  Fixed _ -> do
+                    let n = effectiveTotalCost g pk cardDef
                     when (player.resources >= Resources n) $ do
                       markPlayedLimited cardDef
                       let paidPlayer =
@@ -1485,6 +1590,7 @@ newGame deck1 deck2 = do
       , limitedPlayedThisTurn = False
       , unitsDiscardedThisTurn = 0
       , damageTakenThisTurn = mempty
+      , damagedInCurrentCombat = []
       }
 
 -- | Look up a player record by key.
@@ -1566,13 +1672,16 @@ firePendingEffect = \case
 -- distinction later.
 combatDamageOf :: Game -> PlayerKey -> UnitDetails -> Int
 combatDamageOf g side u =
-  u.effectivePower
-    + lordOfKhorne
-    + riftOfBattle
-    + organGunDefendingBonus
-    + daBadMoonAttackingAura
-    + bigBossesBannerAura
-    + gorbadIronclawSelf
+  max 0
+    ( u.effectivePower
+        + lordOfKhorne
+        + riftOfBattle
+        + organGunDefendingBonus
+        + daBadMoonAttackingAura
+        + bigBossesBannerAura
+        + gorbadIronclawSelf
+        - runeOfFortitudePenalty
+    )
   where
     isAttacker = case g.combat of
       Just cs -> side == cs.attackingPlayer && u.key `elem` cs.attackers
@@ -1580,6 +1689,15 @@ combatDamageOf g side u =
     isDefender = case g.combat of
       Just cs -> side == cs.defendingPlayer && u.key `elem` cs.defenders
       Nothing -> False
+
+    -- Rune of Fortitude (core-013): if BeginCombat couldn't charge
+    -- the per-attacker tax, every attacker eats -1 power for this
+    -- combat. The penalty lives on the in-flight CombatState.
+    runeOfFortitudePenalty
+      | isAttacker = case g.combat of
+          Just cs -> cs.attackerPowerPenalty
+          Nothing -> 0
+      | otherwise = 0
 
     -- Lord of Khorne (cataclysm-033) deals +1 damage in combat per
     -- burning zone (across both capitals).
@@ -1602,9 +1720,9 @@ combatDamageOf g side u =
       , any (\a -> a.cardDef.code == CardCode "core-015") u.attachments = 2
       | otherwise = 0
 
-    -- Da Bad Moon (core-121): your other Orc units gain {power} while
-    -- attacking, provided the Bad Moon support is in play under your
-    -- control.
+    -- Da Bad Moon (core-121): "Battlefield." prefix — Bad Moon must
+    -- be in your battlefield. Your other Orc units gain {power} while
+    -- attacking.
     daBadMoonAttackingAura
       | isAttacker
       , Orc `elem` u.cardDef.races
@@ -1612,6 +1730,7 @@ combatDamageOf g side u =
           ( \s ->
               s.controller == u.controller
                 && s.cardDef.code == CardCode "core-121"
+                && s.zone == BattlefieldZone
           )
           g.supports = 1
       | otherwise = 0
@@ -1937,6 +2056,40 @@ zoneAuraBonus g pk zone =
         , s.zone == zone
         ]
 
+-- | Fire post-combat "when this unit damages an enemy" effects. Read
+-- 'damagedInCurrentCombat' to know which units actually took damage,
+-- then iterate Plaguebearer / Beasts-of-Nurgle participants on each
+-- side and corrupt damaged enemies they were dealing damage to.
+firePerSourceCombatEffects :: Game -> CombatState -> StateT Game GameT ()
+firePerSourceCombatEffects g cs = do
+  let damaged = g.damagedInCurrentCombat
+      damagedEnemiesOf side =
+        [ k
+        | k <- damaged
+        , Just u <- [findUnit k g]
+        , u.controller /= side
+        , not u.corrupted
+        ]
+      hasCorruptOnDamage u =
+        u.cardDef.code == CardCode "core-085" -- Plaguebearers of Nurgle
+          || u.cardDef.code == CardCode "core-096" -- Beasts of Nurgle
+      attackerSources =
+        [ u
+        | k <- cs.attackers
+        , Just u <- [findUnit k g]
+        , hasCorruptOnDamage u
+        ]
+      defenderSources =
+        [ u
+        | k <- cs.defenders
+        , Just u <- [findUnit k g]
+        , hasCorruptOnDamage u
+        ]
+  when (not (null attackerSources)) $
+    traverse_ (send . CorruptUnit) (damagedEnemiesOf cs.attackingPlayer)
+  when (not (null defenderSources)) $
+    traverse_ (send . CorruptUnit) (damagedEnemiesOf cs.defendingPlayer)
+
 -- | Per-turn damage caps that some cards impose on themselves —
 -- e.g. Daemonettes of Slaanesh "cannot be assigned more than 1
 -- damage per turn". Given how much damage has already landed on the
@@ -2004,22 +2157,46 @@ devsInZone g u =
         BattlefieldZone -> player.capital.battlefield.developments
    in d
 
--- | Card-specific cost adjustments applied at play time. Centralised
--- here as a small switch by 'CardCode'; cards whose printed cost is
--- contextual list themselves below. Returns the cost AFTER adjustment,
--- floored at 0. 'PlayerKey' is the player playing the card so that
--- effects scoped to "you" vs. "your opponent" can distinguish.
-effectiveUnitCost :: Game -> PlayerKey -> CardDef Unit -> Int -> Int
-effectiveUnitCost g pk cardDef printed =
-  max 0 (printed + selfAdjust + opponentAdjust + globalAdjust)
+-- | Count race symbols matching 'r' that the named player controls.
+-- The player's capital board contributes 1 for its faction; every
+-- in-play card (unit, support, quest, legend) bearing the race adds
+-- 1 more per instance.
+raceSymbolCount :: Game -> PlayerKey -> Race -> Int
+raceSymbolCount g pk r =
+  capitalSymbol + boardSymbols
   where
-    -- Bloodcrusher: -1 per burning zone (across both capitals).
+    player = lookupPlayer pk g
+    capitalSymbol = if player.race == r then 1 else 0
+    boardSymbols =
+      length [u | u <- g.units, u.controller == pk, r `elem` u.cardDef.races]
+        + length [s | s <- g.supports, s.controller == pk, r `elem` s.cardDef.races]
+        + length [q | q <- g.quests, q.controller == pk, r `elem` q.cardDef.races]
+        + length [l | l <- g.legends, l.controller == pk, r `elem` l.cardDef.races]
+
+-- | Loyalty surcharge: each loyalty icon costs 1 resource, reduced by
+-- matching race symbols you control (floor at 0). For multi-race
+-- cards we take the most generous (largest) symbol count across the
+-- card's races.
+loyaltySurcharge :: Game -> PlayerKey -> CardDef k -> Int
+loyaltySurcharge g pk cardDef =
+  let perRace = map (raceSymbolCount g pk) cardDef.races
+      bestMatch = if null perRace then 0 else maximum perRace
+   in max 0 (cardDef.loyalty - bestMatch)
+
+-- | Card-specific adjustments to the printed (non-loyalty) part of a
+-- play cost. Card-by-card switches live here; everything else returns
+-- 0. Result may be negative — the final cost is clamped in
+-- 'effectiveTotalCost'.
+printedCostAdjustment :: Game -> PlayerKey -> CardDef k -> Int
+printedCostAdjustment g pk cardDef =
+  selfAdjust + globalAdjust + opponentAdjust
+  where
     selfAdjust = case cardDef.code of
+      -- Bloodcrusher: -1 per burning zone (across both capitals).
       CardCode "cataclysm-034" -> negate (burningZoneCount g)
       _ -> 0
-
-    -- Imperial Crown (core-041): your Empire heroes cost 1 less while
-    -- you control the crown.
+    -- Imperial Crown (core-041): "Kingdom." prefix — active while
+    -- the crown sits in your kingdom. Your Empire heroes cost 1 less.
     globalAdjust
       | Empire `elem` cardDef.races
       , Hero `elem` cardDef.traits
@@ -2027,20 +2204,53 @@ effectiveUnitCost g pk cardDef printed =
           ( \s ->
               s.controller == pk
                 && s.cardDef.code == CardCode "core-041"
+                && s.zone == KingdomZone
           )
           g.supports = -1
       | otherwise = 0
-
-    -- Master Rune of Dismay (core-016): opponent's units cost +1 to
-    -- play.
+    -- Master Rune of Dismay (core-016): "Kingdom." prefix — must sit
+    -- in the opponent's kingdom for the +1 cost-to-play tax to apply
+    -- to your units.
     opponentAdjust
       | any
           ( \s ->
               s.controller == pk.next
                 && s.cardDef.code == CardCode "core-016"
+                && s.zone == KingdomZone
           )
           g.supports = 1
       | otherwise = 0
+
+-- | Additional resource cost an effect must pay to target the unit
+-- referenced in the supplied 'ActionTarget'. Currently only King
+-- Kazador (core-007): opponents pay +3 resources per effect that
+-- names him. Returns 0 for any non-targeted effect, or when the
+-- caster is the unit's controller.
+extraTargetTax :: PlayerKey -> ActionTarget -> Game -> Int
+extraTargetTax caster target g = case target of
+  TargetUnit k -> case findUnit k g of
+    Just u
+      | u.controller /= caster
+      , u.cardDef.code == CardCode "core-007" -> 3
+    _ -> 0
+  _ -> 0
+
+-- | Total cost to play a card: max(0, printed + adjustments) + loyalty
+-- surcharge. Works uniformly for every card kind because the inputs
+-- (printed cost, loyalty icons, races) all live on 'CardDef'.
+effectiveTotalCost :: Game -> PlayerKey -> CardDef k -> Int
+effectiveTotalCost g pk cardDef =
+  let printed = case cardDef.cost of
+        Fixed n -> n
+        Variable -> 0
+      adjustedPrinted = max 0 (printed + printedCostAdjustment g pk cardDef)
+      loyalty = loyaltySurcharge g pk cardDef
+   in adjustedPrinted + loyalty
+
+-- | Legacy entry-point preserved for callers that haven't migrated
+-- yet. Returns the same answer as 'effectiveTotalCost' for units.
+effectiveUnitCost :: Game -> PlayerKey -> CardDef Unit -> Int -> Int
+effectiveUnitCost g pk cardDef _printed = effectiveTotalCost g pk cardDef
 
 -- | Printed HP for a 'CardDef Unit' (no in-play context). Variable HP
 -- defaults to 1; we'll grow this once X-cost units are in scope.
@@ -2120,32 +2330,46 @@ auraPowerBonus g u = sum
       , any (\v -> isFriendly v && differentUnit v && hasCode "core-035" v) g.units = 1
       | otherwise = 0
 
-    -- Templar of Sigmar: your other Warrior units in this zone gain
-    -- {power} while the Templar is here.
+    -- Templar of Sigmar: "Battlefield." prefix scopes the aura to
+    -- the battlefield. Your other Warrior units in the battlefield
+    -- gain {power} while the Templar is there.
     templarOfSigmarAura
       | Warrior `elem` u.cardDef.traits
+      , u.zone == BattlefieldZone
       , any
           ( \v ->
               isFriendly v
                 && differentUnit v
                 && hasCode "core-028" v
-                && v.zone == u.zone
+                && v.zone == BattlefieldZone
           )
           g.units = 1
       | otherwise = 0
 
-    -- Iron Tower: your Chaos units in the battlefield gain {power}.
+    -- Iron Tower: "Battlefield." prefix — only active while the
+    -- Iron Tower itself sits in your battlefield. Your Chaos units
+    -- in the battlefield then gain {power}.
     ironTowerAura
       | Chaos `elem` u.cardDef.races
       , u.zone == BattlefieldZone
-      , hasSupport "core-099" = 1
+      , hasSupportInZone "core-099" BattlefieldZone = 1
       | otherwise = 0
 
-    -- Cauldron of Blood: your Witch Elf units gain {power}.
+    -- Cauldron of Blood: "Battlefield." prefix — only active while
+    -- the Cauldron sits in your battlefield.
     cauldronOfBloodAura
       | u.cardDef.code == CardCode "core-135"
-      , hasSupport "core-147" = 1
+      , hasSupportInZone "core-147" BattlefieldZone = 1
       | otherwise = 0
+
+    hasSupportInZone code z =
+      any
+        ( \s ->
+            isFriendlySupport s
+              && hasCodeS s code
+              && s.zone == z
+        )
+        g.supports
 
     -- Da Bad Moon: your other Orc units gain {power} while attacking.
     -- The "while attacking" part is handled in 'combatDamageOf'; here

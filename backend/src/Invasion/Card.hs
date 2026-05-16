@@ -482,9 +482,10 @@ allCards =
     , ("core-155", TacticCardDef coldBloodedSlaughter)
     ]
 
--- TODO: re-implement the "+2 power while >= 2 developments in this zone"
--- effect on top of CardDef.receive once the engine surfaces
--- development-count-change events.
+-- The +2-power-while-≥2-developments effect is wired in
+-- 'Invasion.Engine.selfScalingPowerBonus'; recomputeUnitStats
+-- consults it after every message so the bonus stays in sync with
+-- the live development count.
 trollSlayers :: CardDef Unit
 trollSlayers = unit "core-004" "Troll Slayers" do
   race Dwarf
@@ -520,8 +521,8 @@ runesmith = unit "core-005" "Runesmith" do
         _ -> pure ()
     }
 
--- TODO: re-implement the "+2 power while a capital section is burning"
--- effect once burning is wired through CardDef.receive.
+-- The +2-power-while-burning effect is wired in
+-- 'Invasion.Engine.selfScalingPowerBonus'.
 durgnarTheBold :: CardDef Unit
 durgnarTheBold = unit "core-006" "Durgnar the Bold" do
   unique
@@ -659,7 +660,10 @@ keystoneForge = support "core-014" "Keystone Forge" do
   trait Building
   body "Kingdom. Forced: At the beginning of your turn, heal 1 damage to your capital."
   onReceive $ Receive \msg _owner self -> case msg of
-    BeginTurn k | k == self.controller -> push (HealCapital self.controller 1)
+    BeginTurn k
+      | k == self.controller
+      , self.zone == KingdomZone ->
+          push (HealCapital self.controller 1)
     _ -> pure ()
 
 organGun :: CardDef Support
@@ -1345,17 +1349,32 @@ ironThroneroom = support "the-inevitable-city-013" "Iron Throneroom" do
           -- the controller's hand snapshot (taken pre-receive); 'owner'
           -- carries that hand.
           when (self.tokens == 1) $ do
-            -- Walk by card-instance so we forward the in-hand 'UnitKey'
-            -- (not the code) to 'PutUnitIntoPlay'. The engine no longer
-            -- mints fresh keys at play-time; the card already has one.
-            let chaosKeys =
+            -- Walk by card-instance so we forward the in-hand /
+            -- in-discard 'UnitKey' (not the code) to
+            -- 'PutUnitIntoPlay' / 'PutUnitIntoPlayFromDiscard'. We
+            -- prefer hand picks first, then top up from discard, up
+            -- to 3 total.
+            let chaosHandKeys =
                   [ c.key
                   | c <- owner.hand
                   , UnitCardDef cd <- pure c.def
                   , Chaos `elem` cd.races
                   ]
-                picks = take 3 chaosKeys
-            traverse_ (\k -> push (PutUnitIntoPlay self.controller k KingdomZone)) picks
+                chaosDiscardKeys =
+                  [ c.key
+                  | c <- owner.discard
+                  , UnitCardDef cd <- pure c.def
+                  , Chaos `elem` cd.races
+                  ]
+                handPicks = take 3 chaosHandKeys
+                slotsLeft = 3 - length handPicks
+                discardPicks = take slotsLeft chaosDiscardKeys
+            traverse_
+              (\k -> push (PutUnitIntoPlay self.controller k KingdomZone))
+              handPicks
+            traverse_
+              (\k -> push (PutUnitIntoPlayFromDiscard self.controller k KingdomZone))
+              discardPicks
     _ -> pure ()
 
 raidingCamps :: CardDef Quest
@@ -1448,8 +1467,7 @@ dominionOfChaos = quest "the-ruinous-hordes-082" "Dominion of Chaos" do
                     take 3 $
                       filter (\u -> u.controller /= self.controller) g.units
               traverse_ (\u -> push (CorruptUnit u.key)) enemies
-              -- TODO: also remove this quest from play (no destroy-quest
-              -- message yet).
+              push (DestroyQuest self.key)
             _ -> pure ()
     _ -> pure ()
 
@@ -2023,8 +2041,10 @@ hoethsWisdom = support "core-069" "Hoeth's Wisdom" do
   trait Building
   body "Kingdom. Forced: At the beginning of your turn, draw a card."
   onReceive $ Receive \msg _owner self -> case msg of
-    BeginTurn k | k == self.controller ->
-      push (Draw (Drawing StandardDraw self.controller))
+    BeginTurn k
+      | k == self.controller
+      , self.zone == KingdomZone ->
+          push (Draw (Drawing StandardDraw self.controller))
     _ -> pure ()
 
 theWhiteTower :: CardDef Quest
@@ -2164,6 +2184,9 @@ plaguebearersOfNurgle = unit "core-085" "Plaguebearers of Nurgle" do
   hitPoints 4
   trait Daemon
   body "Forced: When this unit damages an enemy unit in combat, corrupt that unit."
+  -- Engine-handled: firePerSourceCombatEffects at 'EndCombat' walks
+  -- the damagedInCurrentCombat list and corrupts every enemy that
+  -- took damage in any combat this unit participated in.
 
 festeringNurglings :: CardDef Unit
 festeringNurglings = unit "core-086" "Festering Nurglings" do
@@ -2299,24 +2322,7 @@ beastsOfNurgle = unit "core-096" "Beasts of Nurgle" do
   hitPoints 5
   traits [Creature, Daemon]
   body "Forced: When this unit damages an enemy unit, corrupt that unit."
-  -- Approximation: corrupt the first enemy combatant on every combat
-  -- in which this unit is participating. Real card needs damage-source
-  -- tracking on individual damage events.
-  onReceive $ Receive \msg _owner self -> case msg of
-    ResolveCombat -> do
-      g <- getGame
-      case g.combat of
-        Just cs
-          | self.key `elem` cs.attackers || self.key `elem` cs.defenders ->
-              let enemies =
-                    if self.key `elem` cs.attackers
-                      then cs.defenders
-                      else cs.attackers
-               in case enemies of
-                    (t : _) -> push (CorruptUnit t)
-                    [] -> pure ()
-        _ -> pure ()
-    _ -> pure ()
+  -- Engine-handled by firePerSourceCombatEffects (see Plaguebearers).
 
 chaosSpawn :: CardDef Unit
 chaosSpawn = unit "core-097" "Chaos Spawn" do
@@ -2356,9 +2362,12 @@ pyreOfTcharzanek = support "core-100" "Pyre of Tchar'zanek" do
   loyalty 2
   trait Building
   body "Kingdom. Forced: At the beginning of your turn, deal 1 damage to a target zone."
-  -- Auto-target the opponent's most-damaged zone.
+  -- Auto-target the opponent's most-damaged zone. Gated on Pyre
+  -- sitting in your kingdom ("Kingdom." prefix).
   onReceive $ Receive \msg _owner self -> case msg of
-    BeginTurn k | k == self.controller -> do
+    BeginTurn k
+      | k == self.controller
+      , self.zone == KingdomZone -> do
       g <- getGame
       let opp = case self.controller of
             Player1 -> g.player2
@@ -2620,9 +2629,12 @@ daMorksEye = support "core-124" "Da Mork's Eye" do
   power 1
   trait Building
   body "Kingdom. Forced: At the beginning of your turn, deal 1 damage to one target enemy zone."
-  -- Auto-target the opponent's most-damaged unburned zone.
+  -- Auto-target the opponent's most-damaged unburned zone. Gated on
+  -- Da Mork's Eye being in the controller's kingdom.
   onReceive $ Receive \msg _owner self -> case msg of
-    BeginTurn k | k == self.controller -> do
+    BeginTurn k
+      | k == self.controller
+      , self.zone == KingdomZone -> do
       g <- getGame
       let opp = case self.controller of
             Player1 -> g.player2
@@ -3067,8 +3079,10 @@ theBlackArk = support "core-148" "The Black Ark" do
   trait Building
   body "Kingdom. Forced: At the beginning of your turn, draw a card."
   onReceive $ Receive \msg _owner self -> case msg of
-    BeginTurn k | k == self.controller ->
-      push (Draw (Drawing StandardDraw self.controller))
+    BeginTurn k
+      | k == self.controller
+      , self.zone == KingdomZone ->
+          push (Draw (Drawing StandardDraw self.controller))
     _ -> pure ()
 
 whipOfAgony :: CardDef Support

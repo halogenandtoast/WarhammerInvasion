@@ -117,6 +117,10 @@ data CombatState = CombatState
   , targetZone :: ZoneKind
   , attackers :: [UnitKey]
   , defenders :: [UnitKey]
+  , attackerPowerPenalty :: Int
+    -- ^ Per-attacker power penalty for this combat. Currently set
+    -- by Rune of Fortitude (core-013) when the attacker can't afford
+    -- the 1-per-attacker tax.
   }
   deriving stock Show
 
@@ -220,6 +224,11 @@ data Game = Game
     -- ^ Damage successfully landed on each unit this turn. Reset on
     -- 'BeginTurn'. Read by Daemonettes of Slaanesh and any future
     -- per-turn cap mechanics.
+  , damagedInCurrentCombat :: [UnitKey]
+    -- ^ Units that had non-zero damage land on them during the
+    -- currently-active combat. Reset on 'BeginCombat'; consulted at
+    -- 'EndCombat' to fire "when this unit damages an enemy" effects
+    -- (Plaguebearers, Beasts of Nurgle).
   }
   deriving stock Show
 

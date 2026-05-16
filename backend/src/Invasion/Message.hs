@@ -116,6 +116,12 @@ data Message where
     -- ^ Remove a free-standing support from play. Card goes to its
     -- controller's discard. Triggers 'SupportLeftPlay'.
   SupportLeftPlay :: PlayerKey -> UnitKey -> CardCode -> Message
+  -- Quest destruction (used by Mission-quest sacrifice effects like
+  -- Dominion of Chaos).
+  DestroyQuest :: UnitKey -> Message
+    -- ^ Remove a quest from play; its card goes to the controller's
+    -- discard pile. Triggers 'QuestLeftPlay'.
+  QuestLeftPlay :: PlayerKey -> UnitKey -> CardCode -> Message
   -- Experiences
   AttachExperience :: UnitKey -> CardCode -> Message
     -- ^ Pin a card (by code) as an "experience" on a host unit. Used by
@@ -214,17 +220,36 @@ data Message where
     -- ^ Credit N resources to the named player's pool. Used by tactic
     -- effects (Burying the Grudge, …) that bypass the kingdom-phase
     -- collection step.
-  -- Combat sequence
+  -- Combat sequence — implemented as a 5-step ladder with an action
+  -- window after each step, matching the rulebook. Either client may
+  -- act in each window; CloseActionWindow advances to the next step.
   BeginCombat :: PlayerKey -> ZoneKind -> [UnitKey] -> Message
-    -- ^ Declare an attack: 'PlayerKey' is the attacker, 'ZoneKind' is
-    -- the defending zone (of the opponent), and the list is the
-    -- attacking unit keys.
+    -- ^ Step 1: Declare target of attack. 'PlayerKey' is the
+    -- attacker, 'ZoneKind' is the defending zone, and the list is the
+    -- attacking unit keys (committed already so they're known when
+    -- the post-step window opens).
+  AdvanceCombatToAttackers :: Message
+    -- ^ Internal: fired by CloseActionWindow after the
+    -- AfterDeclareCombatTarget window closes. Opens the
+    -- AfterDeclareAttackers window.
+  AdvanceCombatToDefenders :: Message
+    -- ^ Internal: opens the AfterDeclareAttackers → defenders
+    -- transition, auto-picks defenders (until the defender has a
+    -- prompt), fires Counterstrike, opens AfterDeclareDefenders.
   DeclareDefenders :: [UnitKey] -> Message
     -- ^ Defender locks in which of their units block. Auto-picks all
-    -- eligible defenders if no list is supplied (we always supply
-    -- one from the engine today).
+    -- eligible defenders if no list is supplied.
+  AdvanceCombatToAssign :: Message
+    -- ^ Internal: after the AfterDeclareDefenders window closes,
+    -- compute and queue damage assignments. Opens
+    -- AfterAssignCombatDamage.
+  AdvanceCombatToApply :: Message
+    -- ^ Internal: after the AfterAssignCombatDamage window closes,
+    -- actually apply queued damage. Opens AfterApplyCombatDamage.
   ResolveCombat :: Message
-    -- ^ Compute and apply combat damage on both sides, then 'EndCombat'.
+    -- ^ Legacy entry-point preserved for tests / debug. Equivalent
+    -- to firing AdvanceCombatToAssign + AdvanceCombatToApply
+    -- back-to-back, skipping the intermediate action windows.
   EndCombat :: Message
     -- ^ Combat ends; clear 'Game.combat'.
 
