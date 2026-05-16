@@ -34,7 +34,7 @@ module Invasion.Model
       , DeckId
       , DeckUserId
       , DeckName
-      , DeckFaction
+      , DeckCapital
       , DeckCards
       , DeckCreatedAt
       , DeckUpdatedAt
@@ -106,7 +106,7 @@ Deck sql=decks
     Id UUID sqltype=uuid default=gen_random_uuid()
     userId UserId sql=user_id sqltype=uuid
     name Text sqltype=text
-    faction Text Maybe sqltype=text
+    capital Text Maybe sqltype=text
     cards Value sqltype=jsonb
     createdAt UTCTime sql=created_at sqltype=timestamptz
     updatedAt UTCTime sql=updated_at sqltype=timestamptz

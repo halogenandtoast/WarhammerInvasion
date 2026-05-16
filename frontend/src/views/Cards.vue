@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Card, CardType, Race } from '../types/card'
+import type { Card, CardStat, CardType, Race } from '../types/card'
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -14,7 +14,7 @@ const selectedCycle = ref<string | 'all'>('all')
 const selectedSet = ref<string | 'all'>('all')
 const selectedType = ref<CardType | 'all'>('all')
 const selectedRace = ref<Race | 'all'>('all')
-const selectedCost = ref<string | 'all'>('all')
+const selectedCost = ref<CardStat | 'all'>('all')
 const includeStubs = ref(true)
 const sidebarOpen = ref(false)
 
@@ -56,12 +56,16 @@ const races = computed(() =>
   unique(allCards.value.map((c) => c.race).filter((r): r is Race => Boolean(r))),
 )
 const costs = computed(() => {
-  const all = unique(allCards.value.map((c) => c.cost).filter(Boolean) as string[])
+  const all = unique(
+    allCards.value
+      .map((c) => c.cost)
+      .filter((c): c is number | 'X' => c !== null && !(typeof c === 'number' && c < 0)),
+  )
   return all.sort((a, b) => {
-    const an = Number(a)
-    const bn = Number(b)
-    if (Number.isNaN(an) || Number.isNaN(bn)) return a.localeCompare(b)
-    return an - bn
+    if (typeof a === 'number' && typeof b === 'number') return a - b
+    if (typeof a === 'number') return -1
+    if (typeof b === 'number') return 1
+    return a.localeCompare(b)
   })
 })
 

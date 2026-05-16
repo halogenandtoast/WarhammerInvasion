@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { createDeck, deleteDeck, listDecks, type DeckRecord } from '../api/decks'
-import { MIN_DECK_SIZE, MAX_DECK_SIZE, type Faction } from '../lib/deck'
+import { MIN_DECK_SIZE, MAX_DECK_SIZE, raceOfCapital, type Capital } from '../lib/deck'
 import { ApiError } from '../api/client'
 
 const { t } = useI18n({ useScope: 'global' })
@@ -15,7 +15,6 @@ const loadError = ref<string | null>(null)
 
 const creating = ref(false)
 const newName = ref('')
-const newFaction = ref<Faction | ''>('')
 const showNew = ref(false)
 
 onMounted(async () => {
@@ -36,7 +35,7 @@ async function submitNew() {
   try {
     const deck = await createDeck({
       name,
-      faction: newFaction.value === '' ? null : newFaction.value,
+      capital: null,
       cards: {},
     })
     emit('navigate', `#/decks/${deck.id}`)
@@ -71,10 +70,14 @@ function validityLabel(size: number): { label: string; tone: 'ok' | 'warn' } {
   return { label: t('decks.list.size_ok', { size }), tone: 'ok' }
 }
 
-function factionLabel(f: Faction | null): string {
-  if (f === 'order') return t('decks.faction.order')
-  if (f === 'destruction') return t('decks.faction.destruction')
-  return t('decks.faction.unset')
+function capitalLabel(c: Capital | null): string {
+  if (c === null) return t('decks.capital.unset')
+  return t(`decks.capital.${c}`)
+}
+
+function capitalRaceClass(c: Capital | null): string {
+  if (c === null) return 'capital-unset'
+  return `race-${raceOfCapital(c).toLowerCase().replace(/\s+/g, '-')}`
 }
 
 const empty = computed(() => !loading.value && decks.value.length === 0)
@@ -99,15 +102,8 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
           <span class="field-label">{{ t('decks.list.name_label') }}</span>
           <input v-model="newName" type="text" required maxlength="80" :placeholder="t('decks.list.name_placeholder')" />
         </label>
-        <label class="field">
-          <span class="field-label">{{ t('decks.list.faction_label') }}</span>
-          <select v-model="newFaction">
-            <option value="">{{ t('decks.faction.unset') }}</option>
-            <option value="order">{{ t('decks.faction.order') }}</option>
-            <option value="destruction">{{ t('decks.faction.destruction') }}</option>
-          </select>
-        </label>
       </div>
+      <p class="hint">{{ t('decks.list.capital_hint') }}</p>
       <button class="primary" type="submit" :disabled="creating || newName.trim().length === 0">
         {{ creating ? t('decks.list.creating') : t('decks.list.create') }}
       </button>
@@ -123,8 +119,8 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
         <a class="deck-link" :href="`#/decks/${deck.id}`" @click.prevent="emit('navigate', `#/decks/${deck.id}`)">
           <header>
             <h2>{{ deck.name }}</h2>
-            <span class="chip" :class="`faction-${deck.faction ?? 'unset'}`">
-              {{ factionLabel(deck.faction) }}
+            <span class="chip capital-chip" :class="capitalRaceClass(deck.capital)">
+              {{ capitalLabel(deck.capital) }}
             </span>
           </header>
           <p class="size" :class="`tone-${validityLabel(deckSize(deck)).tone}`">
@@ -347,6 +343,29 @@ h1 {
   background: var(--faction-destruction);
   color: var(--on-accent);
   border-color: transparent;
+}
+
+.capital-chip {
+  color: var(--bg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.capital-chip.race-empire { background: var(--race-empire); }
+.capital-chip.race-dwarf { background: var(--race-dwarf); }
+.capital-chip.race-high-elf { background: var(--race-high-elf); }
+.capital-chip.race-chaos { background: var(--race-chaos); color: var(--on-accent); }
+.capital-chip.race-orc { background: var(--race-orc); }
+.capital-chip.race-dark-elf { background: var(--race-dark-elf); color: var(--on-accent); }
+.capital-chip.capital-unset {
+  background: var(--bg);
+  color: var(--fg-dim);
+  border-color: var(--border);
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--fg-faint);
 }
 
 .size {

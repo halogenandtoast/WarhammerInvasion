@@ -12,6 +12,15 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 
+# Load .env (DATABASE_URL, WHI_JWT_SECRET, …) so the backend + dbmate
+# see them without the caller having to export anything.
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT_DIR/.env"
+  set +a
+fi
+
 BACKEND_PORT_PREF="${BACKEND_PORT_PREF:-3000}"
 FRONTEND_PORT_PREF="${FRONTEND_PORT_PREF:-5173}"
 PORT_SCAN_LIMIT="${PORT_SCAN_LIMIT:-50}"

@@ -47,15 +47,23 @@ decks:
     unset: Neutral / unset
     order: Order
     destruction: Destruction
+  capital:
+    unset: No capital
+    empire: Empire
+    dwarf: Dwarf
+    high_elf: High Elf
+    chaos: Chaos
+    orc: Orc
+    dark_elf: Dark Elf
   list:
     eyebrow: Your collection
     heading: Decks
-    lead: Build a 50–100 card deck for one faction. Order and Destruction can't share a deck.
+    lead: Build a 50–100 card deck around one capital. Order and Destruction can't share a deck.
     new: New deck
     cancel_new: Cancel
     name_label: Deck name
     name_placeholder: e.g. Dwarven Engineers
-    faction_label: Faction
+    capital_hint: You'll pick a capital board on the next screen.
     create: Create deck
     creating: Creating…
     loading: Loading decks…
@@ -82,7 +90,6 @@ deck_edit:
   type_label: Card type
   race_label: Race
   cost_label: Cost
-  faction_label: Faction
   any_type: Any type
   any_race: Any race
   any_cost: Any cost
@@ -103,6 +110,13 @@ deck_edit:
     saving: Saving…
     saved: Saved
     error: Save failed
+  capital_picker:
+    aria: Pick a capital board
+    heading: Pick your capital
+    lead: Your capital board sets the deck's faction and provides one race symbol for loyalty. You can mix races within the same faction.
+    change: Change capital
+    change_blocked: Remove all non-Neutral cards before changing capital.
+    cancel: Keep current capital
 
 rules:
   page_title: Rules

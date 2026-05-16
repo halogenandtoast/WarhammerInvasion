@@ -1,10 +1,10 @@
 import { api } from './client'
-import type { Faction } from '../lib/deck'
+import type { Capital } from '../lib/deck'
 
 export interface DeckRecord {
   id: string
   name: string
-  faction: Faction | null
+  capital: Capital | null
   cards: Record<string, number>
   createdAt: string
   updatedAt: string
@@ -12,7 +12,7 @@ export interface DeckRecord {
 
 export interface DeckInput {
   name: string
-  faction: Faction | null
+  capital: Capital | null
   cards: Record<string, number>
 }
 

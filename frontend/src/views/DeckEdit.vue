@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Card, CardType, Race } from '../types/card'
+import type { Card, CardStat, CardType, Race } from '../types/card'
 import { ApiError } from '../api/client'
 import { deleteDeck, getDeck, updateDeck, type DeckRecord } from '../api/decks'
 import {
-  cardFaction,
+  ALL_CAPITALS,
+  factionOfCapital,
+  hasFactionCards,
+  isCardAllowedInDeck,
   isCardAllowedInFaction,
-  inferFaction,
+  raceOfCapital,
   summarize,
   MAX_COPIES_PER_TITLE,
   MIN_DECK_SIZE,
   MAX_DECK_SIZE,
-  type Faction,
+  type Capital,
 } from '../lib/deck'
 
 const props = defineProps<{ deckId: string }>()
@@ -33,7 +36,8 @@ const cardIndex = computed<Map<string, Card>>(() => {
 const deck = ref<DeckRecord | null>(null)
 const counts = ref<Record<string, number>>({})
 const editingName = ref('')
-const editingFaction = ref<Faction | null>(null)
+const editingCapital = ref<Capital | null>(null)
+const isChangingCapital = ref(false)
 
 const loading = ref(true)
 const loadError = ref<string | null>(null)
@@ -54,7 +58,7 @@ onMounted(async () => {
     deck.value = deckRes
     counts.value = { ...deckRes.cards }
     editingName.value = deckRes.name
-    editingFaction.value = deckRes.faction
+    editingCapital.value = deckRes.capital
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'load_failed'
   } finally {
@@ -87,7 +91,7 @@ async function persist() {
   try {
     const updated = await updateDeck(deck.value.id, {
       name: editingName.value.trim() || t('deck_edit.untitled'),
-      faction: editingFaction.value,
+      capital: editingCapital.value,
       cards: counts.value,
     })
     deck.value = updated
@@ -102,14 +106,8 @@ async function persist() {
 // ----- deck mutation -------------------------------------------------------
 
 function add(card: Card) {
-  // Faction lock: first non-neutral card sets the deck's faction.
-  if (editingFaction.value === null) {
-    const inferred = cardFaction(card)
-    if (inferred === 'order' || inferred === 'destruction') {
-      editingFaction.value = inferred
-    }
-  }
-  if (!isCardAllowedInFaction(card, editingFaction.value)) return
+  if (editingCapital.value === null) return
+  if (!isCardAllowedInDeck(card, editingCapital.value)) return
   const current = counts.value[card.id] ?? 0
   if (current >= MAX_COPIES_PER_TITLE) return
   counts.value = { ...counts.value, [card.id]: current + 1 }
@@ -122,22 +120,25 @@ function remove(card: Card | { id: string }) {
   const next = { ...counts.value }
   if (current === 1) {
     delete next[card.id]
-    // If we just removed the last race-bearing card, unlock faction.
-    if (editingFaction.value !== null) {
-      const stillLocked = Object.entries(next).some(([id, n]) => {
-        if (n <= 0) return false
-        const c = cardIndex.value.get(id)
-        if (!c) return false
-        const f = cardFaction(c)
-        return f === 'order' || f === 'destruction'
-      })
-      if (!stillLocked) editingFaction.value = null
-    }
   } else {
     next[card.id] = current - 1
   }
   counts.value = next
   scheduleSave()
+}
+
+function pickCapital(c: Capital) {
+  editingCapital.value = c
+  isChangingCapital.value = false
+  scheduleSave()
+}
+
+function requestChangeCapital() {
+  isChangingCapital.value = true
+}
+
+function cancelChangeCapital() {
+  isChangingCapital.value = false
 }
 
 function renameDeck(event: Event) {
@@ -161,9 +162,13 @@ async function destroyDeck() {
 const search = ref('')
 const selectedType = ref<CardType | 'all'>('all')
 const selectedRace = ref<Race | 'all'>('all')
-const selectedCost = ref<string | 'all'>('all')
+const selectedCost = ref<CardStat | 'all'>('all')
 const showOtherFaction = ref(false)
 const showDeckOnMobile = ref(false)
+
+const editingFaction = computed(() =>
+  editingCapital.value === null ? null : factionOfCapital(editingCapital.value),
+)
 
 const types = computed(() =>
   Array.from(new Set(allCards.value.map((c) => c.type).filter((t): t is CardType => Boolean(t)))),
@@ -172,13 +177,17 @@ const races = computed(() =>
   Array.from(new Set(allCards.value.map((c) => c.race).filter((r): r is Race => Boolean(r)))),
 )
 const costs = computed(() => {
-  const seen = new Set<string>()
-  for (const c of allCards.value) if (c.cost) seen.add(c.cost)
+  const seen = new Set<number | 'X'>()
+  for (const c of allCards.value) {
+    if (c.cost === null) continue
+    if (typeof c.cost === 'number' && c.cost < 0) continue
+    seen.add(c.cost)
+  }
   return Array.from(seen).sort((a, b) => {
-    const an = Number(a)
-    const bn = Number(b)
-    if (Number.isNaN(an) || Number.isNaN(bn)) return a.localeCompare(b)
-    return an - bn
+    if (typeof a === 'number' && typeof b === 'number') return a - b
+    if (typeof a === 'number') return -1
+    if (typeof b === 'number') return 1
+    return a.localeCompare(b)
   })
 })
 
@@ -201,12 +210,11 @@ const filtered = computed(() => {
 // ----- derived summary -----------------------------------------------------
 
 const summary = computed(() =>
-  summarize({ cards: counts.value, faction: editingFaction.value }, cardIndex.value),
+  summarize({ cards: counts.value, capital: editingCapital.value }, cardIndex.value),
 )
-const inferredFaction = computed(() =>
-  inferFaction({ cards: counts.value }, cardIndex.value),
+const canChangeCapital = computed(
+  () => !hasFactionCards({ cards: counts.value }, cardIndex.value),
 )
-const factionLockedByCards = computed(() => inferredFaction.value !== null)
 
 const maxCostBucket = computed(() =>
   Math.max(1, ...summary.value.stats.costCurve.map((b) => b.count)),
@@ -226,10 +234,13 @@ function raceClass(race: Race | null): string {
   return `race-${race.toLowerCase().replace(/\s+/g, '-')}`
 }
 
-function factionLabel(f: Faction | null): string {
-  if (f === 'order') return t('decks.faction.order')
-  if (f === 'destruction') return t('decks.faction.destruction')
-  return t('decks.faction.unset')
+function capitalLabel(c: Capital | null): string {
+  if (c === null) return t('decks.capital.unset')
+  return t(`decks.capital.${c}`)
+}
+
+function capitalRaceClass(c: Capital): string {
+  return `race-${raceOfCapital(c).toLowerCase().replace(/\s+/g, '-')}`
 }
 
 function saveLabel(): string {
@@ -251,8 +262,8 @@ const validationTone = computed<'ok' | 'warn'>(() =>
   summary.value.issues.some((i) => i.severity === 'error') ? 'warn' : 'ok',
 )
 
-// Re-run save scheduling when name/faction changes via UI inputs.
-watch(editingFaction, () => scheduleSave())
+// Persist capital changes through the UI.
+watch(editingCapital, () => scheduleSave())
 </script>
 
 <template>
@@ -286,7 +297,39 @@ watch(editingFaction, () => scheduleSave())
 
       <p v-if="saveError" class="error">{{ saveError }}</p>
 
-      <div class="layout">
+      <section
+        v-if="editingCapital === null || isChangingCapital"
+        class="capital-gate"
+        :aria-label="t('deck_edit.capital_picker.aria')"
+      >
+        <header class="gate-head">
+          <h2>{{ t('deck_edit.capital_picker.heading') }}</h2>
+          <p>{{ t('deck_edit.capital_picker.lead') }}</p>
+        </header>
+        <ul class="capital-grid" role="list">
+          <li v-for="c in ALL_CAPITALS" :key="c">
+            <button
+              type="button"
+              class="capital-tile"
+              :class="[capitalRaceClass(c), { selected: editingCapital === c }]"
+              @click="pickCapital(c)"
+            >
+              <span class="tile-race">{{ t(`decks.capital.${c}`) }}</span>
+              <span class="tile-faction">{{ t(`decks.faction.${factionOfCapital(c)}`) }}</span>
+            </button>
+          </li>
+        </ul>
+        <button
+          v-if="isChangingCapital && editingCapital !== null"
+          class="ghost"
+          type="button"
+          @click="cancelChangeCapital"
+        >
+          {{ t('deck_edit.capital_picker.cancel') }}
+        </button>
+      </section>
+
+      <div v-else class="layout">
         <!-- Card browser -->
         <section class="browser" :aria-label="t('deck_edit.browser_label')">
           <div class="filters">
@@ -325,7 +368,7 @@ watch(editingFaction, () => scheduleSave())
               v-for="card in filtered"
               :key="card.id"
               class="tile"
-              :class="[raceClass(card.race), { blocked: !isCardAllowedInFaction(card, editingFaction) }]"
+              :class="[raceClass(card.race), { blocked: !isCardAllowedInDeck(card, editingCapital) }]"
             >
               <div class="img-wrap">
                 <img v-if="imageUrl(card)" :src="imageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
@@ -348,7 +391,7 @@ watch(editingFaction, () => scheduleSave())
                   <button
                     class="qty-btn"
                     type="button"
-                    :disabled="(counts[card.id] ?? 0) >= MAX_COPIES_PER_TITLE || !isCardAllowedInFaction(card, editingFaction)"
+                    :disabled="(counts[card.id] ?? 0) >= MAX_COPIES_PER_TITLE || !isCardAllowedInDeck(card, editingCapital)"
                     @click="add(card)"
                     :aria-label="t('deck_edit.plus_aria', { name: card.name })"
                   >+</button>
@@ -362,23 +405,27 @@ watch(editingFaction, () => scheduleSave())
         <aside class="deck-panel" :class="{ open: showDeckOnMobile }" :aria-label="t('deck_edit.panel_label')">
           <div class="panel-inner">
             <header class="panel-head">
-              <span class="chip" :class="`faction-${editingFaction ?? 'unset'}`">
-                {{ factionLabel(editingFaction) }}
+              <span
+                class="chip capital-chip"
+                :class="editingCapital ? capitalRaceClass(editingCapital) : 'capital-unset'"
+              >
+                {{ capitalLabel(editingCapital) }}
               </span>
               <span class="count" :class="`tone-${validationTone}`">
                 {{ summary.stats.total }} / {{ MIN_DECK_SIZE }}–{{ MAX_DECK_SIZE }}
               </span>
             </header>
 
-            <div v-if="editingFaction !== null && !factionLockedByCards" class="faction-controls">
-              <label class="toggle small">
-                <select v-model="editingFaction" :aria-label="t('deck_edit.faction_label')">
-                  <option :value="null">{{ t('decks.faction.unset') }}</option>
-                  <option value="order">{{ t('decks.faction.order') }}</option>
-                  <option value="destruction">{{ t('decks.faction.destruction') }}</option>
-                </select>
-              </label>
-            </div>
+            <button
+              v-if="editingCapital !== null"
+              type="button"
+              class="change-capital"
+              :disabled="!canChangeCapital"
+              :title="canChangeCapital ? '' : t('deck_edit.capital_picker.change_blocked')"
+              @click="requestChangeCapital"
+            >
+              {{ t('deck_edit.capital_picker.change') }}
+            </button>
 
             <ul v-if="summary.issues.length > 0" class="issues">
               <li
@@ -426,7 +473,7 @@ watch(editingFaction, () => scheduleSave())
                 <li v-for="entry in summary.cards" :key="entry.card.id" class="dl-row">
                   <span class="dl-count">{{ entry.count }}×</span>
                   <span class="dl-name" :class="raceClass(entry.card.race)">{{ entry.card.name }}</span>
-                  <span class="dl-cost" v-if="entry.card.cost">{{ entry.card.cost }}</span>
+                  <span class="dl-cost" v-if="entry.card.cost !== null">{{ entry.card.cost }}</span>
                   <button class="qty-btn ghost-btn" type="button" @click="remove(entry.card)" :aria-label="t('deck_edit.minus_aria', { name: entry.card.name })">−</button>
                   <button
                     class="qty-btn ghost-btn"
@@ -829,6 +876,125 @@ watch(editingFaction, () => scheduleSave())
   background: var(--faction-destruction);
   color: var(--on-accent);
   border-color: transparent;
+}
+
+.capital-chip {
+  color: var(--bg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.capital-chip.race-empire { background: var(--race-empire); }
+.capital-chip.race-dwarf { background: var(--race-dwarf); }
+.capital-chip.race-high-elf { background: var(--race-high-elf); }
+.capital-chip.race-chaos { background: var(--race-chaos); color: var(--on-accent); }
+.capital-chip.race-orc { background: var(--race-orc); }
+.capital-chip.race-dark-elf { background: var(--race-dark-elf); color: var(--on-accent); }
+.capital-chip.capital-unset {
+  background: var(--bg);
+  color: var(--fg-dim);
+  border-color: var(--border);
+}
+
+.change-capital {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--fg-dim);
+  border-radius: var(--radius-md);
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  min-height: var(--tap-target);
+}
+
+.change-capital:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
+
+.change-capital:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.capital-gate {
+  max-width: 720px;
+  margin: 1.5rem auto;
+  padding: 1.5rem 1.25rem 2rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gate-head h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1.3rem;
+  color: var(--fg);
+}
+
+.gate-head p {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 0.92rem;
+}
+
+.capital-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.7rem;
+}
+
+.capital-tile {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--fg);
+  cursor: pointer;
+  min-height: var(--tap-target);
+  text-align: left;
+  transition:
+    transform var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.capital-tile:hover {
+  transform: translateY(-1px);
+}
+
+.capital-tile.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.capital-tile.race-empire { border-left: 4px solid var(--race-empire); }
+.capital-tile.race-dwarf { border-left: 4px solid var(--race-dwarf); }
+.capital-tile.race-high-elf { border-left: 4px solid var(--race-high-elf); }
+.capital-tile.race-chaos { border-left: 4px solid var(--race-chaos); }
+.capital-tile.race-orc { border-left: 4px solid var(--race-orc); }
+.capital-tile.race-dark-elf { border-left: 4px solid var(--race-dark-elf); }
+
+.tile-race {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.tile-faction {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
 }
 
 .count {

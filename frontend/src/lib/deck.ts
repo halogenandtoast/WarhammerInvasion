@@ -1,11 +1,50 @@
 // Pure deck model — validation, stats, faction logic. UI-agnostic.
 
-import type { Card, Race } from '../types/card'
+import type { Card, CardStat, Race } from '../types/card'
 
 export type Faction = 'order' | 'destruction'
 
+// Capital values are the wire format (snake_case) of the six playable races.
+// One capital = one race; the faction is derived from it.
+export type Capital = 'empire' | 'dwarf' | 'high_elf' | 'chaos' | 'orc' | 'dark_elf'
+
+export const ALL_CAPITALS: readonly Capital[] = [
+  'empire',
+  'dwarf',
+  'high_elf',
+  'chaos',
+  'orc',
+  'dark_elf',
+] as const
+
 export const ORDER_RACES: readonly Race[] = ['Empire', 'Dwarf', 'High Elf'] as const
 export const DESTRUCTION_RACES: readonly Race[] = ['Chaos', 'Orc', 'Dark Elf'] as const
+
+const CAPITAL_TO_RACE: Record<Capital, Race> = {
+  empire: 'Empire',
+  dwarf: 'Dwarf',
+  high_elf: 'High Elf',
+  chaos: 'Chaos',
+  orc: 'Orc',
+  dark_elf: 'Dark Elf',
+}
+
+const CAPITAL_TO_FACTION: Record<Capital, Faction> = {
+  empire: 'order',
+  dwarf: 'order',
+  high_elf: 'order',
+  chaos: 'destruction',
+  orc: 'destruction',
+  dark_elf: 'destruction',
+}
+
+export function raceOfCapital(c: Capital): Race {
+  return CAPITAL_TO_RACE[c]
+}
+
+export function factionOfCapital(c: Capital): Faction {
+  return CAPITAL_TO_FACTION[c]
+}
 
 export const MIN_DECK_SIZE = 50
 export const MAX_DECK_SIZE = 100
@@ -14,7 +53,7 @@ export const MAX_COPIES_PER_TITLE = 3
 export interface SavedDeck {
   id: string
   name: string
-  faction: Faction | null
+  capital: Capital | null
   cards: Record<string, number>
   createdAt: string
   updatedAt: string
@@ -42,6 +81,10 @@ export function isCardAllowedInFaction(card: Pick<Card, 'race'>, faction: Factio
   return cf === faction
 }
 
+export function isCardAllowedInDeck(card: Pick<Card, 'race'>, capital: Capital | null): boolean {
+  return isCardAllowedInFaction(card, capital == null ? null : factionOfCapital(capital))
+}
+
 export interface DeckIssue {
   severity: 'error' | 'warning'
   code: string
@@ -59,6 +102,7 @@ export interface DeckStats {
 export interface DeckSummary {
   cards: { card: Card; count: number }[]
   unknown: { id: string; count: number }[]
+  capital: Capital | null
   faction: Faction | null
   stats: DeckStats
   issues: DeckIssue[]
@@ -66,17 +110,16 @@ export interface DeckSummary {
 
 const COST_BUCKETS: string[] = ['0', '1', '2', '3', '4', '5', '6+', 'X']
 
-function bucketForCost(cost: string | null): string {
-  if (cost == null) return 'X'
-  if (cost === 'X') return 'X'
-  const n = Number(cost)
-  if (Number.isNaN(n)) return 'X'
-  if (n >= 6) return '6+'
-  return String(n)
+function bucketForCost(cost: CardStat): string {
+  if (cost == null || cost === 'X') return 'X'
+  if (typeof cost !== 'number' || Number.isNaN(cost)) return 'X'
+  if (cost < 0) return 'X'
+  if (cost >= 6) return '6+'
+  return String(cost)
 }
 
 export function summarize(
-  deck: Pick<SavedDeck, 'cards' | 'faction'>,
+  deck: Pick<SavedDeck, 'cards' | 'capital'>,
   cardIndex: Map<string, Card>,
 ): DeckSummary {
   const entries: { card: Card; count: number }[] = []
@@ -105,6 +148,7 @@ export function summarize(
 
   entries.sort((a, b) => a.card.name.localeCompare(b.card.name))
 
+  const faction = deck.capital == null ? null : factionOfCapital(deck.capital)
   const issues: DeckIssue[] = []
   if (total < MIN_DECK_SIZE) {
     issues.push({
@@ -132,7 +176,7 @@ export function summarize(
   }
 
   // Faction conflicts: any card whose faction disagrees with the deck's.
-  const conflicting = entries.filter(({ card }) => !isCardAllowedInFaction(card, deck.faction))
+  const conflicting = entries.filter(({ card }) => !isCardAllowedInFaction(card, faction))
   if (conflicting.length > 0) {
     issues.push({
       severity: 'error',
@@ -154,7 +198,8 @@ export function summarize(
   return {
     cards: entries,
     unknown,
-    faction: deck.faction,
+    capital: deck.capital,
+    faction,
     stats: {
       total,
       uniqueTitles: entries.length,
@@ -167,19 +212,20 @@ export function summarize(
 }
 
 /**
- * Infer the deck's faction from its non-Neutral cards. Returns null if
- * the deck is empty or has only Neutral cards.
+ * Returns true if the deck contains any non-Neutral card. Used to gate the
+ * "change capital" affordance — once a real faction card is in the deck,
+ * swapping capitals can silently invalidate it.
  */
-export function inferFaction(
+export function hasFactionCards(
   deck: Pick<SavedDeck, 'cards'>,
   cardIndex: Map<string, Card>,
-): Faction | null {
+): boolean {
   for (const [id, count] of Object.entries(deck.cards)) {
     if (count <= 0) continue
     const card = cardIndex.get(id)
     if (!card) continue
     const cf = cardFaction(card)
-    if (cf === 'order' || cf === 'destruction') return cf
+    if (cf === 'order' || cf === 'destruction') return true
   }
-  return null
+  return false
 }

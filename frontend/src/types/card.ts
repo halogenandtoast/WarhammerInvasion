@@ -8,6 +8,12 @@ export type Race =
   | 'Dark Elf'
   | 'Neutral'
 
+/**
+ * Numeric stats are usually a plain number. `"X"` stands in for variable
+ * values; `null` means the field doesn't apply to this card.
+ */
+export type CardStat = number | 'X' | null
+
 export interface Card {
   id: string
   name: string
@@ -16,13 +22,13 @@ export interface Card {
   number: number | null
   type: CardType | null
   race: Race | null
-  cost: string | null
+  cost: CardStat
   loyalty: number | null
-  power: string | null
-  health: string | null
+  power: CardStat
+  health: CardStat
   traits: string | null
   text: string | null
-  quantity: string | null
+  quantity: number | null
   illustrator: string | null
   image: string | null
   /** True when card has only filename-derived data (no engine/text). */

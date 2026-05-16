@@ -243,7 +243,7 @@ userJsonInline uid email displayName =
 
 data DeckInput = DeckInput
   { diName :: Text
-  , diFaction :: Maybe Text
+  , diCapital :: Maybe Text
   , diCards :: Value
   }
 
@@ -251,7 +251,7 @@ instance FromJSON DeckInput where
   parseJSON = Aeson.withObject "DeckInput" $ \o ->
     DeckInput
       <$> o .: "name"
-      <*> o .:? "faction"
+      <*> o .:? "capital"
       <*> (fromMaybe (Aeson.Object mempty) <$> o .:? "cards")
 
 getDecksR :: Handler Value
@@ -267,12 +267,12 @@ getDecksR = do
 postDecksR :: Handler Value
 postDecksR = do
   Entity uk _ <- requireUser
-  DeckInput{diName, diFaction, diCards} <- requireCheckJsonBody
-  validateFaction diFaction
+  DeckInput{diName, diCapital, diCards} <- requireCheckJsonBody
+  validateCapital diCapital
   validateDeckName diName
   now <- liftIO getCurrentTime
   did <- liftIO nextRandom
-  let deck = Deck uk diName diFaction diCards now now
+  let deck = Deck uk diName diCapital diCards now now
   runHandlerDB $ P.insertKey (DeckKey did) deck
   sendStatusJSON status201 (deckJson (Entity (DeckKey did) deck))
 
@@ -289,8 +289,8 @@ getDeckR did = do
 putDeckR :: UUID -> Handler Value
 putDeckR did = do
   Entity uk _ <- requireUser
-  DeckInput{diName, diFaction, diCards} <- requireCheckJsonBody
-  validateFaction diFaction
+  DeckInput{diName, diCapital, diCards} <- requireCheckJsonBody
+  validateCapital diCapital
   validateDeckName diName
   mdeck <- runHandlerDB (P.get (DeckKey did))
   case mdeck of
@@ -302,7 +302,7 @@ putDeckR did = do
           runHandlerDB $
             P.update (DeckKey did)
               [ DeckName P.=. diName
-              , DeckFaction P.=. diFaction
+              , DeckCapital P.=. diCapital
               , DeckCards P.=. diCards
               , DeckUpdatedAt P.=. now
               ]
@@ -328,7 +328,7 @@ deckJson (Entity (DeckKey did) d) =
   Aeson.object
     [ "id" .= UUID.toText did
     , "name" .= deckName d
-    , "faction" .= deckFaction d
+    , "capital" .= deckCapital d
     , "cards" .= deckCards d
     , "createdAt" .= deckCreatedAt d
     , "updatedAt" .= deckUpdatedAt d
@@ -457,12 +457,12 @@ validateDisplayName n
   where
     niceChar c = isAlpha c || isDigit c || c `elem` (" _-.'" :: String)
 
-validateFaction :: Maybe Text -> Handler ()
-validateFaction Nothing = pure ()
-validateFaction (Just t) =
-  if t `elem` (["order", "destruction"] :: [Text])
+validateCapital :: Maybe Text -> Handler ()
+validateCapital Nothing = pure ()
+validateCapital (Just t) =
+  if t `elem` (["empire", "dwarf", "high_elf", "chaos", "orc", "dark_elf"] :: [Text])
     then pure ()
-    else sendStatusJSON status400 (errorObj "invalid_faction")
+    else sendStatusJSON status400 (errorObj "invalid_capital")
 
 validateDeckName :: Text -> Handler ()
 validateDeckName n

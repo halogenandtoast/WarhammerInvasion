@@ -37,9 +37,12 @@ src/
     tokens.css, layout.css
 ```
 
-Today the repo only has the Vite + Vue starter scaffold (`App.vue`,
-`HelloWorld.vue`). The above is what we're building toward — see
-`../ARCHITECTURE.md` §4.
+What's built today: auth (`stores/auth.ts`, `Login.vue`, `Register.vue`),
+the deckbuilder (`Decks.vue`, `DeckEdit.vue`, `api/decks.ts`, `lib/deck.ts`),
+the rules and cards browsers (`Rules.vue`, `Cards.vue`), and a hash router
+inlined in `App.vue`. Not built yet: `api/socket.ts`, `api/protocol.ts`,
+the Pinia game store, `Lobby.vue`/`Game.vue`, the in-game components, and
+`DebugPanel.vue` — see `../ARCHITECTURE.md` §4 for the target.
 
 ## State rule
 
