@@ -52,6 +52,12 @@ else
   git pull --ff-only
 fi
 echo "deploy.sh: HEAD now at $(git rev-parse --short HEAD) ($(git log -1 --pretty=%s))"
+# Apply pending migrations (idempotent). Env is loaded from /etc/whi.env
+# so DATABASE_URL points at the managed cluster.
+set -a
+. /etc/whi.env
+set +a
+dbmate --no-dump-schema up
 docker compose up -d --build
 docker image prune -f >/dev/null
 docker compose ps

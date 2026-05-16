@@ -6,14 +6,23 @@ Haskell game engine + WebSocket server for *Warhammer: Invasion*.
 
 ```sh
 stack build
+DATABASE_URL=postgres://whi:whi@localhost:5432/whi?sslmode=disable \
+WHI_JWT_SECRET=dev-secret \
 stack exec WarhammerInvasion-exe        # listens on $PORT (default 3000)
 stack test                              # once tests exist
 ```
+
+The server now requires a Postgres connection at boot — `DATABASE_URL`
+and `WHI_JWT_SECRET` are both mandatory. For local dev, the
+docker-compose stack (`docker compose up -d db`) provides Postgres.
 
 `fourmolu.yaml` is the formatter config. Default extensions are set in
 `package.yaml` — assume `OverloadedRecordDot`, `NoFieldSelectors`,
 `DuplicateRecordFields`, `BlockArguments`, `LambdaCase`, etc. are on.
 `NoImplicitPrelude` is on, with `Invasion.Prelude` as the project prelude.
+**`Invasion.Model` opts into `FieldSelectors`** so persistent's generated
+accessors (`userEmail`, `deckCards`, …) are top-level functions; access
+entity fields with those, not with `.email` dot syntax.
 
 ## Module map
 
@@ -29,7 +38,12 @@ Invasion/
   Modifier.hs           -- temporary effects
   Entity.hs             -- shared entity helpers
   Engine.hs             -- Message ADT, Run class, gameMain loop
-  Server.hs             -- Yesod foundation (currently HTTP-only)
+  Server.hs             -- Yesod foundation: health, game, auth, decks
+  DB.hs                 -- ConnectionPool helpers wrapping persistent
+  Model.hs              -- persistent entities (User, Deck, RefreshToken)
+  Auth/
+    Password.hs         -- bcrypt hashing wrapper
+    Jwt.hs              -- HS256 JWT issue + verify
 Queue.hs                -- two-IORef work queue used by the engine
 ```
 
@@ -68,23 +82,34 @@ protocol's `EnqueueMessage` escape hatch is meant to work.
 
 Built today:
 - Engine skeleton, queue, dwarf starter deck, `runSetup`, JSON for `Game`.
-- HTTP routes: `GET /api/health`, `POST /api/game` (returns a fresh
-  post-setup game).
+- HTTP routes:
+  - `GET /api/health`
+  - `POST /api/game` (returns a fresh post-setup game; currently open)
+  - `POST /api/auth/{register,login,refresh,logout}`, `GET /api/auth/me`
+  - `GET/POST /api/decks`, `GET/PUT/DELETE /api/decks/<uuid>` (auth-gated)
+- Postgres-backed user accounts with bcrypt + HS256 JWT auth. Refresh
+  tokens are hashed (SHA-256) in `refresh_tokens`, rotated on every use,
+  and delivered to the browser as an HttpOnly cookie.
 
 Planned (see `../ARCHITECTURE.md` §3):
-- `Invasion/Server/{App,WebSocket,Session,Registry,Protocol,Debug}.hs`.
+- `Invasion/Server/{WebSocket,Session,Registry,Debug}.hs`.
 - TVar-backed game registry + idle TTL sweeper.
-- WebSocket upgrade at `/ws/games/:id?token=…`.
+- WebSocket upgrade at `/ws/games/:id?token=…` (will reuse the JWT from
+  `Invasion.Auth.Jwt`).
 
 Dependencies to add when wiring WebSockets: `wai-websockets`, `websockets`,
-`stm`, `uuid`, `time`. They are *not* in `package.yaml` yet.
+`stm`. The DB stack (`persistent`, `persistent-postgresql`, `esqueleto`,
+`bcrypt`, etc.) is already in `package.yaml`.
 
 ## Conventions
 
-- Records use `NoFieldSelectors` + `OverloadedRecordDot`. Access with
-  `p.hand`, never `hand p`.
-- New record types want a `deriveToJSON defaultOptions ''Foo` block at the
-  bottom of the module so the frontend can render them.
+- Engine-side records use `NoFieldSelectors` + `OverloadedRecordDot`.
+  Access with `p.hand`, never `hand p`.
+- **Persistent entities are the exception**: `Invasion.Model` enables
+  `FieldSelectors` so the generated accessors (`userEmail u`, `deckCards
+  d`, …) are top-level functions. Don't try to use `u.email` on an entity.
+- New non-entity record types want a `deriveToJSON defaultOptions ''Foo`
+  block at the bottom of the module so the frontend can render them.
 - Phantom-typed `Ref Target` / `Ref Source` distinguishes which side of an
   effect a reference is on. Don't collapse them.
 - Cyclic dependencies between `Card` and `Game` are handled via `.hs-boot`
@@ -92,6 +117,23 @@ Dependencies to add when wiring WebSockets: `wai-websockets`, `websockets`,
 - Concurrency: per the architecture, one runner thread per game owns the
   engine state. The engine itself stays single-threaded; do not add MVars
   inside `Invasion.*` modules.
+
+## DB workflow
+
+The schema lives in `../db/migrations/*.sql`. Persistent's `mkPersist`
+generates Haskell types that mirror the schema — it does **not** generate
+or apply migrations.
+
+When changing a column:
+
+1. `dbmate new <slug>` from the repo root, write the SQL up/down.
+2. `dbmate up` against your local DB.
+3. Update the matching entity in `Invasion.Model`. Field name, sql type,
+   nullability, and key type all need to line up.
+4. Add an exported `EntityField` constructor to the export list if you
+   added a new column (otherwise esqueleto code can't reference it).
+
+Never call `runMigration` / `runMigrationSilent`.
 
 ## Protocol changes
 

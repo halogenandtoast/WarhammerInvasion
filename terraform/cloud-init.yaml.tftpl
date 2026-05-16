@@ -1,22 +1,53 @@
 #cloud-config
 # Bootstraps a DigitalOcean "Docker on Ubuntu" droplet to run the
 # Warhammer: Invasion docker-compose stack. The marketplace image already
-# has docker + the compose plugin installed; we just need git, swap, and
-# a systemd unit that runs `docker compose up`.
+# has docker + the compose plugin installed; we add git, swap, dbmate,
+# and a systemd unit chain that runs migrations before `docker compose up`.
 
 package_update: true
 package_upgrade: false
 packages:
   - git
+  - curl
 
 write_files:
+  - path: /etc/whi.env
+    permissions: "0640"
+    owner: root:root
+    content: |
+      DATABASE_URL=${database_url}
+      WHI_JWT_SECRET=${jwt_secret}
+      WHI_JWT_ACCESS_TTL_SECONDS=${jwt_access_ttl_seconds}
+      WHI_JWT_REFRESH_TTL_SECONDS=${jwt_refresh_ttl_seconds}
+      WHI_COOKIE_SECURE=1
+      WHI_IDLE_TTL_SECONDS=${whi_idle_ttl_seconds}
+      WHI_DEBUG=${whi_debug}
+
+  - path: /etc/systemd/system/whi-migrate.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Run dbmate migrations against managed Postgres
+      Requires=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/whi
+      EnvironmentFile=/etc/whi.env
+      ExecStart=/usr/local/bin/dbmate --no-dump-schema up
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
   - path: /etc/systemd/system/whi.service
     permissions: "0644"
     content: |
       [Unit]
       Description=Warhammer Invasion (docker compose)
-      Requires=docker.service
-      After=docker.service network-online.target
+      Requires=docker.service whi-migrate.service
+      After=docker.service whi-migrate.service network-online.target
       Wants=network-online.target
 
       [Service]
@@ -30,12 +61,6 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
-  - path: /etc/whi.env
-    permissions: "0644"
-    content: |
-      WHI_IDLE_TTL_SECONDS=${whi_idle_ttl_seconds}
-      WHI_DEBUG=${whi_debug}
-
 runcmd:
   # Swap -- Haskell compilation OOMs on small droplets.
   - |
@@ -46,9 +71,22 @@ runcmd:
       swapon /swapfile
       echo '/swapfile none swap sw 0 0' >> /etc/fstab
     fi
+  # Install dbmate (single static binary). Pinned in tfvars.
+  - |
+    set -e
+    arch=$(dpkg --print-architecture)
+    case "$arch" in
+      amd64) dbarch=amd64 ;;
+      arm64) dbarch=arm64 ;;
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;;
+    esac
+    curl -fsSL -o /usr/local/bin/dbmate \
+      "https://github.com/amacneil/dbmate/releases/download/v${dbmate_version}/dbmate-linux-$dbarch"
+    chmod +x /usr/local/bin/dbmate
   # Clone source.
   - install -d -m 0755 /opt/whi
   - git clone --depth 1 --branch ${repo_branch} ${repo_url} /opt/whi
-  # Build + run via systemd. The first build is slow (Haskell deps).
+  # Wire up systemd: migrate first, then compose. `whi.service` Requires it.
   - systemctl daemon-reload
+  - systemctl enable whi-migrate.service
   - systemctl enable --now whi.service

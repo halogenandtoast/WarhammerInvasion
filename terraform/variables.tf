@@ -80,6 +80,51 @@ variable "whi_debug" {
   default     = "0"
 }
 
+# --- Database ----------------------------------------------------------------
+
+variable "db_size" {
+  description = "DigitalOcean managed Postgres node slug. db-s-1vcpu-1gb is the cheapest tier suitable for prod-like workloads."
+  type        = string
+  default     = "db-s-1vcpu-1gb"
+}
+
+variable "db_node_count" {
+  description = "Number of nodes in the DB cluster. 1 = single-node (no HA). Raise to 2+ for failover."
+  type        = number
+  default     = 1
+}
+
+variable "db_engine_version" {
+  description = "PostgreSQL major version supported by DigitalOcean."
+  type        = string
+  default     = "16"
+}
+
+variable "dbmate_version" {
+  description = "dbmate binary version installed on the droplet. Pinned so reboots can't silently move us forward."
+  type        = string
+  default     = "2.20.0"
+}
+
+variable "jwt_secret_override" {
+  description = "Override the auto-generated JWT signing secret. Leave empty to let terraform generate one and keep it in state."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "jwt_access_ttl_seconds" {
+  description = "Access-token lifetime in seconds. Default 15 min."
+  type        = number
+  default     = 900
+}
+
+variable "jwt_refresh_ttl_seconds" {
+  description = "Refresh-token lifetime in seconds. Default 30 days."
+  type        = number
+  default     = 2592000
+}
+
 # --- AWS / CloudFront card-asset CDN -----------------------------------------
 
 variable "aws_region" {

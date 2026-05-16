@@ -1,5 +1,11 @@
+# Local dev expects `COMPOSE_PROFILES=local-db` (set in .env). That brings up
+# the in-cluster postgres service. Production sets DATABASE_URL to the
+# DigitalOcean managed cluster's URI and omits the profile so the `db`
+# service is never started.
+
 services:
   db:
+    profiles: ["local-db"]
     image: postgres:16-alpine
     container_name: whi-db
     environment:
@@ -23,8 +29,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+        required: false
     environment:
-      DATABASE_URL: "postgres://whi:whi@db:5432/whi?sslmode=disable"
+      DATABASE_URL: "${DATABASE_URL:-postgres://whi:whi@db:5432/whi?sslmode=disable}"
     volumes:
       - ./db:/db
     command: ["up"]
@@ -49,6 +56,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+        required: false
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped

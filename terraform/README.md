@@ -1,15 +1,23 @@
 # Terraform — single-droplet DigitalOcean deploy
 
 Provisions one droplet that runs the app via `docker compose` (see
-`../docker-compose.yml`). No DB, no load balancer, no DNS — just an IP.
+`../docker-compose.yml`), and one managed Postgres cluster the droplet
+talks to over the VPC.
 
 ## What it creates
 
 DigitalOcean (the app host):
 - One droplet (defaults: `s-2vcpu-2gb` in `nyc3`, DO's Docker marketplace image).
-- A firewall (SSH + HTTP + ICMP in; all out).
+- One managed Postgres cluster (defaults: `db-s-1vcpu-1gb`, pg-16,
+  single node) plus a transaction-mode connection pool.
+- A database firewall locking the cluster to the droplet only.
+- A droplet firewall (SSH + HTTP + ICMP in; all out).
 - An SSH key in your DO account.
 - A project to group the droplet under.
+
+Terraform also generates a random `WHI_JWT_SECRET` (48 chars) and stores
+it in state. Override with `jwt_secret_override` if you'd rather supply
+your own.
 
 AWS (the card-image CDN — see `assets.tf`):
 - An S3 bucket (`warhammer-invasion-assets`, fully private).
@@ -24,9 +32,15 @@ when card art changes.
 Cloud-init on first boot:
 
 1. Creates a swap file (Haskell compilation OOMs without it on small droplets).
-2. Installs `git`, clones `var.repo_url` to `/opt/whi`.
-3. Drops a `whi.service` systemd unit that runs `docker compose up -d --build`.
-4. Enables it.
+2. Installs `git` and a pinned `dbmate` binary (`var.dbmate_version`).
+3. Clones `var.repo_url` to `/opt/whi`.
+4. Writes `/etc/whi.env` containing `DATABASE_URL` (the managed cluster's
+   private URI), `WHI_JWT_SECRET`, and the JWT TTL knobs.
+5. Drops two systemd units:
+   - `whi-migrate.service` (oneshot) — runs `dbmate up` against the cluster.
+   - `whi.service` — runs `docker compose up -d --build` *after* the
+     migrate unit succeeds.
+6. Enables `whi.service`, which pulls in the migrate unit by `Requires=`.
 
 The first `docker compose up` is slow — the Haskell builder downloads GHC
 and compiles all dependencies. Expect ~15–25 min before port 80 answers.
@@ -91,11 +105,15 @@ The script reads the droplet IP from `terraform output ipv4_address`; set
 
 - No domain or TLS. Add an `acme.sh` / certbot step + a DO DNS record if
   you want HTTPS. The nginx config in `frontend/nginx.conf` only listens
-  on port 80.
-- No off-host persistence — matches the ephemeral-games design goal
-  (see `../ARCHITECTURE.md` §1).
-- No remote state. `terraform.tfstate` lives next to the config. For
-  anything shared, switch to a DO Spaces backend.
+  on port 80. **Note: refresh-token cookies are sent with `Secure=1` on
+  the droplet, which means logins won't work over plain HTTP. Either add
+  TLS or set `WHI_COOKIE_SECURE=0` in `/etc/whi.env` while you do.**
+- No off-droplet backups. DO managed Postgres takes daily backups
+  automatically (7-day retention on the default tier); rely on those for
+  recovery, or add a `pg_dump` cron if you want belt-and-braces.
+- No remote state. `terraform.tfstate` lives next to the config — and
+  now contains a sensitive JWT secret. Treat the state file as a secret,
+  or switch to a DO Spaces backend with state encryption.
 
 ## Variables
 
@@ -109,6 +127,10 @@ See `variables.tf` for the full list. The interesting ones:
 | `region`, `droplet_size` | Where + how big. |
 | `ssh_allowed_cidrs` | Lock SSH to your IP. |
 | `whi_debug` | `"1"` to enable the debug protocol channel. Off by default. |
+| `db_size`, `db_node_count`, `db_engine_version` | Managed Postgres shape. |
+| `dbmate_version` | Pin the migration tool installed on the droplet. |
+| `jwt_secret_override` | Bring your own JWT signing secret (default: generated). |
+| `jwt_access_ttl_seconds`, `jwt_refresh_ttl_seconds` | Token lifetimes. |
 | `aws_region` | Region for the asset bucket. Defaults to `us-east-1`. |
 | `assets_bucket_name` | S3 bucket name. Defaults to the existing `warhammer-invasion-assets`. |
 

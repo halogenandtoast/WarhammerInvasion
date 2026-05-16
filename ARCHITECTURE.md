@@ -14,40 +14,49 @@ yet to be built.
 | # | Constraint | Implication |
 |---|---|---|
 | G1 | Real-time, two-player only | WebSockets; no matchmaking for >2; no turn-by-email fallback |
-| G2 | Ephemeral games — no DB | All state lives in process memory; cleanup on idle |
+| G2 | Live games are ephemeral | Active `Game` state lives in process memory; cleanup on idle |
 | G3 | Authoritative server | Frontend is a thin renderer; never mutates game state locally |
 | G4 | Mobile-friendly UI | Touch-first, responsive layout, no hover-only interactions |
 | G5 | Debug mode for every feature | Engine exposes a typed "edit state" channel; UI exposes it behind a flag |
 | G6 | Idle TTL: 5 min (configurable) | Both players disconnected → start countdown → drop the game |
+| G7 | User-owned data is durable | Accounts and saved decks live in Postgres; schema owned by dbmate |
 
-Non-goals (for now): accounts, ranking/MMR, deck building UI, spectators,
-chat moderation, replays, persistence across server restarts.
+Non-goals (for now): ranking/MMR, spectators, chat moderation, replays,
+persisting in-progress games across server restarts.
 
 ---
 
 ## 2. System overview
 
 ```
-+----------------+        WebSocket (JSON)       +-----------------------+
++----------------+   HTTP + WebSocket (JSON)     +-----------------------+
 |  Browser (P1)  | <---------------------------> |                       |
 +----------------+                               |   Yesod / Warp        |
                                                  |   ─────────────       |
-+----------------+        WebSocket (JSON)       |   Lobby + Sessions    |
-|  Browser (P2)  | <---------------------------> |   Game runtime (STM)  |
-+----------------+                               |   Engine (Queue+Msg)  |
-                                                 +-----------------------+
-                                                            |
-                                                            v
-                                                  in-memory game table
-                                                  (TVar (Map GameId GameSlot))
++----------------+   HTTP + WebSocket (JSON)     |   Auth / Decks API    |
+|  Browser (P2)  | <---------------------------> |   Lobby + Sessions    |
++----------------+                               |   Game runtime (STM)  |
+                                                 |   Engine (Queue+Msg)  |
+                                                 +-----------+-----------+
+                                                             |
+                                          in-memory game     |     persistent storage
+                                          table (TVar Map)   |     (PostgreSQL)
+                                                  ●          +------> users, decks,
+                                          per-game runner            refresh_tokens
+                                          threads (STM)
 ```
 
-- One process, one node. No external dependencies beyond the GHC runtime.
+- Compute lives on one droplet running docker-compose (backend, frontend,
+  dbmate one-shot). Postgres is a separate DigitalOcean managed cluster
+  reached over the private VPC.
 - Each active game = one `GameSlot` value in a shared `TVar` map, owned by a
   dedicated runner thread. All mutations go through that thread to keep the
   engine single-threaded per game.
-- Browsers talk to the server only over WebSockets after the initial HTTP
-  page-load + lobby creation.
+- Account data and decks live in Postgres and survive restarts. Schema is
+  owned by `db/migrations/*.sql` (dbmate); persistent + esqueleto provide
+  typed access — no `runMigration`.
+- Browsers talk to the server over HTTPS for auth/deck CRUD and over the
+  same origin's WebSocket for live games.
 
 ---
 
