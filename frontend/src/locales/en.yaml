@@ -822,6 +822,7 @@ game:
     password_lead: This game is private. Enter the password to join.
   play:
     turn_label: "Turn {n}"
+    turn_prefix: "Turn"
     your_turn: Your turn
     opponent_turn: "{name}'s turn"
     first_player_tag: First

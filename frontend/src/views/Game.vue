@@ -551,7 +551,14 @@ function formatTime(at: string): string {
          ──────────────────────────────────────────────────────────── -->
     <footer v-if="isPlaying && engine" class="phase-bar">
       <div class="phase-bar-left">
-        <span class="turn-label">{{ turnLabel }}</span>
+        <span class="turn-label" :title="turnLabel ?? undefined">
+          {{ t('game.play.turn_prefix') }}
+          <span class="turn-number-slot">
+            <Transition name="turn-flip">
+              <span class="turn-number" :key="engine.turn">{{ engine.turn }}</span>
+            </Transition>
+          </span>
+        </span>
         <span class="active-label">{{ activeLabel }}</span>
       </div>
       <ol class="phase-track">
@@ -1021,6 +1028,35 @@ function formatTime(at: string): string {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--fg-faint);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+}
+.turn-number-slot {
+  position: relative;
+  display: inline-block;
+  min-width: 1ch;
+  text-align: left;
+  /* Clip the leaving digit as it slides up past the top edge. */
+  overflow: hidden;
+  line-height: 1;
+}
+.turn-number {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+.turn-flip-leave-active {
+  position: absolute;
+  inset: 0;
+  transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1), opacity 420ms ease;
+}
+.turn-flip-leave-to {
+  transform: translateY(-110%);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-flip-leave-active { transition: opacity 120ms ease; }
+  .turn-flip-leave-to { transform: none; }
 }
 .active-label {
   font-size: 0.86rem;
