@@ -99,19 +99,23 @@ overGame f = do
 
 -- | Pump the queue until either empty or the game has ended. Returning
 -- here is also how the engine exposes "we're waiting for player input"
--- — an open action window stops emitting messages and the queue drains.
+-- — an open action window stops emitting messages and the queue drains,
+-- and a pending prompt halts pumping entirely until the client posts a
+-- 'ResolvePrompt'.
 gameMain :: GameT Game
 gameMain = do
   game <- getGame
   case game.lifecycle of
     GameFinished _ -> pure game
-    _ -> do
-      mmsg <- pop
-      case mmsg of
-        Just msg -> do
-          overGame $ distribute msg
-          gameMain
-        Nothing -> pure game
+    _ -> case game.pendingPrompt of
+      Just _ -> pure game
+      Nothing -> do
+        mmsg <- pop
+        case mmsg of
+          Just msg -> do
+            overGame $ distribute msg
+            gameMain
+          Nothing -> pure game
 
 class Run a where
   distribute :: Message -> a -> GameT a
@@ -280,19 +284,26 @@ instance Run Game where
     OpenActionWindow trigger -> do
       current <- gets (.currentPlayer)
       let aw = ActionWindow {trigger, awaiting = NoPasses current}
-      modify \g -> g {actionWindow = Just aw}
+      modify \g ->
+        let stack' = aw : g.actionWindowStack
+         in g
+              { actionWindowStack = stack'
+              , actionWindow = Just aw
+              }
       logIt LogSystem
         "log.window.open"
         [("trigger", triggerParam trigger), ("player", playerParam current)]
     PassPriority k -> do
       g <- get
-      case g.actionWindow of
-        Just aw | priorityHolder aw.awaiting == k -> do
+      case g.actionWindowStack of
+        (aw : rest) | priorityHolder aw.awaiting == k -> do
           logIt LogPlayerAction "log.priority.pass" [("player", playerParam k)]
           case aw.awaiting of
             NoPasses _ -> do
               let aw' = aw {awaiting = OnePass k.next}
-              modify \gx -> gx {actionWindow = Just aw'}
+                  stack' = aw' : rest
+              modify \gx ->
+                gx {actionWindowStack = stack', actionWindow = Just aw'}
             OnePass _ ->
               -- Both players have now passed consecutively.
               send CloseActionWindow
@@ -302,14 +313,26 @@ instance Run Game where
         _ -> pure ()
     CloseActionWindow -> do
       g <- get
-      let trigger = (.trigger) <$> g.actionWindow
-      modify \gx -> gx {actionWindow = Nothing}
+      let (closed, rest) = case g.actionWindowStack of
+            (w : ws) -> (Just w, ws)
+            [] -> (Nothing, [])
+          trigger = (.trigger) <$> closed
+      modify \gx ->
+        gx
+          { actionWindowStack = rest
+          , actionWindow = case rest of
+              (w : _) -> Just w
+              [] -> Nothing
+          }
       logIt LogSystem "log.window.close" []
-      -- Phase windows end their phase. Combat sub-step windows
-      -- aren't opened today (see BeginCombat comment); when they
-      -- land, each trigger should dispatch to its AdvanceCombatTo*
-      -- counterpart here.
+      -- Combat sub-step windows advance to the next sub-step; the
+      -- top-of-stack phase window ends its phase.
       case trigger of
+        Just AfterDeclareCombatTarget -> send AdvanceCombatToAttackers
+        Just AfterDeclareAttackers -> send AdvanceCombatToDefenders
+        Just AfterDeclareDefenders -> send AdvanceCombatToAssign
+        Just AfterAssignCombatDamage -> send AdvanceCombatToApply
+        Just AfterApplyCombatDamage -> send EndCombat
         _ -> case g.phase of
           Just p -> send (EndPhase p)
           Nothing -> pure ()
@@ -930,6 +953,21 @@ instance Run Game where
           case cardDef.receive of
             Receive f -> f (TacticResolved pk code target) owner ctx
         _ -> pure ()
+    RequestPrompt p -> do
+      modify \g -> g {pendingPrompt = Just p}
+      logIt LogSystem
+        "log.prompt.opened"
+        [("player", playerParam p.player)]
+    ResolvePrompt result -> do
+      g <- get
+      case g.pendingPrompt of
+        Nothing -> pure ()
+        Just p -> do
+          modify \gx -> gx {pendingPrompt = Nothing}
+          logIt LogSystem
+            "log.prompt.resolved"
+            [("player", playerParam p.player)]
+          dispatchPromptCallback p.callback result
     TriggerCardAction pk srcKey idx target -> do
       g <- get
       case findActionSource srcKey g of
@@ -1205,20 +1243,18 @@ instance Run Game where
             logIt LogSystem
               "log.combat.rune_penalty"
               [("amount", T.pack (show penalty))]
-          -- TODO: rules-correct flow opens an action window after
-          -- each of the 5 combat steps (DeclareCombatTarget,
-          -- DeclareAttackers, DeclareDefenders, AssignDamage,
-          -- ApplyDamage). The window-stacking machinery isn't there
-          -- yet — auto-attack cards (Vicious Marauder) already fire
-          -- inside an open BattlefieldActionWindow, and combat
-          -- windows would clobber it. For now the engine threads
-          -- BeginCombat → DeclareDefenders → ResolveCombat
-          -- directly; Counterstrike, Scout, Rune of Fortitude, and
-          -- per-source corruption all still trigger at the right
-          -- conceptual steps.
-          send (DeclareDefenders autoDefenders)
-    AdvanceCombatToAttackers -> pure ()
-    AdvanceCombatToDefenders -> pure ()
+          -- Step 1 done (target + attackers committed). Open the
+          -- AfterDeclareCombatTarget window on top of the current
+          -- BattlefieldActionWindow; auto-pass for now since the
+          -- protocol doesn't surface combat decision points yet.
+          openAutoCombatWindow AfterDeclareCombatTarget
+    AdvanceCombatToAttackers ->
+      openAutoCombatWindow AfterDeclareAttackers
+    AdvanceCombatToDefenders -> do
+      g <- get
+      case g.combat of
+        Nothing -> pure ()
+        Just cs -> send (DeclareDefenders cs.defenders)
     DeclareDefenders defs -> do
       modify \gx -> case gx.combat of
         Just cs -> gx {combat = Just (cs {defenders = defs} :: CombatState)}
@@ -1247,66 +1283,34 @@ instance Run Game where
             )
             defenderUnits
         Nothing -> pure ()
-      send ResolveCombat
-    AdvanceCombatToAssign -> pure ()
-    AdvanceCombatToApply -> pure ()
+      openAutoCombatWindow AfterDeclareDefenders
+    AdvanceCombatToAssign -> do
+      -- Step 4: assignment. Compute per-defender allocations and
+      -- queue DealDamageToUnit messages. The damage-cancel window
+      -- (Defenders of the Faith, Master Rune of Valaya) opens
+      -- afterwards.
+      g <- get
+      case g.combat of
+        Nothing -> pure ()
+        Just cs -> assignCombatDamage g cs
+      openAutoCombatWindow AfterAssignCombatDamage
+    AdvanceCombatToApply ->
+      -- Step 5: damage actually lands. With the current pipeline
+      -- DealDamageToUnit is the apply, and we queued it in step 4,
+      -- so this window is just the response window. EndCombat
+      -- triggers from CloseActionWindow(AfterApplyCombatDamage).
+      openAutoCombatWindow AfterApplyCombatDamage
     ResolveCombat -> do
+      -- Legacy entry-point: the staged 5-step flow does this work
+      -- via AdvanceCombatToAssign (which queues damage) + window
+      -- closes (which advance to apply + end). Calling ResolveCombat
+      -- directly still works — it just runs assign + skips straight
+      -- to EndCombat without opening the response window.
       g <- get
       case g.combat of
         Nothing -> pure ()
         Just cs -> do
-          let attackerUnits =
-                [ u
-                | k <- cs.attackers
-                , Just u <- [findUnit k g]
-                ]
-              defenderUnits =
-                [ u
-                | k <- cs.defenders
-                , Just u <- [findUnit k g]
-                ]
-              -- Per-attacker contributions, split by cancel-status so
-              -- Toughness only eats into cancellable damage.
-              (attackerCanc, attackerUncanc) =
-                splitDamage g cs.attackingPlayer attackerUnits
-              (defenderCanc, defenderUncanc) =
-                splitDamage g cs.defendingPlayer defenderUnits
-          -- Apply attacker damage to defending units (cancellable first
-          -- so it absorbs Toughness, then uncancellable). Whatever's
-          -- left over spills onto the targeted zone.
-          (cRem, uRem) <-
-            applyDamageToUnitsSplit g attackerCanc attackerUncanc defenderUnits
-          let toZone = cRem + uRem
-          when (toZone > 0) $
-            send (DealDamageToZone cs.defendingPlayer cs.targetZone toZone)
-          -- Counterattack: defender damage soaks against attackers.
-          -- Defenders cannot damage the attacker's capital, so any
-          -- excess simply evaporates.
-          _ <-
-            applyDamageToUnitsSplit g defenderCanc defenderUncanc attackerUnits
-          logIt LogSystem
-            "log.combat.resolved"
-            [ ("attacker_damage", T.pack (show (attackerCanc + attackerUncanc)))
-            , ("defender_damage", T.pack (show (defenderCanc + defenderUncanc)))
-            ]
-          -- Scout: after damage is applied, every surviving Scout
-          -- participant forces the opposite side to discard one card
-          -- at random. Re-read units to see who's still in play.
-          gAfter <- get
-          let survivors keys =
-                [ u
-                | k <- keys
-                , Just u <- [findUnit k gAfter]
-                ]
-              scoutOf u = Scout `elem` u.cardDef.keywords
-              attackerScouts = filter scoutOf (survivors cs.attackers)
-              defenderScouts = filter scoutOf (survivors cs.defenders)
-          traverse_
-            (\_ -> send (DiscardRandomFromHand cs.defendingPlayer))
-            attackerScouts
-          traverse_
-            (\_ -> send (DiscardRandomFromHand cs.attackingPlayer))
-            defenderScouts
+          assignCombatDamage g cs
           send EndCombat
     EndCombat -> do
       g <- get
@@ -1575,6 +1579,8 @@ newGame deck1 deck2 = do
       , turn = Turn 0
       , phase = Nothing
       , actionWindow = Nothing
+      , actionWindowStack = []
+      , pendingPrompt = Nothing
       , modifiers = mempty
       , lifecycle = GameSetup
       , log = []
@@ -2055,6 +2061,108 @@ zoneAuraBonus g pk zone =
         , s.cardDef.code == CardCode "cataclysm-037"
         , s.zone == zone
         ]
+
+-- | Compute and queue per-defender / per-attacker damage assignments
+-- for the in-flight combat. Spillover to the targeted zone goes out
+-- via 'DealDamageToZone'. Scout post-combat discards queue here too,
+-- but they read damage state AFTER the queued damage applies (the
+-- queue is FIFO).
+assignCombatDamage :: Game -> CombatState -> StateT Game GameT ()
+assignCombatDamage g cs = do
+  let attackerUnits = [u | k <- cs.attackers, Just u <- [findUnit k g]]
+      defenderUnits = [u | k <- cs.defenders, Just u <- [findUnit k g]]
+      (attackerCanc, attackerUncanc) =
+        splitDamage g cs.attackingPlayer attackerUnits
+      (defenderCanc, defenderUncanc) =
+        splitDamage g cs.defendingPlayer defenderUnits
+  (cRem, uRem) <-
+    applyDamageToUnitsSplit g attackerCanc attackerUncanc defenderUnits
+  let toZone = cRem + uRem
+  when (toZone > 0) $
+    send (DealDamageToZone cs.defendingPlayer cs.targetZone toZone)
+  _ <- applyDamageToUnitsSplit g defenderCanc defenderUncanc attackerUnits
+  logIt LogSystem
+    "log.combat.resolved"
+    [ ("attacker_damage", T.pack (show (attackerCanc + attackerUncanc)))
+    , ("defender_damage", T.pack (show (defenderCanc + defenderUncanc)))
+    ]
+  -- Scout: every surviving Scout participant on each side forces the
+  -- opposite controller to discard one card at random. We queue
+  -- DiscardRandomFromHand for each scout; the discards process AFTER
+  -- the queued damage messages, so they see the post-damage state.
+  let scoutOf u = Scout `elem` u.cardDef.keywords
+      attackerScouts = filter scoutOf attackerUnits
+      defenderScouts = filter scoutOf defenderUnits
+  traverse_
+    (\_ -> send (DiscardRandomFromHand cs.defendingPlayer))
+    attackerScouts
+  traverse_
+    (\_ -> send (DiscardRandomFromHand cs.attackingPlayer))
+    defenderScouts
+
+-- | Open a combat sub-step window and immediately enqueue the two
+-- passes that close it. Real client interaction (Defenders of the
+-- Faith etc.) will eventually replace the auto-pass with a real
+-- prompt window; for now we maintain rules-correct structure
+-- without blocking the engine.
+openAutoCombatWindow :: ActionWindowTrigger -> StateT Game GameT ()
+openAutoCombatWindow trigger = do
+  send (OpenActionWindow trigger)
+  active <- gets (.currentPlayer)
+  send (PassPriority active)
+  send (PassPriority active.next)
+
+-- | Translate a resolved prompt into engine messages. Each callback
+-- knows the structure of its expected result (units to summon, unit
+-- to sacrifice, etc.) and is responsible for validating that the
+-- chosen targets pass the prompt's filter / count gates before
+-- firing the follow-up effect.
+dispatchPromptCallback
+  :: PromptCallback
+  -> PromptResult
+  -> StateT Game GameT ()
+dispatchPromptCallback cb result = case (cb, result) of
+  (CallbackIronThroneroomPayoff srcKey, PickUnits chosen) -> do
+    g <- get
+    case findSupport srcKey g of
+      Nothing -> pure ()
+      Just self -> do
+        let owner = lookupPlayer self.controller g
+            handKeySet = [c.key | c <- owner.hand]
+            discardKeySet = [c.key | c <- owner.discard]
+            picks = take 3 chosen
+            chaosUnitInList list k =
+              case [c | c <- list, c.key == k] of
+                (c : _) -> case c.def of
+                  UnitCardDef cd -> Chaos `elem` cd.races
+                  _ -> False
+                [] -> False
+            fromHand =
+              [ k
+              | k <- picks
+              , k `elem` handKeySet
+              , chaosUnitInList owner.hand k
+              ]
+            fromDiscard =
+              [ k
+              | k <- picks
+              , k `elem` discardKeySet
+              , chaosUnitInList owner.discard k
+              ]
+        traverse_
+          (\k -> send (PutUnitIntoPlay self.controller k KingdomZone))
+          fromHand
+        traverse_
+          (\k -> send (PutUnitIntoPlayFromDiscard self.controller k KingdomZone))
+          fromDiscard
+  (CallbackBloodthirsterSacrifice pk _, PickUnits (chosen : _)) -> do
+    g <- get
+    case findUnit chosen g of
+      Just u | u.controller == pk ->
+        send (DestroyUnit u.key)
+      _ -> pure ()
+  (CallbackBloodthirsterSacrifice _ _, PickNone) -> pure ()
+  _ -> pure ()
 
 -- | Fire post-combat "when this unit damages an enemy" effects. Read
 -- 'damagedInCurrentCombat' to know which units actually took damage,

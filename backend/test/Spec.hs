@@ -10,7 +10,7 @@ module Main (main) where
 
 import Invasion.Capital (Capital (..), Damage (..), Zone (..))
 import Invasion.Card (Card (..), SomeCardDef (..))
-import Invasion.CardDef (CardDef (..))
+import Invasion.CardDef (CardDef (..), Keyword (..))
 import Invasion.Engine
 import Invasion.Entity (UnitDetails (..))
 import Invasion.Game
@@ -216,28 +216,31 @@ inactivePlayer g = case g.currentPlayer of
 
 -- | Find the first Unit in a player's hand whose total cost (printed +
 -- loyalty surcharge, accounting for the player's capital race symbol)
--- is within that player's current resources. Returns the card's
--- in-hand key, printed code, and total effective cost.
+-- is within that player's current resources, and which doesn't carry
+-- Toughness (which would let the smoke's 1-damage test get cancelled
+-- entirely). Returns the card's in-hand key, printed code, and total
+-- effective cost.
 findPlayableUnit :: Player -> Maybe (UnitKey, CardCode, Int)
 findPlayableUnit p =
   let Resources budget = p.resources
   in go p.hand budget
   where
+    hasToughness cardDef =
+      any (\k -> case k of Toughness _ -> True; _ -> False) cardDef.keywords
     go [] _ = Nothing
     go (Card {key, def} : rest) budget = case def of
-      UnitCardDef cardDef ->
-        let printed = case cardDef.cost of
-              Fixed n -> n
-              Variable -> 1000
-            -- Capital provides one race symbol; no other in-play cards
-            -- exist at this point in the smoke, so it's the only
-            -- discount available.
-            symbolMatch = if p.race `elem` cardDef.races then 1 else 0
-            loyaltySurcharge = max 0 (cardDef.loyalty - symbolMatch)
-            total = printed + loyaltySurcharge
-         in if total <= budget
-              then Just (key, cardDef.code, total)
-              else go rest budget
+      UnitCardDef cardDef
+        | hasToughness cardDef -> go rest budget
+        | otherwise ->
+            let printed = case cardDef.cost of
+                  Fixed n -> n
+                  Variable -> 1000
+                symbolMatch = if p.race `elem` cardDef.races then 1 else 0
+                loyaltySurcharge = max 0 (cardDef.loyalty - symbolMatch)
+                total = printed + loyaltySurcharge
+             in if total <= budget
+                  then Just (key, cardDef.code, total)
+                  else go rest budget
       _ -> go rest budget
 
 check :: String -> Bool -> IO ()

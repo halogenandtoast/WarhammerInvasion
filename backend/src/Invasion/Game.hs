@@ -100,6 +100,71 @@ priorityHolder = \case
   NoPasses p -> p
   OnePass p -> p
 
+-- | A pending choice the engine is waiting for the client to resolve.
+-- gameMain pauses while one is set; the client posts a 'ResolvePrompt'
+-- message carrying a 'PromptResult', the engine clears the slot and
+-- fires the callback Message constructed from the result.
+data Prompt = Prompt
+  { player :: PlayerKey
+    -- ^ Which player is being asked. The wire layer should only
+    -- accept a resolution from this seat.
+  , kind :: PromptKind
+    -- ^ Static metadata describing what the player must pick. The
+    -- client renders this.
+  , callback :: PromptCallback
+    -- ^ Tag identifying which engine effect to fire once the player
+    -- has chosen.
+  }
+  deriving stock Show
+
+-- | What kind of choice the player has to make.
+data PromptKind
+  = ChooseUnits
+      { filterSpec :: PromptFilter
+      , minPick :: Int
+      , maxPick :: Int
+      , description :: Text
+      }
+    -- ^ Pick a list of units matching the filter, between min and max
+    -- entries (inclusive). 'min == 0' means the player may pass.
+  | ChooseSacrifice
+      { zone :: ZoneKind
+      , optional :: Bool
+      , description :: Text
+      }
+    -- ^ Pick one of your own units in the named zone to sacrifice.
+    -- 'optional' lets the player skip if no eligible target exists.
+  deriving stock Show
+
+-- | Predicate describing which units a 'ChooseUnits' prompt accepts.
+-- Kept as a tagged value (not a function) so it serializes onto the
+-- wire and the client can do its own filtering.
+data PromptFilter
+  = AnyOwnUnit
+    -- ^ Any unit the prompted player controls.
+  | OwnUnitsFromHandByRace Race
+    -- ^ Cards in the prompted player's hand whose CardDef carries the
+    -- named race. Used for Iron Throneroom's summon-from-hand half.
+  | OwnUnitsFromDiscardByRace Race
+    -- ^ Same as above but from discard.
+  | OwnUnitsFromHandOrDiscardByRace Race
+    -- ^ Union of hand and discard, filtered by race.
+  deriving stock Show
+
+-- | A tag identifying the engine continuation to invoke once the
+-- prompt resolves. Each constructor packages the source-card key (or
+-- whatever extra context the continuation needs) so the engine can
+-- locate the originating card.
+data PromptCallback
+  = CallbackIronThroneroomPayoff UnitKey
+    -- ^ The Iron Throneroom's UnitKey. Result: up to 3 in-hand /
+    -- in-discard CardKeys to summon for free into the kingdom.
+  | CallbackBloodthirsterSacrifice PlayerKey UnitKey
+    -- ^ (Sacrificing player, Bloodthirster's UnitKey). Result: one
+    -- of the sacrificing player's units in the Bloodthirster's
+    -- corresponding zone (or none if no eligible unit exists).
+  deriving stock Show
+
 -- | A scheduled effect that fires at a specific trigger.
 data PendingEffect
   = PEDealDamageToUnit UnitKey Int
@@ -167,7 +232,15 @@ data Game = Game
     -- ^ 'Nothing' before the first 'BeginTurn'; otherwise the phase
     -- currently being processed.
   , actionWindow :: Maybe ActionWindow
-    -- ^ 'Just' when the engine is paused awaiting player passes.
+    -- ^ Top of the action-window stack — the window 'PassPriority'
+    -- is currently directed at. Always equal to @listToMaybe
+    -- actionWindowStack@; kept denormalized so existing wire
+    -- clients can keep reading a single window.
+  , actionWindowStack :: [ActionWindow]
+    -- ^ Stack of currently-open action windows. The head is the
+    -- topmost window; OpenActionWindow pushes, CloseActionWindow
+    -- pops. Combat sub-step windows live on top of the
+    -- BattlefieldActionWindow that opened them.
   , modifiers :: Map (Ref Target) [Modifier]
   , lifecycle :: GameState
     -- ^ Named 'lifecycle' (not 'state') because 'Player' also has a
@@ -229,7 +302,23 @@ data Game = Game
     -- currently-active combat. Reset on 'BeginCombat'; consulted at
     -- 'EndCombat' to fire "when this unit damages an enemy" effects
     -- (Plaguebearers, Beasts of Nurgle).
+  , pendingPrompt :: Maybe Prompt
+    -- ^ When 'Just', the engine is waiting for the named player to
+    -- post a 'ResolvePrompt' carrying their choice. 'gameMain'
+    -- returns early as long as this is set, leaving the queue
+    -- partially-drained so the wire layer can push the state and
+    -- wait for the client's response.
   }
+  deriving stock Show
+
+-- | Concrete answer the client posts back with 'ResolvePrompt'.
+data PromptResult
+  = PickUnits [UnitKey]
+    -- ^ List of chosen unit keys (in-play, in-hand, or in-discard
+    -- depending on the prompt). The engine validates against the
+    -- prompt's filter / bounds before firing the callback.
+  | PickNone
+    -- ^ Player declined / no eligible target.
   deriving stock Show
 
 instance HasField "over" Game Bool where
@@ -287,6 +376,11 @@ mconcat
   , deriveToJSON defaultOptions ''LogEntry
   , deriveToJSON defaultOptions ''PendingEffect
   , deriveToJSON defaultOptions ''CombatState
+  , deriveToJSON defaultOptions ''PromptFilter
+  , deriveToJSON defaultOptions ''PromptKind
+  , deriveToJSON defaultOptions ''PromptCallback
+  , deriveToJSON defaultOptions ''Prompt
+  , deriveJSON defaultOptions ''PromptResult
   , deriveToJSON defaultOptions ''Game
   , deriveToJSON defaultOptions ''GameState
   ]

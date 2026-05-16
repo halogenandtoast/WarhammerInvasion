@@ -3,7 +3,7 @@
 module Invasion.Message (module Invasion.Message) where
 
 import Invasion.CardDef (ActionTarget)
-import Invasion.Game (ActionWindowTrigger)
+import Invasion.Game (ActionWindowTrigger, Prompt, PromptResult)
 import Invasion.Modifier (Modifier, ModifierScope)
 import Invasion.Player (Drawing, EliminationReason)
 import Invasion.Prelude
@@ -137,6 +137,15 @@ data Message where
     -- tactic's CardDef.receive is invoked with this message; cards
     -- like Berserk Fury and Blood for the Blood God react here. The
     -- 'ActionTarget' carries the choice from 'PlayTactic'.
+  -- Prompts
+  RequestPrompt :: Prompt -> Message
+    -- ^ Suspend the engine with the given prompt. 'gameMain' will
+    -- return as long as 'Game.pendingPrompt' is set, allowing the
+    -- wire layer to push the state to the client.
+  ResolvePrompt :: PromptResult -> Message
+    -- ^ Carry the prompted player's answer back into the engine.
+    -- Clears 'Game.pendingPrompt' and fires the callback specified
+    -- by the prompt.
   -- Card action abilities
   TriggerCardAction :: PlayerKey -> UnitKey -> Int -> ActionTarget -> Message
     -- ^ Trigger the indexed action ability on an in-play card. The

@@ -990,21 +990,31 @@ bloodthirster = unit "core-092" "Bloodthirster" do
   body
     "Damage cannot be cancelled.\n\
     \Forced: After your turn begins, each player must sacrifice a unit in this corresponding zone."
-  -- Auto-targeting: the engine doesn't surface a player choice yet, so
-  -- on each player's turn-begin we sacrifice the first unit found in
-  -- the matching zone for each player. Real targeting waits on the
-  -- action-prompt iteration.
+  -- "Each player must sacrifice a unit in this corresponding zone"
+  -- — each player gets prompted to pick one of their own units in
+  -- the Bloodthirster's zone. If a player has no eligible unit, the
+  -- prompt resolves to PickNone (controller can post that
+  -- immediately on the wire). Prompts queue in player order; the
+  -- engine pauses at each.
   onReceive $ Receive \msg _owner self -> case msg of
-    BeginTurn _turnOwner
-      | _turnOwner == self.controller -> do
-          g <- getGame
-          let pick pk = firstUnitOfInZone pk self.zone g
-          case pick Player1 of
-            Just u -> push (DestroyUnit u.key)
-            Nothing -> pure ()
-          case pick Player2 of
-            Just u -> push (DestroyUnit u.key)
-            Nothing -> pure ()
+    BeginTurn turnOwner
+      | turnOwner == self.controller -> do
+          let promptFor pk =
+                push
+                  ( RequestPrompt Prompt
+                      { player = pk
+                      , kind =
+                          ChooseSacrifice
+                            { zone = self.zone
+                            , optional = False
+                            , description =
+                                "Sacrifice one of your units in this zone."
+                            }
+                      , callback = CallbackBloodthirsterSacrifice pk self.key
+                      }
+                  )
+          promptFor Player1
+          promptFor Player2
     _ -> pure ()
 
 bloodForTheBloodGod :: CardDef Tactic
@@ -1344,37 +1354,27 @@ ironThroneroom = support "the-inevitable-city-013" "Iron Throneroom" do
     BeginTurn turnOwner
       | turnOwner == self.controller && self.tokens > 0 -> do
           push (AdjustSupportTokens self.key (-1))
-          -- If this tick is going to land us at 0 tokens, immediately
-          -- schedule the summon of up to 3 Chaos units. We pick from
-          -- the controller's hand snapshot (taken pre-receive); 'owner'
-          -- carries that hand.
-          when (self.tokens == 1) $ do
-            -- Walk by card-instance so we forward the in-hand /
-            -- in-discard 'UnitKey' (not the code) to
-            -- 'PutUnitIntoPlay' / 'PutUnitIntoPlayFromDiscard'. We
-            -- prefer hand picks first, then top up from discard, up
-            -- to 3 total.
-            let chaosHandKeys =
-                  [ c.key
-                  | c <- owner.hand
-                  , UnitCardDef cd <- pure c.def
-                  , Chaos `elem` cd.races
-                  ]
-                chaosDiscardKeys =
-                  [ c.key
-                  | c <- owner.discard
-                  , UnitCardDef cd <- pure c.def
-                  , Chaos `elem` cd.races
-                  ]
-                handPicks = take 3 chaosHandKeys
-                slotsLeft = 3 - length handPicks
-                discardPicks = take slotsLeft chaosDiscardKeys
-            traverse_
-              (\k -> push (PutUnitIntoPlay self.controller k KingdomZone))
-              handPicks
-            traverse_
-              (\k -> push (PutUnitIntoPlayFromDiscard self.controller k KingdomZone))
-              discardPicks
+          -- On the transition to 0 tokens, prompt the controller for
+          -- up to 3 Chaos unit cards from hand or discard. The
+          -- engine's CallbackIronThroneroomPayoff handler routes
+          -- hand picks through PutUnitIntoPlay and discard picks
+          -- through PutUnitIntoPlayFromDiscard.
+          when (self.tokens == 1) $
+            push
+              ( RequestPrompt Prompt
+                  { player = self.controller
+                  , kind =
+                      ChooseUnits
+                        { filterSpec =
+                            OwnUnitsFromHandOrDiscardByRace Chaos
+                        , minPick = 0
+                        , maxPick = 3
+                        , description =
+                            "Choose up to 3 Chaos units from your hand or discard pile to put into play."
+                        }
+                  , callback = CallbackIronThroneroomPayoff self.key
+                  }
+              )
     _ -> pure ()
 
 raidingCamps :: CardDef Quest
