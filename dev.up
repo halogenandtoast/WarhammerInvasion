@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# dev.up — start backend + frontend together on free ports.
+#
+# Picks the lowest free TCP port at or above each preferred starting point,
+# runs the Haskell server with PORT=<backend>, and runs Vite with
+# BACKEND_PORT=<backend> --port <frontend> --strictPort so the proxy target
+# matches the actual backend.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+FRONTEND_DIR="$ROOT_DIR/frontend"
+
+BACKEND_PORT_PREF="${BACKEND_PORT_PREF:-3000}"
+FRONTEND_PORT_PREF="${FRONTEND_PORT_PREF:-5173}"
+PORT_SCAN_LIMIT="${PORT_SCAN_LIMIT:-50}"
+
+port_in_use() {
+  local port=$1
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    # Fallback: try to bind via bash's /dev/tcp; success means something accepted.
+    (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1
+  fi
+}
+
+find_free_port() {
+  local start=$1
+  local label=$2
+  local port=$start
+  local end=$((start + PORT_SCAN_LIMIT))
+  while [ "$port" -lt "$end" ]; do
+    if ! port_in_use "$port"; then
+      echo "$port"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+  echo "dev.up: no free $label port in [$start, $end)" >&2
+  return 1
+}
+
+BACKEND_PORT=$(find_free_port "$BACKEND_PORT_PREF" backend)
+FRONTEND_PORT=$(find_free_port "$FRONTEND_PORT_PREF" frontend)
+
+BACKEND_PID=""
+FRONTEND_PID=""
+
+cleanup() {
+  local code=$?
+  trap - INT TERM EXIT
+  if [ -n "$FRONTEND_PID" ] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    kill "$FRONTEND_PID" 2>/dev/null || true
+  fi
+  if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+    kill "$BACKEND_PID" 2>/dev/null || true
+  fi
+  if [ -n "$FRONTEND_PID" ]; then wait "$FRONTEND_PID" 2>/dev/null || true; fi
+  if [ -n "$BACKEND_PID" ];  then wait "$BACKEND_PID"  2>/dev/null || true; fi
+  exit "$code"
+}
+trap cleanup INT TERM EXIT
+
+echo "dev.up: backend  → http://localhost:$BACKEND_PORT"
+echo "dev.up: frontend → http://localhost:$FRONTEND_PORT (proxying /api to backend)"
+
+(
+  cd "$BACKEND_DIR"
+  PORT="$BACKEND_PORT" exec stack exec WarhammerInvasion-exe
+) &
+BACKEND_PID=$!
+
+(
+  cd "$FRONTEND_DIR"
+  BACKEND_PORT="$BACKEND_PORT" exec npm run dev -- --port "$FRONTEND_PORT" --strictPort
+) &
+FRONTEND_PID=$!
+
+# Exit as soon as either process dies; cleanup trap will reap the other.
+while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do
+  wait -n "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || break
+done

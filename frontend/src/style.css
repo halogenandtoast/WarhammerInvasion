@@ -1,11 +1,21 @@
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  line-height: 1.55;
   font-weight: 400;
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  background-color: #1c1c1f;
+
+  --bg: #1c1c1f;
+  --bg-elev: #232328;
+  --bg-elev-2: #2b2b31;
+  --fg: rgba(255, 255, 255, 0.87);
+  --fg-dim: rgba(255, 255, 255, 0.6);
+  --fg-faint: rgba(255, 255, 255, 0.42);
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #c4634a;
+  --accent-strong: #e0775e;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -13,67 +23,63 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+* {
+  box-sizing: border-box;
 }
-a:hover {
-  color: #535bf2;
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100dvh;
+  background: var(--bg);
 }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-.card {
-  padding: 2em;
 }
 
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  min-height: 100dvh;
+}
+
+a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.2;
+  margin: 0;
+}
+
+code,
+kbd {
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  background: var(--bg-elev-2);
+  padding: 0.08em 0.36em;
+  border-radius: 4px;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
+    color: #1c1c1f;
+    background-color: #f6f5f1;
+    --bg: #f6f5f1;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #eceae3;
+    --fg: #1c1c1f;
+    --fg-dim: #4a4a52;
+    --fg-faint: #7d7d85;
+    --border: rgba(0, 0, 0, 0.12);
+    --accent: #a44229;
+    --accent-strong: #8b3621;
   }
 }
