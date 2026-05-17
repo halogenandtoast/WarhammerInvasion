@@ -74,9 +74,26 @@ mkCard k d = Card {key = k, def = d}
 newtype CardBuilder k a = CardBuilder (State (CardDef k) a)
   deriving newtype (Functor, Applicative, Monad, MonadState (CardDef k))
 
-emptyCardDef :: CardCode -> String -> CardKind -> CardDef k
+emptyCardDef :: forall k. HasDefaultExtras k => CardCode -> String -> CardKind -> CardDef k
 emptyCardDef code title kind =
-  CardDef code title kind [] (Fixed 0) 0 0 Nothing [] Nothing Nothing [] False [] noReceive
+  CardDef
+    code
+    title
+    kind
+    []
+    (Fixed 0)
+    0
+    0
+    Nothing
+    []
+    Nothing
+    Nothing
+    []
+    False
+    []
+    noReceive
+    (defaultExtras @k)
+    (\_ _ -> 0)
 
 unit :: CardCode -> String -> CardBuilder Unit () -> CardDef Unit
 unit code title = buildCard $ (emptyCardDef code title Unit) {CardDef.hitPoints = Just (Fixed 1)}
@@ -188,6 +205,107 @@ battlefieldOnly = keyword BattlefieldOnly
 -- (set by 'emptyCardDef') is 'noReceive' — a no-op.
 onReceive :: Receive k -> CardBuilder k ()
 onReceive r = modify \cardDef -> cardDef {receive = r}
+
+-- ---------------------------------------------------------------------
+-- Extras builders
+--
+-- The engine reads kind-specific 'extras' fields instead of casing on a
+-- card's 'code'. Each helper below sets a single slice; absence keeps
+-- the corresponding default from 'defaultExtras' (no-op for that
+-- behavior).
+-- ---------------------------------------------------------------------
+
+modifyUnitExtras :: (UnitExtras -> UnitExtras) -> CardBuilder Unit ()
+modifyUnitExtras f =
+  modify \cd -> cd {extras = f cd.extras}
+
+modifySupportExtras :: (SupportExtras -> SupportExtras) -> CardBuilder Support ()
+modifySupportExtras f =
+  modify \cd -> cd {extras = f cd.extras}
+
+-- | Game-state-derived self power bonus (Troll Slayers, Korhil, …).
+selfPower :: (Game -> UnitDetails -> Int) -> CardBuilder Unit ()
+selfPower f = modifyUnitExtras \e -> e {selfPowerBonus = f}
+
+-- | Extra combat damage this unit deals (Lord of Khorne, Gorbad).
+combatPower :: (Game -> UnitDetails -> Int) -> CardBuilder Unit ()
+combatPower f = modifyUnitExtras \e -> e {combatPowerBonus = f}
+
+-- | Power this unit grants to other in-play units (Karl Franz, Templar
+-- of Sigmar). Args to @f@: game, this unit, target unit.
+unitAura :: (Game -> UnitDetails -> UnitDetails -> Int) -> CardBuilder Unit ()
+unitAura f = modifyUnitExtras \e -> e {unitAuraPower = f}
+
+-- | Predicate gating attacker eligibility (Sworn of Khorne).
+canAttack :: (Game -> PlayerKey -> ZoneKind -> UnitDetails -> Bool) -> CardBuilder Unit ()
+canAttack f = modifyUnitExtras \e -> e {canAttackZone = f}
+
+-- | Per-turn damage cap (Daemonettes of Slaanesh).
+perTurnDamageCap :: Int -> CardBuilder Unit ()
+perTurnDamageCap n = modifyUnitExtras \e -> e {damageCap = Just n}
+
+-- | Mark the unit as corrupting any enemy it deals non-zero combat
+-- damage to (Plaguebearers of Nurgle, Beasts of Nurgle).
+corruptsOnDamage :: CardBuilder Unit ()
+corruptsOnDamage = modifyUnitExtras \e -> e {corruptsOnCombatDamage = True}
+
+-- | Extra resources a non-controller must spend to target this unit
+-- (King Kazador).
+targetTax :: (Game -> PlayerKey -> UnitDetails -> Int) -> CardBuilder Unit ()
+targetTax f = modifyUnitExtras \e -> e {extraTargetTax = f}
+
+-- | Multiplier on ALL applied damage while this unit is in play
+-- (Bloodletter).
+damageMultiplier :: Int -> CardBuilder Unit ()
+damageMultiplier n = modifyUnitExtras \e -> e {damageMultiplierWhileInPlay = n}
+
+-- | Self-cost adjustment when playing this card (Bloodcrusher: -1
+-- per burning zone). May be negative.
+selfCostAdjust :: (Game -> PlayerKey -> Int) -> CardBuilder k ()
+selfCostAdjust f = modify \cd -> cd {selfCostAdjustment = f}
+
+-- | Static power contribution while attached (Daemonsword, Banner of
+-- Sigmar, …).
+attachmentPower :: Int -> CardBuilder Support ()
+attachmentPower n = modifySupportExtras \e -> e {attachmentPowerBonus = n}
+
+-- | Static HP contribution while attached (Daemonsword).
+attachmentHp :: Int -> CardBuilder Support ()
+attachmentHp n = modifySupportExtras \e -> e {attachmentHPBonus = n}
+
+-- | While attached, the host unit's combat damage is uncancellable
+-- (Hammer of Sigmar).
+grantsUncancellable :: CardBuilder Support ()
+grantsUncancellable =
+  modifySupportExtras \e -> e {grantsUncancellableDamage = True}
+
+-- | Power this support grants to a unit (Iron Tower, Cauldron of
+-- Blood, Da Bad Moon static slice).
+supportAura :: (Game -> SupportDetails -> UnitDetails -> Int) -> CardBuilder Support ()
+supportAura f = modifySupportExtras \e -> e {supportAuraPower = f}
+
+-- | Extra combat damage this support adds to a unit (Rift of Battle,
+-- Organ Gun while defending, Da Bad Moon and Big Boss's Banner for Orc
+-- attackers).
+supportCombat :: (Game -> SupportDetails -> UnitDetails -> Int) -> CardBuilder Support ()
+supportCombat f = modifySupportExtras \e -> e {supportCombatBonus = f}
+
+-- | Bonus power this support contributes to a zone of its controller
+-- (Lighthouse of Lothern, Rift of Chaos).
+zonePowerAura :: (Game -> SupportDetails -> ZoneKind -> Int) -> CardBuilder Support ()
+zonePowerAura f = modifySupportExtras \e -> e {zonePowerBonus = f}
+
+-- | Cost-of-play adjustment this support imposes on other cards being
+-- played (Imperial Crown, Master Rune of Dismay).
+globalCostAdjust
+  :: (Game -> SupportDetails -> PlayerKey -> CardCodeFilter -> Int)
+  -> CardBuilder Support ()
+globalCostAdjust f = modifySupportExtras \e -> e {globalCostAdjustment = f}
+
+-- | Mark the printed Rune of Fortitude effect on this support.
+imposesRuneOfFortitudeTax :: CardBuilder Support ()
+imposesRuneOfFortitudeTax =
+  modifySupportExtras \e -> e {runeOfFortitudeTax = True}
 
 -- | Append an 'ActionDef' to the card's action list. Multiple actions
 -- can be declared; the engine surfaces them to the client by index.
@@ -317,8 +435,7 @@ legendOf pk g = case filter (\l -> l.controller == pk) g.legends of
 
 -- | Total number of currently-burning zones across both capitals. Used
 -- by Chaos cards that scale with burning (Bloodcrusher, Lord of Khorne,
--- Rift of Chaos, Durgnar). Not yet wired into cost / power calculation
--- — see the per-card TODOs.
+-- Rift of Chaos, Durgnar).
 burningZoneCount :: Game -> Int
 burningZoneCount g =
   length
@@ -327,6 +444,48 @@ burningZoneCount g =
     , z <- p.capital.zones
     , z.burning
     ]
+
+-- | Number of facedown developments in the named unit's zone. Read by
+-- Toughness X and a couple of dev-scaling cards (Troll Slayers,
+-- Ironbreakers of Ankhor).
+devsInZone :: Game -> UnitDetails -> Int
+devsInZone g u =
+  let player = case u.controller of
+        Player1 -> g.player1
+        Player2 -> g.player2
+      Developments d = case u.zone of
+        KingdomZone -> player.capital.kingdom.developments
+        QuestZone -> player.capital.quest.developments
+        BattlefieldZone -> player.capital.battlefield.developments
+   in d
+
+-- | True iff any section of @pk@'s capital is currently burning.
+controllerBurning :: Game -> PlayerKey -> Bool
+controllerBurning g pk =
+  let p = case pk of
+        Player1 -> g.player1
+        Player2 -> g.player2
+   in any (.burning) p.capital.zones
+
+-- | True iff the unit is currently declared as an attacker in the
+-- in-flight combat. Returns False outside combat.
+unitIsAttacking :: Game -> UnitDetails -> Bool
+unitIsAttacking g u = case g.combat of
+  Just cs -> u.key `elem` cs.attackers
+  Nothing -> False
+
+-- | True iff the unit is currently declared as a defender. Returns False
+-- outside combat.
+unitIsDefending :: Game -> UnitDetails -> Bool
+unitIsDefending g u = case g.combat of
+  Just cs -> u.key `elem` cs.defenders
+  Nothing -> False
+
+-- | Every in-play support, whether free-standing in 'Game.supports' or
+-- attached to a unit. Used when an effect needs to consult every
+-- support regardless of attachment status.
+allInPlaySupports :: Game -> [SupportDetails]
+allInPlaySupports g = g.supports ++ concatMap (.attachments) g.units
 
 allCards :: Map CardCode SomeCardDef
 allCards =
@@ -512,10 +671,6 @@ allCards =
     , ("core-155", TacticCardDef coldBloodedSlaughter)
     ]
 
--- The +2-power-while-≥2-developments effect is wired in
--- 'Invasion.Engine.selfScalingPowerBonus'; recomputeUnitStats
--- consults it after every message so the bonus stays in sync with
--- the live development count.
 trollSlayers :: CardDef Unit
 trollSlayers = unit "core-004" "Troll Slayers" do
   race Dwarf
@@ -526,6 +681,7 @@ trollSlayers = unit "core-004" "Troll Slayers" do
   trait Slayer
   body
     "Battlefield. This unit gains {power}{power} while you have at least two developments in this zone."
+  selfPower \g u -> if devsInZone g u >= 2 then 2 else 0
 
 runesmith :: CardDef Unit
 runesmith = unit "core-005" "Runesmith" do
@@ -551,8 +707,6 @@ runesmith = unit "core-005" "Runesmith" do
         _ -> pure ()
     }
 
--- The +2-power-while-burning effect is wired in
--- 'Invasion.Engine.selfScalingPowerBonus'.
 durgnarTheBold :: CardDef Unit
 durgnarTheBold = unit "core-006" "Durgnar the Bold" do
   unique
@@ -564,6 +718,7 @@ durgnarTheBold = unit "core-006" "Durgnar the Bold" do
   traits [Hero, Warrior]
   body
     "Limit one Hero per zone.\nThis unit gains {power}{power} while one section of your capital is burning."
+  selfPower \g u -> if controllerBurning g u.controller then 2 else 0
 
 kingKazador :: CardDef Unit
 kingKazador = unit "core-007" "King Kazador" do
@@ -577,6 +732,7 @@ kingKazador = unit "core-007" "King Kazador" do
   body
     "Limit one Hero per zone.\nToughness 2.\nOpponents cannot target this unit with card effects unless they pay an additional 3 resources per effect."
   toughness 2
+  targetTax \_g caster self -> if caster /= self.controller then 3 else 0
 
 dwarfCannonCrew :: CardDef Unit
 dwarfCannonCrew = unit "core-008" "Dwarf Cannon Crew" do
@@ -681,6 +837,7 @@ runeOfFortitude = support "core-013" "Rune of Fortitude" do
   loyalty 1
   trait Rune
   body "Each unit attacking this zone loses {power} unless its controller pays 1 resource per unit."
+  imposesRuneOfFortitudeTax
 
 keystoneForge :: CardDef Support
 keystoneForge = support "core-014" "Keystone Forge" do
@@ -705,6 +862,8 @@ organGun = support "core-015" "Organ Gun" do
   traits [Attachment, Weapon]
   body "Attach to a target unit.\n Attached unit gains {power}{power} while defending."
   flavor "A dwarf device deadly and reliable forever."
+  supportCombat \g s u ->
+    if s.attachedTo == Just u.key && unitIsDefending g u then 2 else 0
 
 masterRuneOfDismay :: CardDef Support
 masterRuneOfDismay = support "core-016" "Master Rune of Dismay" do
@@ -714,6 +873,8 @@ masterRuneOfDismay = support "core-016" "Master Rune of Dismay" do
   trait Rune
   body "Kingdom. Opponent's units cost 1 additional resource to play."
   flavor "Enemies of the dwarfs beware, your fears are returned to you a hundredfold!"
+  globalCostAdjust \_g s playing _filter ->
+    if playing /= s.controller && s.zone == KingdomZone then 1 else 0
 
 aGloriousDeath :: CardDef Quest
 aGloriousDeath = quest "core-017" "A Glorious Death" do
@@ -1088,6 +1249,7 @@ bloodletter = unit "legends-031" "Bloodletter" do
   hitPoints 3
   trait Daemon
   body "Double all damage assigned to units as it is being assigned."
+  damageMultiplier 2
 
 bloodsworn :: CardDef Unit
 bloodsworn = unit "path-of-the-zealot-031" "Bloodsworn" do
@@ -1115,6 +1277,7 @@ bloodcrusher = unit "cataclysm-034" "Bloodcrusher" do
   hitPoints 5
   trait Daemon
   body "Lower the cost to play this unit by 1 for each burning zone."
+  selfCostAdjust \g _pk -> negate (burningZoneCount g)
 
 swornOfKhorne :: CardDef Unit
 swornOfKhorne = unit "fragments-of-power-031" "Sworn of Khorne" do
@@ -1126,6 +1289,14 @@ swornOfKhorne = unit "fragments-of-power-031" "Sworn of Khorne" do
   trait Warrior
   keyword BattlefieldOnly
   body "Battlefield only. This unit cannot attack unless the defending zone has at least 1 corrupted unit."
+  canAttack \g defender zone _u ->
+    any
+      ( \v ->
+          v.controller == defender
+            && v.zone == zone
+            && v.corrupted
+      )
+      g.units
 
 viciousMarauder :: CardDef Unit
 viciousMarauder = unit "the-fourth-waystone-091" "Vicious Marauder" do
@@ -1241,6 +1412,7 @@ skulltaker = unit "faith-and-steel-113" "Skulltaker" do
   body
     "This unit gains {power} for each experience attached to it. \
     \Action: When an opponent's unit leaves play, spend 1 resource to attach it facedown to this unit as an experience."
+  selfPower \_g u -> length u.experiences
   -- When an opponent's unit leaves play, ask Skulltaker's controller
   -- whether to pay 1 resource to attach it as an experience. The
   -- engine blocks until the controller answers; on yes (and still
@@ -1276,6 +1448,7 @@ lordOfKhorne = unit "cataclysm-033" "Lord of Khorne" do
   hitPoints 3
   trait Warrior
   body "This unit deals +1 damage in combat for each burning zone."
+  combatPower \g _u -> burningZoneCount g
 
 berserkFury :: CardDef Tactic
 berserkFury = tactic "the-warpstone-chronicles-094" "Berserk Fury" do
@@ -1311,9 +1484,9 @@ daemonsword = support "the-warpstone-chronicles-095" "Daemonsword" do
   body
     "Attach to a target {chaos} unit. Corrupt that unit. \
     \Attached unit gains 3 Power and gets +2 Hit Points."
-  -- On entering play, corrupt the host. The +3 power / +2 HP buff
-  -- waits on the modifier-recompute iteration; for now the body text
-  -- documents the unmet half.
+  attachmentPower 3
+  attachmentHp 2
+  -- On entering play, corrupt the host.
   onReceive $ Receive \msg _owner self -> case msg of
     SupportEnteredPlay _pk key
       | key == self.key
@@ -1347,6 +1520,7 @@ markOfChaos = support "omens-of-ruin-013" "Mark of Chaos" do
   body
     "Attach to a target unit. Attached unit gains {power}{power}. \
     \Forced: At the beginning of your turn, attached unit takes 1 uncancellable damage."
+  attachmentPower 2
   -- The +2 power half waits on dynamic modifiers; for now wire the
   -- turn-start damage tick on the host's controller's turn.
   onReceive $ Receive \msg _owner self -> case msg of
@@ -1486,6 +1660,7 @@ riftOfBattle = support "the-accursed-dead-052" "Rift of Battle" do
   loyalty 2
   trait Rift
   body "Units in all corresponding zones deal +1 damage in combat."
+  supportCombat \_g _s _u -> 1
 
 riftOfChaos :: CardDef Support
 riftOfChaos = support "cataclysm-037" "Rift of Chaos" do
@@ -1495,6 +1670,8 @@ riftOfChaos = support "cataclysm-037" "Rift of Chaos" do
   power 1
   trait Rift
   body "This card gains {power} for each burning zone."
+  zonePowerAura \g s zone ->
+    if s.zone == zone then burningZoneCount g else 0
 
 recklessAttack :: CardDef Tactic
 recklessAttack = tactic "days-of-blood-018" "Reckless Attack" do
@@ -1590,6 +1767,14 @@ templarOfSigmar = unit "core-028" "Templar of Sigmar" do
   hitPoints 2
   traits [Warrior, Priest]
   body "Battlefield. Your other Warrior units gain {power} while in this zone."
+  unitAura \_g self target ->
+    if self.zone == BattlefieldZone
+       && target.zone == BattlefieldZone
+       && self.controller == target.controller
+       && target.key /= self.key
+       && Warrior `elem` target.cardDef.traits
+       then 1
+       else 0
 
 witchHunter :: CardDef Unit
 witchHunter = unit "core-029" "Witch Hunter" do
@@ -1691,6 +1876,12 @@ karlFranz = unit "core-035" "Karl Franz" do
   body
     "Limit one Hero per zone.\n\
     \Your other Empire units gain {power}."
+  unitAura \_g self target ->
+    if self.controller == target.controller
+       && target.key /= self.key
+       && Empire `elem` target.cardDef.races
+       then 1
+       else 0
 
 volkmarTheGrim :: CardDef Unit
 volkmarTheGrim = unit "core-036" "Volkmar the Grim" do
@@ -1769,6 +1960,13 @@ theImperialCrown = support "core-041" "The Imperial Crown" do
   power 2
   trait CapitalCenter
   body "Kingdom. Your Empire heroes cost 1 less to play."
+  globalCostAdjust \_g s playing tgt ->
+    if playing == s.controller
+       && s.zone == KingdomZone
+       && Empire `elem` tgt.cfRaces
+       && Hero `elem` tgt.cfTraits
+       then -1
+       else 0
 
 hammerOfSigmar :: CardDef Support
 hammerOfSigmar = support "core-042" "The Hammer of Sigmar" do
@@ -1777,6 +1975,8 @@ hammerOfSigmar = support "core-042" "The Hammer of Sigmar" do
   loyalty 2
   traits [Attachment, Weapon]
   body "Attach to a target Empire unit. Attached unit gains {power}{power}; its damage cannot be cancelled."
+  attachmentPower 2
+  grantsUncancellable
 
 bannerOfSigmar :: CardDef Support
 bannerOfSigmar = support "core-043" "Banner of Sigmar" do
@@ -1785,6 +1985,7 @@ bannerOfSigmar = support "core-043" "Banner of Sigmar" do
   loyalty 2
   trait Attachment
   body "Attach to a target unit. Attached unit gains {power}."
+  attachmentPower 1
 
 altdorf :: CardDef Support
 altdorf = support "core-044" "Altdorf" do
@@ -2048,6 +2249,14 @@ korhil = unit "core-061" "Korhil" do
   body
     "Limit one Hero per zone.\n\
     \Battlefield. This unit gains {power} for each other White Lion unit you control."
+  selfPower \g u ->
+    length
+      [ ()
+      | v <- g.units
+      , v.controller == u.controller
+      , v.key /= u.key
+      , v.cardDef.code == CardCode "core-052"
+      ]
 
 loremasterOfHoeth :: CardDef Unit
 loremasterOfHoeth = unit "core-062" "Loremaster of Hoeth" do
@@ -2102,6 +2311,8 @@ lighthouseOfLothern = support "core-066" "The Lighthouse of Lothern" do
   power 2
   trait CapitalCenter
   body "Quest. Your quest zone gains +1 power."
+  zonePowerAura \_g s zone ->
+    if s.zone == QuestZone && zone == QuestZone then 1 else 0
 
 bannerOfAvelorn :: CardDef Support
 bannerOfAvelorn = support "core-067" "Banner of Avelorn" do
@@ -2110,6 +2321,7 @@ bannerOfAvelorn = support "core-067" "Banner of Avelorn" do
   loyalty 2
   trait Attachment
   body "Attach to a target High Elf unit. Attached unit gains {power}{power}."
+  attachmentPower 2
 
 bowOfAvelorn :: CardDef Support
 bowOfAvelorn = support "core-068" "Bow of Avelorn" do
@@ -2280,9 +2492,7 @@ plaguebearersOfNurgle = unit "core-085" "Plaguebearers of Nurgle" do
   hitPoints 4
   trait Daemon
   body "Forced: When this unit damages an enemy unit in combat, corrupt that unit."
-  -- Engine-handled: firePerSourceCombatEffects at 'EndCombat' walks
-  -- the damagedInCurrentCombat list and corrupts every enemy that
-  -- took damage in any combat this unit participated in.
+  corruptsOnDamage
 
 festeringNurglings :: CardDef Unit
 festeringNurglings = unit "core-086" "Festering Nurglings" do
@@ -2433,6 +2643,7 @@ daemonettesOfSlaanesh = unit "core-095" "Daemonettes of Slaanesh" do
   hitPoints 2
   traits [Daemon]
   body "Battlefield. This unit cannot be assigned more than 1 damage per turn."
+  perTurnDamageCap 1
 
 beastsOfNurgle :: CardDef Unit
 beastsOfNurgle = unit "core-096" "Beasts of Nurgle" do
@@ -2443,7 +2654,7 @@ beastsOfNurgle = unit "core-096" "Beasts of Nurgle" do
   hitPoints 5
   traits [Creature, Daemon]
   body "Forced: When this unit damages an enemy unit, corrupt that unit."
-  -- Engine-handled by firePerSourceCombatEffects (see Plaguebearers).
+  corruptsOnDamage
 
 chaosSpawn :: CardDef Unit
 chaosSpawn = unit "core-097" "Chaos Spawn" do
@@ -2465,6 +2676,7 @@ eyeOfTzeentch = support "core-098" "Eye of Tzeentch" do
   loyalty 2
   traits [Attachment, Spell]
   body "Attach to a target Chaos unit. Attached unit gains {power}; you may draw a card whenever it attacks."
+  attachmentPower 1
 
 theIronTower :: CardDef Support
 theIronTower = support "core-099" "The Iron Tower" do
@@ -2475,6 +2687,13 @@ theIronTower = support "core-099" "The Iron Tower" do
   power 2
   trait CapitalCenter
   body "Battlefield. Your Chaos units gain {power} while in this zone."
+  supportAura \_g s u ->
+    if s.controller == u.controller
+       && s.zone == BattlefieldZone
+       && u.zone == BattlefieldZone
+       && Chaos `elem` u.cardDef.races
+       then 1
+       else 0
 
 pyreOfTcharzanek :: CardDef Support
 pyreOfTcharzanek = support "core-100" "Pyre of Tchar'zanek" do
@@ -2583,6 +2802,9 @@ gorbadIronclaw = unit "core-108" "Gorbad Ironclaw" do
   body
     "Limit one Hero per zone.\n\
     \Forced: When this unit damages a zone, deal 1 additional damage to that zone."
+  -- Approximated as a flat +1 to its own combat damage while
+  -- attacking; spillover to the zone scales naturally with that.
+  combatPower \g u -> if unitIsAttacking g u then 1 else 0
 
 orcBigUns :: CardDef Unit
 orcBigUns = unit "core-109" "Orc Big 'Uns" do
@@ -2726,6 +2948,16 @@ daBadMoon = support "core-121" "Da Bad Moon" do
   power 2
   trait CapitalCenter
   body "Battlefield. Your other Orc units gain {power} while attacking."
+  -- "Battlefield." prefix scopes the aura to the controller's
+  -- battlefield. The aura fires on combat damage, not on resting
+  -- power, so it's a 'supportCombat' bonus.
+  supportCombat \g s u ->
+    if s.controller == u.controller
+       && s.zone == BattlefieldZone
+       && Orc `elem` u.cardDef.races
+       && unitIsAttacking g u
+       then 1
+       else 0
 
 choppa :: CardDef Support
 choppa = support "core-122" "Choppa" do
@@ -2734,6 +2966,7 @@ choppa = support "core-122" "Choppa" do
   loyalty 1
   traits [Attachment, Weapon]
   body "Attach to a target Orc unit. Attached unit gains {power}{power}."
+  attachmentPower 2
 
 bigBossesBanner :: CardDef Support
 bigBossesBanner = support "core-123" "Big Boss's Banner" do
@@ -2742,6 +2975,20 @@ bigBossesBanner = support "core-123" "Big Boss's Banner" do
   loyalty 2
   trait Attachment
   body "Attach to a target Orc unit. While attached unit is attacking, your other Orc attackers gain {power}."
+  -- The banner buffs the host's other Orc attackers — never its own
+  -- host. Grant +1 to any friendly Orc attacker different from the
+  -- host while the host is itself attacking.
+  supportCombat \g s u ->
+    case s.attachedTo of
+      Just hostKey
+        | hostKey /= u.key
+        , s.controller == u.controller
+        , Orc `elem` u.cardDef.races
+        , unitIsAttacking g u
+        , Just host <- findUnit hostKey g
+        , unitIsAttacking g host ->
+            1
+      _ -> 0
 
 daMorksEye :: CardDef Support
 daMorksEye = support "core-124" "Da Mork's Eye" do
@@ -2968,6 +3215,13 @@ croneHellebron = unit "core-133" "Crone Hellebron" do
   body
     "Limit one Hero per zone.\n\
     \Battlefield. This unit gains {power} for each Witch Elf unit you control."
+  selfPower \g u ->
+    length
+      [ ()
+      | v <- g.units
+      , v.controller == u.controller
+      , v.cardDef.code == CardCode "core-135"
+      ]
 
 lokhirFellheart :: CardDef Unit
 lokhirFellheart = unit "core-134" "Lokhir Fellheart" do
@@ -3190,6 +3444,12 @@ cauldronOfBlood = support "core-147" "Cauldron of Blood" do
   power 2
   trait CapitalCenter
   body "Battlefield. Your Witch Elf units gain {power}."
+  supportAura \_g s u ->
+    if s.controller == u.controller
+       && s.zone == BattlefieldZone
+       && u.cardDef.code == CardCode "core-135"
+       then 1
+       else 0
 
 theBlackArk :: CardDef Support
 theBlackArk = support "core-148" "The Black Ark" do
@@ -3214,6 +3474,7 @@ whipOfAgony = support "core-149" "Whip of Agony" do
   loyalty 2
   traits [Attachment, Weapon]
   body "Attach to a target Dark Elf unit. Attached unit gains {power}{power}."
+  attachmentPower 2
 
 druchiiBanner :: CardDef Support
 druchiiBanner = support "core-150" "Druchii Banner" do
@@ -3222,6 +3483,7 @@ druchiiBanner = support "core-150" "Druchii Banner" do
   loyalty 1
   trait Attachment
   body "Attach to a target unit. Attached unit gains {power}; opponents pay 1 additional resource to target it."
+  attachmentPower 1
 
 witchbrew :: CardDef Support
 witchbrew = support "core-151" "Witchbrew" do

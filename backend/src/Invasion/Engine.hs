@@ -1372,18 +1372,19 @@ instance Run Game where
                 , u.zone == zone
                 , not u.corrupted
                 ]
-              -- Rune of Fortitude (core-013): each unit attacking
-              -- this zone loses 1 power unless its controller pays 1
-              -- per attacker. All-or-nothing approximation here: if
-              -- the attacker can afford the full tax, pay it and the
-              -- penalty stays at 0; otherwise leave the resources
-              -- intact and impose -1 per attacker for this combat.
+              -- Rune-of-Fortitude family: each support whose
+              -- 'runeOfFortitudeTax' slice is set, sitting in the
+              -- defender's same zone, imposes the 1-per-attacker tax.
+              -- All-or-nothing approximation: if the attacker can
+              -- afford the full tax, pay it and the penalty stays at
+              -- 0; otherwise leave resources intact and impose -1
+              -- per attacker for this combat.
               runeHere =
                 any
                   ( \s ->
                       s.controller == defender
                         && s.zone == zone
-                        && s.cardDef.code == CardCode "core-013"
+                        && s.cardDef.extras.runeOfFortitudeTax
                   )
                   g.supports
               attackerPlayer = lookupPlayer attacker g
@@ -1868,28 +1869,25 @@ firePendingEffect = \case
     traverse_ (send . DestroyUnit) g.attackersThisPhase
 
 -- | The damage a single unit contributes in combat. Adds card-specific
--- bonuses (Lord of Khorne, Rift of Battle, …) on top of the cached
--- effective power. The 'PlayerKey' is the unit's side, which lets
--- some bonuses scope to attackers vs defenders if they grow such a
--- distinction later.
+-- bonuses (Lord of Khorne self-burning, Rift of Battle, …) on top of
+-- the cached effective power. Per-card slices live on
+-- 'UnitExtras.combatPowerBonus' (self) and 'SupportExtras.supportCombatBonus'
+-- (every in-play support — free-standing or attached — gets to
+-- contribute).
 combatDamageOf :: Game -> PlayerKey -> UnitDetails -> Int
 combatDamageOf g side u =
   max 0
     ( u.effectivePower
-        + lordOfKhorne
-        + riftOfBattle
-        + organGunDefendingBonus
-        + daBadMoonAttackingAura
-        + bigBossesBannerAura
-        + gorbadIronclawSelf
+        + u.cardDef.extras.combatPowerBonus g u
+        + sum
+            [ s.cardDef.extras.supportCombatBonus g s u
+            | s <- allInPlaySupports g
+            ]
         - runeOfFortitudePenalty
     )
   where
     isAttacker = case g.combat of
       Just cs -> side == cs.attackingPlayer && u.key `elem` cs.attackers
-      Nothing -> False
-    isDefender = case g.combat of
-      Just cs -> side == cs.defendingPlayer && u.key `elem` cs.defenders
       Nothing -> False
 
     -- Rune of Fortitude (core-013): if BeginCombat couldn't charge
@@ -1901,89 +1899,14 @@ combatDamageOf g side u =
           Nothing -> 0
       | otherwise = 0
 
-    -- Lord of Khorne (cataclysm-033) deals +1 damage in combat per
-    -- burning zone (across both capitals).
-    lordOfKhorne
-      | u.cardDef.code == CardCode "cataclysm-033" =
-          burningZoneCount g
-      | otherwise = 0
-
-    -- Rift of Battle (the-accursed-dead-052) buffs every unit's
-    -- combat damage by +1 while it's in play.
-    riftOfBattle
-      | any (\s -> s.cardDef.code == CardCode "the-accursed-dead-052") g.supports =
-          1
-      | otherwise = 0
-
-    -- Organ Gun (core-015): attached unit gains +2 power while
-    -- defending. Implemented per-unit because the bonus is conditional.
-    organGunDefendingBonus
-      | isDefender
-      , any (\a -> a.cardDef.code == CardCode "core-015") u.attachments = 2
-      | otherwise = 0
-
-    -- Da Bad Moon (core-121): "Battlefield." prefix — Bad Moon must
-    -- be in your battlefield. Your other Orc units gain {power} while
-    -- attacking.
-    daBadMoonAttackingAura
-      | isAttacker
-      , Orc `elem` u.cardDef.races
-      , any
-          ( \s ->
-              s.controller == u.controller
-                && s.cardDef.code == CardCode "core-121"
-                && s.zone == BattlefieldZone
-          )
-          g.supports = 1
-      | otherwise = 0
-
-    -- Big Boss's Banner (core-123): the attached unit's other Orc
-    -- attackers gain {power}. Granted to U if there's an Orc attacker
-    -- carrying the banner on this side that isn't U itself.
-    bigBossesBannerAura
-      | isAttacker
-      , Orc `elem` u.cardDef.races
-      , let bannerHosts =
-              [ v
-              | v <- g.units
-              , v.controller == u.controller
-              , v.key /= u.key
-              , any (\a -> a.cardDef.code == CardCode "core-123") v.attachments
-              ]
-      , not (null bannerHosts)
-      , let isHostAttacker v = case g.combat of
-              Just cs -> v.key `elem` cs.attackers
-              Nothing -> False
-      , any isHostAttacker bannerHosts = 1
-      | otherwise = 0
-
-    -- Gorbad Ironclaw (core-108): +1 damage in combat when this unit
-    -- damages a zone — approximated as a flat +1 to its own combat
-    -- power (spillover to the zone scales naturally with that).
-    gorbadIronclawSelf
-      | u.cardDef.code == CardCode "core-108"
-      , isAttacker = 1
-      | otherwise = 0
-
 -- | Card-aware attacker eligibility check at 'BeginCombat'. Returns
 -- 'True' if the unit can attack the named defender zone right now.
--- Sworn of Khorne is the current special case; others should plug in
--- here as they land.
+-- Driven by the per-card 'canAttackZone' slice on 'UnitExtras'
+-- (Sworn of Khorne today; default lets every unit attack).
 eligibleAttacker :: Game -> PlayerKey -> ZoneKind -> UnitKey -> Bool
 eligibleAttacker g defender zone ukey = case findUnit ukey g of
   Nothing -> False
-  Just u
-    -- Sworn of Khorne: only if the defender zone contains a corrupted
-    -- defending unit.
-    | u.cardDef.code == CardCode "fragments-of-power-031" ->
-        any
-          ( \v ->
-              v.controller == defender
-                && v.zone == zone
-                && v.corrupted
-          )
-          g.units
-    | otherwise -> True
+  Just u -> u.cardDef.extras.canAttackZone g defender zone u
 
 -- | Split the combat damage contributed by a list of units into a
 -- (cancellable, uncancellable) pair. Damage from units with the
@@ -2002,15 +1925,11 @@ splitDamage g side units =
 
 -- | True if this unit's damage is uncancellable, accounting for both
 -- its printed keywords and any attached supports that grant that
--- property.
+-- property (via 'SupportExtras.grantsUncancellableDamage').
 hasUncancellableDamage :: UnitDetails -> Bool
 hasUncancellableDamage u =
   DamageCannotBeCancelled `elem` u.cardDef.keywords
-    || any
-      ( \a ->
-          a.cardDef.code == CardCode "core-042" -- Hammer of Sigmar
-      )
-      u.attachments
+    || any (.cardDef.extras.grantsUncancellableDamage) u.attachments
 
 -- | Apply a cancellable + uncancellable damage budget to a list of
 -- units, in order. Cancellable damage is offered first so Toughness
@@ -2075,13 +1994,13 @@ zoneParam = \case
   BattlefieldZone -> "BattlefieldZone"
 
 -- | Apply any in-play passive damage multipliers to a raw damage
--- amount. Currently only Bloodletter (legends-031) doubles, but
--- additional multipliers (Slaaneshi mirror effects, etc.) plug in here.
+-- amount. Driven by the per-card 'damageMultiplierWhileInPlay' slice
+-- on 'UnitExtras'; the strongest in-play multiplier wins (Bloodletter
+-- gives 2; default is 1; duplicate copies don't stack).
 applyDamageMultipliers :: Game -> Int -> Int
 applyDamageMultipliers g amount =
-  let hasBloodletter =
-        any (\u -> u.cardDef.code == CardCode "legends-031") g.units
-   in if hasBloodletter then amount * 2 else amount
+  amount
+    * maximum (1 : map (.cardDef.extras.damageMultiplierWhileInPlay) g.units)
 
 -- | A wrapper over the four card-kinds that can host an action
 -- ability. Used to dispatch a 'TriggerCardAction' message uniformly
@@ -2229,34 +2148,17 @@ zonePower g pk zone =
    in base + unitPow + supportPow + legendPow + auraBonus
 
 -- | Extra power a player's zone gets from in-play cards that grant a
--- zone-wide bonus (Lighthouse of Lothern, Rift of Chaos, …).
+-- zone-wide bonus. Driven by the per-support 'zonePowerBonus' slice
+-- on 'SupportExtras' (Lighthouse of Lothern, Rift of Chaos, …); each
+-- support reports its contribution for the queried (controller, zone)
+-- pair.
 zoneAuraBonus :: Game -> PlayerKey -> ZoneKind -> Int
 zoneAuraBonus g pk zone =
-  lighthouseOfLothernBonus + riftOfChaosBonus
-  where
-    -- Lighthouse of Lothern (core-066): your quest zone gains +1
-    -- power while the Lighthouse itself is in the quest zone (the
-    -- "Quest." prefix scopes the effect to that zone).
-    lighthouseOfLothernBonus
-      | zone == QuestZone
-      , any
-          ( \s ->
-              s.controller == pk
-                && s.cardDef.code == CardCode "core-066"
-                && s.zone == QuestZone
-          )
-          g.supports = 1
-      | otherwise = 0
-    -- Rift of Chaos (cataclysm-037): +1 to its own zone per burning
-    -- zone on either capital. Applies wherever the rift sits.
-    riftOfChaosBonus =
-      sum
-        [ burningZoneCount g
-        | s <- g.supports
-        , s.controller == pk
-        , s.cardDef.code == CardCode "cataclysm-037"
-        , s.zone == zone
-        ]
+  sum
+    [ s.cardDef.extras.zonePowerBonus g s zone
+    | s <- g.supports
+    , s.controller == pk
+    ]
 
 -- | Compute and STAGE damage assignments for the in-flight combat
 -- without yet committing them. The pending list lives on
@@ -2548,9 +2450,7 @@ firePerSourceCombatEffects g cs = do
         , u.controller /= side
         , not u.corrupted
         ]
-      hasCorruptOnDamage u =
-        u.cardDef.code == CardCode "core-085" -- Plaguebearers of Nurgle
-          || u.cardDef.code == CardCode "core-096" -- Beasts of Nurgle
+      hasCorruptOnDamage u = u.cardDef.extras.corruptsOnCombatDamage
       attackerSources =
         [ u
         | k <- cs.attackers
@@ -2578,11 +2478,10 @@ applyPerTurnCap u already incoming = case perTurnCap u of
   Nothing -> incoming
   Just cap -> max 0 (min incoming (cap - already))
 
--- | The per-turn damage cap for a unit, if any.
+-- | The per-turn damage cap for a unit, if any. Driven by the per-card
+-- 'damageCap' slice on 'UnitExtras'.
 perTurnCap :: UnitDetails -> Maybe Int
-perTurnCap u = case u.cardDef.code of
-  CardCode "core-095" -> Just 1 -- Daemonettes of Slaanesh
-  _ -> Nothing
+perTurnCap u = u.cardDef.extras.damageCap
 
 -- | True iff the card carries the 'Limited' keyword.
 isLimitedCard :: CardDef k -> Bool
@@ -2621,19 +2520,8 @@ totalToughness g u = sum (map asInt u.cardDef.keywords)
     asInt (Toughness Variable) = devsInZone g u
     asInt _ = 0
 
--- | Number of facedown developments currently sitting in the named
--- unit's zone. Read for Toughness X and a couple of dev-scaling
--- cards (Troll Slayers, Ironbreakers of Ankhor).
-devsInZone :: Game -> UnitDetails -> Int
-devsInZone g u =
-  let player = case u.controller of
-        Player1 -> g.player1
-        Player2 -> g.player2
-      Developments d = case u.zone of
-        KingdomZone -> player.capital.kingdom.developments
-        QuestZone -> player.capital.quest.developments
-        BattlefieldZone -> player.capital.battlefield.developments
-   in d
+-- 'devsInZone' moved to 'Invasion.Card' so both engine and card defs
+-- can read it.
 
 -- | Count race symbols matching 'r' that the named player controls.
 -- The player's capital board contributes 1 for its faction; every
@@ -2662,55 +2550,31 @@ loyaltySurcharge g pk cardDef =
    in max 0 (cardDef.loyalty - bestMatch)
 
 -- | Card-specific adjustments to the printed (non-loyalty) part of a
--- play cost. Card-by-card switches live here; everything else returns
--- 0. Result may be negative — the final cost is clamped in
+-- play cost. Pulls per-card slices: a self adjustment lives directly
+-- on 'CardDef.selfCostAdjustment' (Bloodcrusher); external
+-- adjustments come from in-play supports via the per-support
+-- 'globalCostAdjustment' slice (Imperial Crown, Master Rune of
+-- Dismay). Result may be negative — the final cost is clamped in
 -- 'effectiveTotalCost'.
 printedCostAdjustment :: Game -> PlayerKey -> CardDef k -> Int
 printedCostAdjustment g pk cardDef =
-  selfAdjust + globalAdjust + opponentAdjust
+  cardDef.selfCostAdjustment g pk + supportAdjust
   where
-    selfAdjust = case cardDef.code of
-      -- Bloodcrusher: -1 per burning zone (across both capitals).
-      CardCode "cataclysm-034" -> negate (burningZoneCount g)
-      _ -> 0
-    -- Imperial Crown (core-041): "Kingdom." prefix — active while
-    -- the crown sits in your kingdom. Your Empire heroes cost 1 less.
-    globalAdjust
-      | Empire `elem` cardDef.races
-      , Hero `elem` cardDef.traits
-      , any
-          ( \s ->
-              s.controller == pk
-                && s.cardDef.code == CardCode "core-041"
-                && s.zone == KingdomZone
-          )
-          g.supports = -1
-      | otherwise = 0
-    -- Master Rune of Dismay (core-016): "Kingdom." prefix — must sit
-    -- in the opponent's kingdom for the +1 cost-to-play tax to apply
-    -- to your units.
-    opponentAdjust
-      | any
-          ( \s ->
-              s.controller == pk.next
-                && s.cardDef.code == CardCode "core-016"
-                && s.zone == KingdomZone
-          )
-          g.supports = 1
-      | otherwise = 0
+    filt = cardCodeFilter cardDef
+    supportAdjust =
+      sum
+        [ s.cardDef.extras.globalCostAdjustment g s pk filt
+        | s <- g.supports
+        ]
 
 -- | Additional resource cost an effect must pay to target the unit
--- referenced in the supplied 'ActionTarget'. Currently only King
--- Kazador (core-007): opponents pay +3 resources per effect that
--- names him. Returns 0 for any non-targeted effect, or when the
--- caster is the unit's controller.
+-- referenced in the supplied 'ActionTarget'. Driven by the per-card
+-- 'extraTargetTax' slice on 'UnitExtras' (King Kazador today).
 extraTargetTax :: PlayerKey -> ActionTarget -> Game -> Int
 extraTargetTax caster target g = case target of
   TargetUnit k -> case findUnit k g of
-    Just u
-      | u.controller /= caster
-      , u.cardDef.code == CardCode "core-007" -> 3
-    _ -> 0
+    Just u -> u.cardDef.extras.extraTargetTax g caster u
+    Nothing -> 0
   _ -> 0
 
 -- | Total cost to play a card: max(0, printed + adjustments) + loyalty
@@ -2751,7 +2615,6 @@ recomputeUnitStats g = g {units = map update g.units}
     computePower u =
       u.cardDef.power
         + sum (map (attachmentPowerBonus u) u.attachments)
-        + experiencePowerBonus u
         + modifierPowerBonus u
         + auraPowerBonus g u
         + selfScalingPowerBonus g u
@@ -2762,142 +2625,32 @@ recomputeUnitStats g = g {units = map update g.units}
       let mods = fromMaybe [] (Map.lookup (UnitRef u.key) g.modifiers)
        in sum [n | Modifier (GainPower n) _ <- mods]
 
--- | Per-attachment power contribution. Hard-coded by 'CardCode'.
+-- | Per-attachment power contribution. Read from the support's
+-- 'attachmentPowerBonus' slice on 'SupportExtras'.
 attachmentPowerBonus :: UnitDetails -> SupportDetails -> Int
-attachmentPowerBonus _host s = case s.cardDef.code of
-  CardCode "the-warpstone-chronicles-095" -> 3 -- Daemonsword
-  CardCode "omens-of-ruin-013" -> 2 -- Mark of Chaos
-  CardCode "core-042" -> 2 -- Hammer of Sigmar
-  CardCode "core-043" -> 1 -- Banner of Sigmar
-  CardCode "core-067" -> 2 -- Banner of Avelorn
-  CardCode "core-098" -> 1 -- Eye of Tzeentch
-  CardCode "core-122" -> 2 -- Choppa
-  CardCode "core-149" -> 2 -- Whip of Agony
-  CardCode "core-150" -> 1 -- Druchii Banner
-  _ -> 0
+attachmentPowerBonus _host s = s.cardDef.extras.attachmentPowerBonus
 
--- | Per-attachment HP contribution.
+-- | Per-attachment HP contribution. Read from the support's
+-- 'attachmentHPBonus' slice on 'SupportExtras'.
 attachmentHPBonus :: UnitDetails -> SupportDetails -> Int
-attachmentHPBonus _host s = case s.cardDef.code of
-  CardCode "the-warpstone-chronicles-095" -> 2 -- Daemonsword
-  _ -> 0
+attachmentHPBonus _host s = s.cardDef.extras.attachmentHPBonus
 
--- | Continuous aura contributions to a unit's effective power, from
--- other in-play cards (units, supports). Read by 'recomputeUnitStats'
--- so the bonus shows up in every zone-dependent calculation
+-- | Continuous aura contributions to a unit's effective power, summed
+-- across every in-play unit's 'unitAuraPower' slice (Karl Franz,
+-- Templar of Sigmar) and every in-play support's 'supportAuraPower'
+-- slice (Iron Tower, Cauldron of Blood). Read by 'recomputeUnitStats'
+-- so the bonus is visible in every zone-dependent calculation
 -- (resources, quest draw, combat).
 auraPowerBonus :: Game -> UnitDetails -> Int
-auraPowerBonus g u = sum
-  [ karlFranzAura
-  , templarOfSigmarAura
-  , ironTowerAura
-  , cauldronOfBloodAura
-  , daBadMoonStaticAura
-  ]
-  where
-    isFriendly v = v.controller == u.controller
-    differentUnit v = v.key /= u.key
-    hasCode code v = v.cardDef.code == CardCode code
-    hasSupport code = any (\s -> isFriendlySupport s && hasCodeS s code) g.supports
-    isFriendlySupport s = s.controller == u.controller
-    hasCodeS s code = s.cardDef.code == CardCode code
+auraPowerBonus g u =
+  sum [v.cardDef.extras.unitAuraPower g v u | v <- g.units]
+    + sum [s.cardDef.extras.supportAuraPower g s u | s <- allInPlaySupports g]
 
-    -- Karl Franz: your other Empire units gain {power}.
-    karlFranzAura
-      | Empire `elem` u.cardDef.races
-      , any (\v -> isFriendly v && differentUnit v && hasCode "core-035" v) g.units = 1
-      | otherwise = 0
-
-    -- Templar of Sigmar: "Battlefield." prefix scopes the aura to
-    -- the battlefield. Your other Warrior units in the battlefield
-    -- gain {power} while the Templar is there.
-    templarOfSigmarAura
-      | Warrior `elem` u.cardDef.traits
-      , u.zone == BattlefieldZone
-      , any
-          ( \v ->
-              isFriendly v
-                && differentUnit v
-                && hasCode "core-028" v
-                && v.zone == BattlefieldZone
-          )
-          g.units = 1
-      | otherwise = 0
-
-    -- Iron Tower: "Battlefield." prefix — only active while the
-    -- Iron Tower itself sits in your battlefield. Your Chaos units
-    -- in the battlefield then gain {power}.
-    ironTowerAura
-      | Chaos `elem` u.cardDef.races
-      , u.zone == BattlefieldZone
-      , hasSupportInZone "core-099" BattlefieldZone = 1
-      | otherwise = 0
-
-    -- Cauldron of Blood: "Battlefield." prefix — only active while
-    -- the Cauldron sits in your battlefield.
-    cauldronOfBloodAura
-      | u.cardDef.code == CardCode "core-135"
-      , hasSupportInZone "core-147" BattlefieldZone = 1
-      | otherwise = 0
-
-    hasSupportInZone code z =
-      any
-        ( \s ->
-            isFriendlySupport s
-              && hasCodeS s code
-              && s.zone == z
-        )
-        g.supports
-
-    -- Da Bad Moon: your other Orc units gain {power} while attacking.
-    -- The "while attacking" part is handled in 'combatDamageOf'; here
-    -- we only credit the always-on slice when the moon's a unit on the
-    -- field (it's a support, so this is currently dead code — kept to
-    -- mirror the symmetry with Iron Tower).
-    daBadMoonStaticAura = 0
-
--- | Self-scaling power based on what else is in play. Read by
--- 'recomputeUnitStats' alongside 'auraPowerBonus' and
--- 'experiencePowerBonus'.
+-- | Self-scaling power based on game state. Reads the per-card
+-- 'selfPowerBonus' slice on 'UnitExtras' (which subsumes the old
+-- 'experiencePowerBonus' for cards that scale with experience tokens).
 selfScalingPowerBonus :: Game -> UnitDetails -> Int
-selfScalingPowerBonus g u = case u.cardDef.code of
-  -- Troll Slayers (core-004): +2 power while you have at least 2
-  -- developments in this zone.
-  CardCode "core-004" | devsInZone g u >= 2 -> 2
-  -- Durgnar the Bold (core-006): +2 power while one section of your
-  -- capital is burning.
-  CardCode "core-006" | controllerBurning -> 2
-    where
-      controllerBurning =
-        let p = case u.controller of
-              Player1 -> g.player1
-              Player2 -> g.player2
-         in any (.burning) p.capital.zones
-  -- Korhil: gains {power} per other White Lion unit you control.
-  CardCode "core-061" ->
-    length
-      [ ()
-      | v <- g.units
-      , v.controller == u.controller
-      , v.key /= u.key
-      , v.cardDef.code == CardCode "core-052"
-      ]
-  -- Crone Hellebron: gains {power} per Witch Elf unit you control.
-  CardCode "core-133" ->
-    length
-      [ ()
-      | v <- g.units
-      , v.controller == u.controller
-      , v.cardDef.code == CardCode "core-135"
-      ]
-  _ -> 0
-
--- | Power gained from experience markers. Only Skulltaker reads them
--- today.
-experiencePowerBonus :: UnitDetails -> Int
-experiencePowerBonus u = case u.cardDef.code of
-  CardCode "faith-and-steel-113" -> length u.experiences
-  _ -> 0
+selfScalingPowerBonus g u = u.cardDef.extras.selfPowerBonus g u
 
 -- | Pull a Unit card matching the given 'UnitKey' out of a player's
 -- discard pile. Used by Reckless Attack-style resurrection effects.

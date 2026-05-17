@@ -218,14 +218,15 @@ function cancelPasswordJoin() {
 }
 
 // Label for the join button. "Resume" if it's our own game, "Spectate"
-// when both seats are taken on a spectator-friendly game (or for any
-// guest viewer, who can never claim a seat), otherwise plain "Join".
-// The button still fires `clickJoin` either way; the server attaches
-// us as the right kind of viewer.
+// once the game has actually started (or for any guest viewer, who can
+// never claim a seat), otherwise plain "Join" — seats can free up in
+// the waiting room, so the call-to-action stays "Join" until play
+// begins. The button still fires `clickJoin` either way; the server
+// attaches us as the right kind of viewer.
 function joinLabel(g: GameSummary): string {
   if (isMine(g)) return t('lobby.games.card.resume')
   if (isGuest.value) return t('lobby.games.card.spectate')
-  if (g.filledSeats >= 2 && g.allowSpectators) return t('lobby.games.card.spectate')
+  if (g.status !== 'StatusWaiting' && g.allowSpectators) return t('lobby.games.card.spectate')
   return t('lobby.games.card.join')
 }
 
