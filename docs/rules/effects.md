@@ -5,6 +5,29 @@ Four kinds of card effects exist: **actions**, **forced effects**,
 (corruption, sacrifice, "cannot," control vs. ownership, corresponding
 zones).
 
+For the algorithmic timing structure that surrounds all of the
+following, see [timing.md](./timing.md).
+
+## In play vs. out of play
+
+| Zone | In play? |
+|---|---|
+| Kingdom | in play |
+| Quest zone | in play |
+| Battlefield | in play |
+| Deck | out of play |
+| Hand | out of play |
+| Discard pile | out of play |
+
+Unless a card effect specifies otherwise (e.g. destroy, sacrifice),
+cards can only **move between in-play zones**, never out into hand /
+deck / discard via a "move" effect.
+
+A card that **leaves play** has just moved from an in-play zone to an
+out-of-play zone. Cards generally cannot trigger their own abilities
+once they have left play — *except* for self-referential effects (see
+"Self-referential effects" in [timing.md](./timing.md)).
+
 ## Actions
 
 Marked `Action:` (bold) on a card. Always optional. Triggerable by either
@@ -57,10 +80,15 @@ Shorthand for common rule effects.
 ### Counterstrike N
 
 Defender-only. When the unit is **declared as a defender** it immediately
-deals N **uncancellable** damage to a single attacking unit of the
-defender's choice. Cannot be split. The unit still also fights normally in
+deals N **uncancellable** damage to a single attacking unit or legend of
+the defender's choice. Cannot be split. The unit still also fights normally in
 step 4/5. Multiple Counterstrike sources stack numerically. See
 [combat.md](./combat.md) for placement in the combat sequence.
+
+Counterstrike's trigger condition is *being declared a defender* — it
+exists independently of the source. If the counterstriking unit is
+later destroyed in the same combat, its Counterstrike damage has
+already been dealt.
 
 ### Toughness N
 
@@ -76,7 +104,14 @@ When the unit is **assigned** damage, N of that damage is cancelled
 
 After combat damage is **applied**, the controller of any surviving
 participating Scout unit forces the opponent to discard one random card
-from hand per surviving Scout.
+from hand per surviving Scout. Scout triggers **even if no damage was
+dealt during the combat**, provided the unit participated and survived.
+
+### Ambush
+
+A keyword found only on developments. Ambush may **only be triggered
+on a facedown development**. If an effect has flipped the development
+faceup, its Ambush ability cannot fire.
 
 ### Kingdom / Quest / Battlefield only
 
@@ -103,6 +138,19 @@ turn.
 Restricts a (typically neutral) card to one faction. `Order Only` cards
 cannot go into Destruction decks; `Destruction Only` cannot go into Order
 decks.
+
+### Limit one Hero per zone
+
+A keyword-style restriction that appears on most Hero units. While a
+player controls a Hero in a given zone:
+
+- That player cannot play, take control of, move, or put into play
+  (via a card effect) another Hero into that same zone.
+- The opponent also cannot play, give control of, move, or put into
+  play (via a card effect) another Hero into that same zone.
+
+The restriction is *per zone*, not per capital — a player may control
+one Hero in kingdom and a different Hero in battlefield.
 
 ## Corruption
 
@@ -138,6 +186,46 @@ Implementation: when resolving an effect, evaluate `cannot`-style
 prohibitions last (or first, before changes apply) and short-circuit the
 effect if any apply.
 
+## "Then"
+
+When a card effect uses the word **then**, the *preceding* effect must
+have resolved successfully before the effect following "then" can
+resolve.
+
+> Example: `Forced: When this unit enters play, search the top five
+> cards of your deck for a support card with cost 2 or lower. You may
+> put that card into this zone. Then, shuffle your deck.` — if the
+> search effect is somehow prevented from completing (cancellation,
+> etc.), the shuffle does not happen.
+
+## "Or"
+
+Some effects offer two outcomes joined by **or** — the player choosing
+must pick an option they can *fully* resolve. If only one of the two
+options is resolvable, the player must choose that one.
+
+> Example: Warpstone Meteor — `each player must corrupt one of his
+> units in this corresponding zone or deal 1 damage to his capital.`
+> If a player has no unit to corrupt, they must take the damage; if
+> they have no capital to take the damage (all sections burned), they
+> must corrupt.
+
+## The letter "X"
+
+Unless a card, card effect, or granted player choice defines it, **X is
+always 0**. This applies both to cost values and to effect values.
+
+> Example: copying a tactic with `cost X` via Twin Tailed Comet
+> resolves with `X = 0`.
+
+## Trigger condition (v1.4)
+
+A "trigger condition" is anything that must happen before a card
+ability can fire. This includes playing a card, using an ability, or
+even a constant effect's condition becoming true. The full algorithm
+for resolving triggers (active-player-first ordering, the constant /
+forced split, etc.) is in [timing.md](./timing.md).
+
 ## Control vs. ownership
 
 - **Owner**: who put the card in their deck.
@@ -164,7 +252,7 @@ Putting the above together, when damage is dealt:
 ```
 1. Damage inflicted (sum of power icons, or value of effect)
 2. Damage assigned    ←  attacker/defender choose distribution
-   (action window — cancellable here)
+   (action window — cancellable / redirectable here)
 3. Damage applied     ←  commit to targets
    - Toughness cancels (unless damage is uncancellable)
    - Surviving units stay; units at/over HP are destroyed
@@ -172,8 +260,14 @@ Putting the above together, when damage is dealt:
 4. Post-damage effects (Scout, "after damage applied" triggers)
 ```
 
-Counterstrike damage skips steps 2's action window and is applied at the
+Counterstrike damage skips step 2's action window and is applied at the
 moment of defender declaration, uncancellable.
+
+Non-combat damage also skips the action window — it is applied as soon
+as it is assigned.
+
+See [damage.md](./damage.md) for the full damage rules: assigned vs.
+dealt, indirect damage, redirection, moved damage, healing.
 
 ## Running out of cards
 

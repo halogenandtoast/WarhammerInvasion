@@ -15,6 +15,7 @@ import type {
   EngineGame,
   EngineLegend,
   EnginePlayer,
+  EngineQuest,
   EngineUnit,
   PlayerKey,
   SeatView,
@@ -102,6 +103,27 @@ function legendFor(k: PlayerKey | null): EngineLegend | null {
 }
 const myLegend = computed(() => legendFor(mySeatKey.value))
 const opponentLegend = computed(() => legendFor(opponentSeatKey.value))
+
+// In-play quests, split by zoneOwner (visual placement). A quest's
+// controller may differ from its zoneOwner — Dominion of Chaos sits in
+// the opponent's play area while staying under its controller's
+// control. PlaySide renders an overlay banner in that case.
+const myQuests = computed<EngineQuest[]>(() => {
+  const k = mySeatKey.value
+  if (!k) return []
+  return props.engine.quests.filter((q) => q.zoneOwner === k)
+})
+
+const opponentQuests = computed<EngineQuest[]>(() => {
+  const k = opponentSeatKey.value
+  if (!k) return []
+  return props.engine.quests.filter((q) => q.zoneOwner === k)
+})
+
+const seatNames = computed<Record<PlayerKey, string>>(() => ({
+  Player1: seatName('Player1'),
+  Player2: seatName('Player2'),
+}))
 
 // ---- hand-card play popover ----
 //
@@ -237,9 +259,11 @@ const popoverStyle = computed<Record<string, string>>(() => {
         v-if="opponent && opponentSeatKey"
         :player="opponent"
         :units="opponentUnits"
+        :quests="opponentQuests"
         :legend="opponentLegend"
         perspective="opponent"
         :seat-name="seatName(opponentSeatKey)"
+        :seat-names="seatNames"
         :is-active="engine.currentPlayer === opponentSeatKey"
         :is-first-player="engine.firstPlayer === opponentSeatKey"
       />
@@ -250,9 +274,11 @@ const popoverStyle = computed<Record<string, string>>(() => {
         v-if="me && mySeatKey"
         :player="me"
         :units="myUnits"
+        :quests="myQuests"
         :legend="myLegend"
         perspective="self"
         :seat-name="seatName(mySeatKey)"
+        :seat-names="seatNames"
         :is-active="engine.currentPlayer === mySeatKey"
         :is-first-player="engine.firstPlayer === mySeatKey"
         :can-play-card="canPlayCard"

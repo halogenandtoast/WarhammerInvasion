@@ -78,12 +78,27 @@ Each side counts power icons on its participating units; that total is its
   The attacker can over-assign onto a unit (e.g., to defeat Toughness or
   cancellation), but must satisfy the minimum-to-each-defender rule before
   reaching the capital.
+  - "Enough damage to destroy each defending unit" takes into account
+    each defender's current HP, **any Toughness already active on
+    that defender**, and any other damage-cancellation effects
+    already in play. (Defenders printed *before* combat begins are
+    factored in; defenders revealed mid-combat are not.)
 - **Defender assigns next.** Defender's damage must be assigned to
   attacking units. **Defenders cannot damage the attacker's capital.** The
   defender may also over-assign to a single unit.
 
 Damage at this step is **assigned**, not applied. Tokens are placed *near*
-their targets and can still be cancelled. Action window follows.
+their targets and can still be cancelled or redirected. Action window
+follows. See [damage.md](./damage.md) for the full cancel/redirect/move
+rules.
+
+### Attacking a legend (assignment exception)
+
+When the attack targets the opponent's legend (rather than the zone
+section), any **excess damage** beyond what is required to destroy
+the legend simply has no effect — it cannot spill onto the zone, and
+it cannot spill onto defending units. (Same "left-over damage is
+ignored" treatment as overkill on a burning section.)
 
 ## 5. Apply damage
 
@@ -132,15 +147,24 @@ split. Implementations should special-case it.
 
 ## Non-combat damage
 
-Card effects can deal damage outside of combat. It uses the same
-assign-then-apply pattern *except* for Counterstrike, which is always
-applied immediately.
+Card effects can deal damage outside of combat. Per FAQ 2.2, non-combat
+damage is **always applied as soon as it is assigned** — there is no
+action window between assign and apply. Cancellation effects (Steel's
+Bane, etc.) must be played in response to the *source* of the damage,
+not to the assignment.
 
-Whenever an effect deals damage, model it as a sequence:
+Counterstrike behaves the same way: applied immediately on declare.
 
-```
-DamageAssigned target n  →  (action window if rules call for one)  →  DamageApplied target n
-```
+Indirect damage (e.g. Sigmar's Wrath, Plague Bomb) is a special
+sub-flavour of non-combat damage — see
+[damage.md](./damage.md#indirect-damage-v15).
 
-Some non-combat damage is also tagged "uncancellable" — same semantics as
-Counterstrike: Toughness and cancellation effects don't reduce it.
+## Attacks outside the Battlefield phase
+
+Some effects (Wolves of the North, Strike from the Shadows, …) allow
+a player to make an attack **outside the normal Battlefield phase**.
+Such an attack must follow **all five steps** of the standard combat
+ladder — the only difference is the timing of when the ladder starts.
+
+Cards triggered "when this unit attacks", Counterstrike, Scout, and
+post-combat hooks all fire as normal during such an attack.

@@ -116,6 +116,11 @@ data GameSlot = GameSlot
   , visibility :: Visibility
   , password :: Maybe Text
   , allowSpectators :: Bool
+  , autoSkipActionWindows :: Bool
+    -- ^ When 'True', the engine auto-passes priority whenever the
+    -- holder of an open action window has no tactic in hand and no
+    -- in-play own card with an action ability. Chosen by the host at
+    -- 'createGame' time; immutable for the lifetime of the slot.
   , inviteToken :: Text
   , seats :: TVar (Map Text SeatRow) -- key = "Player1" | "Player2"
   , chat :: TVar (Seq ChatLine)
@@ -214,9 +219,10 @@ createGame
   -> Visibility
   -> Maybe Text
   -> Bool
+  -> Bool
   -> Text
   -> STM GameSlot
-createGame st gid name host vis pw allowSpec token = do
+createGame st gid name host vis pw allowSpec autoSkip token = do
   seats <- newTVar Map.empty
   chat <- newTVar Seq.empty
   status <- newTVar StatusWaiting
@@ -232,6 +238,7 @@ createGame st gid name host vis pw allowSpec token = do
         , visibility = vis
         , password = pw
         , allowSpectators = allowSpec
+        , autoSkipActionWindows = autoSkip
         , inviteToken = token
         , seats
         , chat

@@ -103,11 +103,17 @@ data SupportDetails = SupportDetails
   }
   deriving stock Show
 
--- | A quest card in play (always sits in the quest zone, hence no
+-- | A quest card in play (always sits in the quest area, hence no
 -- 'zone' field).
 data QuestDetails = QuestDetails
   { key :: UnitKey
   , controller :: PlayerKey
+    -- ^ The player who owns the card and receives its benefits.
+  , zoneOwner :: PlayerKey
+    -- ^ The player whose play area visually houses this quest. Equal
+    -- to 'controller' for most quests; for Dominion of Chaos it's the
+    -- opponent (the card says "Play in any opponent's zone under your
+    -- control").
   , cardDef :: CardDef Quest
   , tokens :: Int
     -- ^ Token accumulator: Raiding Camps tracks none, A Glorious Death
@@ -197,6 +203,7 @@ instance ToJSON QuestDetails where
     object
       [ "key" .= d.key
       , "controller" .= d.controller
+      , "zoneOwner" .= d.zoneOwner
       , "cardDef" .= d.cardDef
       , "tokens" .= d.tokens
       , "questingUnit" .= d.questingUnit

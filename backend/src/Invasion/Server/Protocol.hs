@@ -126,11 +126,16 @@ data LobbyIn
   | -- | Create a new game slot. Server replies with 'LobbyGameCreated'.
     -- 'allowSpectators' is optional: if absent, the server defaults to
     -- True for public games and False for private ones.
+    -- 'autoSkipActionWindows' is optional: when 'Just True' the engine
+    -- automatically passes priority for whichever player has no tactic
+    -- in hand and no in-play card carrying an action ability. Defaults
+    -- to False (every action window waits for an explicit pass).
     LobbyCreateGame
       { name :: Text
       , visibility :: Visibility
       , password :: Maybe Text
       , allowSpectators :: Maybe Bool
+      , autoSkipActionWindows :: Maybe Bool
       }
   | -- | Join a public game (no password needed). Reply: 'LobbyGameJoinOk'.
     LobbyJoinPublic { gameId :: UUID }

@@ -141,6 +141,10 @@ export interface EngineSupport {
 export interface EngineQuest {
   key: number
   controller: PlayerKey
+  // Whose play area visually houses this quest. Equal to `controller`
+  // for most quests; Dominion of Chaos lives on the opponent's side
+  // while remaining under its controller's control.
+  zoneOwner: PlayerKey
   cardDef: EngineCardDef
   tokens: number
 }
@@ -172,6 +176,7 @@ export interface EngineCapital {
 }
 
 export type ActionWindowTrigger =
+  | 'BeginningOfTurnActionWindow'
   | 'KingdomActionWindow'
   | 'QuestActionWindow'
   | 'CapitalActionWindow'
@@ -181,6 +186,7 @@ export type ActionWindowTrigger =
   | 'AfterDeclareDefenders'
   | 'AfterAssignCombatDamage'
   | 'AfterApplyCombatDamage'
+  | 'EndOfTurnActionWindow'
 
 export type PassState =
   | { tag: 'NoPasses'; contents: PlayerKey }
@@ -341,6 +347,11 @@ export type LobbyIn =
       // Optional: when null, server defaults to true for public games
       // and false for private ones.
       allowSpectators: boolean | null
+      // Optional: when true, the engine auto-passes priority for any
+      // player whose only option in an action window would be to pass
+      // (no Tactic in hand, no in-play card carrying an action).
+      // Defaults to false on the server when null.
+      autoSkipActionWindows: boolean | null
     }
   | { tag: 'LobbyJoinPublic'; gameId: string }
   | { tag: 'LobbyJoinWithPassword'; gameId: string; password: string | null }

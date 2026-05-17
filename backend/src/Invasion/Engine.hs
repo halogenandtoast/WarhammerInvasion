@@ -355,10 +355,17 @@ instance Run Game where
       logIt LogTurn
         "log.turn.begins"
         [("turn", turnText t), ("player", playerParam k)]
+      -- Phase 0 (FAQ 2.2): all "at the beginning of the turn" triggered
+      -- effects fire on BeginTurn itself via card receive hooks, then
+      -- this action window lets either player respond before the
+      -- Kingdom phase begins.
+      send (OpenActionWindow BeginningOfTurnActionWindow)
       send (BeginPhase KingdomPhase)
     EndTurn k -> do
-      -- Fire scheduled end-of-turn effects before handing off. Each
-      -- effect becomes a real message in the queue.
+      -- Phase 5 (FAQ 2.2): action window first, then "at end of turn"
+      -- triggered effects fire, then UntilEndOfTurn modifiers expire.
+      send (OpenActionWindow EndOfTurnActionWindow)
+      -- Fire scheduled end-of-turn effects after the window closes.
       pending <- gets (.pendingEndOfTurn)
       modify \g -> g {pendingEndOfTurn = []}
       traverse_ firePendingEffect pending
@@ -426,6 +433,7 @@ instance Run Game where
       logIt LogSystem
         "log.window.open"
         [("trigger", triggerParam trigger), ("player", playerParam current)]
+      maybeAutoPassPriority trigger current
     PassPriority k -> do
       g <- get
       case g.actionWindowStack of
@@ -437,6 +445,7 @@ instance Run Game where
                   stack' = aw' : rest
               modify \gx ->
                 gx {actionWindowStack = stack', actionWindow = Just aw'}
+              maybeAutoPassPriority aw.trigger k.next
             OnePass _ ->
               -- Both players have now passed consecutively.
               send CloseActionWindow
@@ -938,10 +947,14 @@ instance Run Game where
                   let paidPlayer =
                         playerWithoutCard
                           {resources = player.resources - Resources n}
+                      hostPlayer
+                        | PlayInOpponentArea `elem` cardDef.keywords = pk.next
+                        | otherwise = pk
                       quest =
                         QuestDetails
                           { key = cardKey
                           , controller = pk
+                          , zoneOwner = hostPlayer
                           , cardDef
                           , tokens = 0
                           , questingUnit = Nothing
@@ -1734,8 +1747,8 @@ newPlayer k race cards =
     , race
     }
 
-newGame :: Deck -> Deck -> Either DeckLoadError Game
-newGame deck1 deck2 = do
+newGame :: Deck -> Deck -> GameOptions -> Either DeckLoadError Game
+newGame deck1 deck2 opts = do
   (race1, defs1) <- loadDeck deck1
   (race2, defs2) <- loadDeck deck2
   let (afterP1, cards1) = mintCards (UnitKey 0) defs1
@@ -1769,7 +1782,18 @@ newGame deck1 deck2 = do
       , unitsDiscardedThisTurn = 0
       , damageTakenThisTurn = mempty
       , damagedInCurrentCombat = []
+      , autoSkipActionWindows = opts.autoSkipActionWindows
       }
+
+-- | Host-chosen options that shape engine behavior without altering
+-- rules. Currently a single toggle; new options join this record so
+-- existing callers stay source-compatible via 'defaultGameOptions'.
+data GameOptions = GameOptions
+  { autoSkipActionWindows :: Bool
+  }
+
+defaultGameOptions :: GameOptions
+defaultGameOptions = GameOptions {autoSkipActionWindows = False}
 
 -- | Look up a player record by key.
 lookupPlayer :: PlayerKey -> Game -> Player
@@ -2357,6 +2381,66 @@ openAutoCombatWindow trigger = do
   active <- gets (.currentPlayer)
   send (PassPriority active)
   send (PassPriority active.next)
+
+-- | The six phase-level action windows where 'autoSkipActionWindows'
+-- applies. Combat sub-step windows (After*) are always auto-passed by
+-- 'openAutoCombatWindow' and don't go through this path.
+isAutoSkippableTrigger :: ActionWindowTrigger -> Bool
+isAutoSkippableTrigger = \case
+  BeginningOfTurnActionWindow -> True
+  KingdomActionWindow -> True
+  QuestActionWindow -> True
+  CapitalActionWindow -> True
+  BattlefieldActionWindow -> True
+  AfterDeclareCombatTarget -> False
+  AfterDeclareAttackers -> False
+  AfterDeclareDefenders -> False
+  AfterAssignCombatDamage -> False
+  AfterApplyCombatDamage -> False
+  EndOfTurnActionWindow -> True
+
+-- | A player has "something to do" in an action window if they hold a
+-- Tactic card in hand or control an in-play card that prints any
+-- action ability. Cost and loyalty are intentionally not consulted —
+-- erring toward the prompt keeps the spectator-information tell weak
+-- and avoids skipping past a state the player may still want to react
+-- to.
+playerHasActionMove :: PlayerKey -> Game -> Bool
+playerHasActionMove pk g =
+  let p = lookupPlayer pk g
+      tacticInHand = any handIsTactic p.hand
+      controlsAction =
+        any (\u -> u.controller == pk && not (null u.cardDef.actions)) g.units
+          || any
+            (\s -> s.controller == pk && not (null s.cardDef.actions))
+            g.supports
+          || any
+            (\q -> q.controller == pk && not (null q.cardDef.actions))
+            g.quests
+          || any
+            (\l -> l.controller == pk && not (null l.cardDef.actions))
+            g.legends
+   in tacticInHand || controlsAction
+  where
+    handIsTactic c = case c.def of
+      TacticCardDef _ -> True
+      _ -> False
+
+-- | If the host enabled 'autoSkipActionWindows', the window is one of
+-- the four phase action windows, and the priority holder has no
+-- playable move, enqueue a 'PassPriority' for them. Combat sub-step
+-- windows skip this path so they don't double-pass on top of the
+-- explicit passes 'openAutoCombatWindow' already enqueues.
+maybeAutoPassPriority
+  :: ActionWindowTrigger -> PlayerKey -> StateT Game GameT ()
+maybeAutoPassPriority trigger pk = do
+  g <- get
+  when
+    ( g.autoSkipActionWindows
+        && isAutoSkippableTrigger trigger
+        && not (playerHasActionMove pk g)
+    )
+    (send (PassPriority pk))
 
 -- | Translate a resolved prompt into engine messages. Each callback
 -- knows the structure of its expected result (units to summon, unit
@@ -2972,6 +3056,7 @@ phaseParam = \case
 
 triggerParam :: ActionWindowTrigger -> Text
 triggerParam = \case
+  BeginningOfTurnActionWindow -> "BeginningOfTurnActionWindow"
   KingdomActionWindow -> "KingdomActionWindow"
   QuestActionWindow -> "QuestActionWindow"
   CapitalActionWindow -> "CapitalActionWindow"
@@ -2981,6 +3066,7 @@ triggerParam = \case
   AfterDeclareDefenders -> "AfterDeclareDefenders"
   AfterAssignCombatDamage -> "AfterAssignCombatDamage"
   AfterApplyCombatDamage -> "AfterApplyCombatDamage"
+  EndOfTurnActionWindow -> "EndOfTurnActionWindow"
 
 elimReasonParam :: EliminationReason -> Text
 elimReasonParam = \case
@@ -3016,6 +3102,6 @@ applyMessage g m = applyMessages g [m]
 -- 'GameSetup' — to actually begin turn 1, follow with
 -- @'applyMessage' g 'BeginGame'@.
 runSetup :: IO (Either DeckLoadError Game)
-runSetup = case newGame dwarfStarterDeck dwarfStarterDeck of
+runSetup = case newGame dwarfStarterDeck dwarfStarterDeck defaultGameOptions of
   Left err -> pure $ Left err
   Right game -> Right <$> applyMessage game Setup

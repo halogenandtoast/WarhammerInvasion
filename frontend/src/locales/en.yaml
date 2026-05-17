@@ -734,6 +734,8 @@ lobby:
       password_help: If you set a password, friends can join via this lobby without the link.
       spectators_label: Allow spectators
       spectators_help: Anyone with access can watch even when both seats are taken.
+      auto_skip_label: Auto-skip empty action windows
+      auto_skip_help: When neither player has a tactic in hand or an action ability to trigger, pass priority automatically. Speeds play up at the cost of a small information tell.
       submit: Create game
       submitting: Creating…
     card:
@@ -852,6 +854,7 @@ game:
     window:
       heading: Action window
       trigger:
+        BeginningOfTurnActionWindow: Beginning of turn
         KingdomActionWindow: After kingdom resources
         QuestActionWindow: After quest draw
         CapitalActionWindow: Capital phase
@@ -861,6 +864,7 @@ game:
         AfterDeclareDefenders: After declaring defenders
         AfterAssignCombatDamage: After assigning damage
         AfterApplyCombatDamage: After applying damage
+        EndOfTurnActionWindow: End of turn
       waiting_you: Your call — act or pass.
       waiting_them: Waiting on {name}…
       passes_so_far_zero: No one has passed yet.
@@ -902,6 +906,8 @@ game:
       play_tactic: Play tactic
       play_legend: Play legend
       cancel: Cancel
+    quest:
+      controlled_by: "{name}'s"
 
 cards:
   page_title: Card Database
@@ -1048,6 +1054,7 @@ log:
     CapitalPhase: Capital
     BattlefieldPhase: Battlefield
   trigger_name:
+    BeginningOfTurnActionWindow: Beginning of turn
     KingdomActionWindow: Kingdom
     QuestActionWindow: Quest
     CapitalActionWindow: Capital
@@ -1057,6 +1064,7 @@ log:
     AfterDeclareDefenders: After declare defenders
     AfterAssignCombatDamage: After assign combat damage
     AfterApplyCombatDamage: After apply combat damage
+    EndOfTurnActionWindow: End of turn
   elim_reason:
     DeckedOut: decked out
     CapitalBurned: capital burned

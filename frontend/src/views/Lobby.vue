@@ -18,6 +18,11 @@ const newPassword = ref('')
 // matches the new default when they change their mind. They can still
 // override it.
 const newAllowSpectators = ref(true)
+// Off by default — every action window waits for a manual pass unless
+// the host opts in. Turning this on makes the engine auto-skip windows
+// where the priority holder can't play anything; the speed-up costs a
+// (mild) information tell to the opponent.
+const newAutoSkipActionWindows = ref(false)
 const creating = ref(false)
 
 const promptForPassword = ref<GameSummary | null>(null)
@@ -168,6 +173,7 @@ function submitHost() {
     visibility: newVisibility.value,
     password: newVisibility.value === 'Private' && pw.length > 0 ? pw : null,
     allowSpectators: newAllowSpectators.value,
+    autoSkipActionWindows: newAutoSkipActionWindows.value,
   })
 }
 
@@ -377,6 +383,14 @@ function formatTime(at: string): string {
               <span>
                 <strong>{{ t('lobby.games.new_form.spectators_label') }}</strong>
                 <small>{{ t('lobby.games.new_form.spectators_help') }}</small>
+              </span>
+            </label>
+
+            <label class="spec-option">
+              <input v-model="newAutoSkipActionWindows" type="checkbox" />
+              <span>
+                <strong>{{ t('lobby.games.new_form.auto_skip_label') }}</strong>
+                <small>{{ t('lobby.games.new_form.auto_skip_help') }}</small>
               </span>
             </label>
 

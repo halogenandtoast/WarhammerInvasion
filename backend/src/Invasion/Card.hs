@@ -155,6 +155,35 @@ scout = keyword Scout
 counterstrike :: Int -> CardBuilder Unit ()
 counterstrike n = keyword (Counterstrike n)
 
+-- | Ambush keyword (FAQ 2.2 v2.0): only triggerable while the host
+-- development is face-down. Used by Cataclysm-era developments.
+ambush :: CardBuilder k ()
+ambush = keyword Ambush
+
+-- | Order Only keyword: cannot be included in a Destruction deck.
+orderOnly :: CardBuilder k ()
+orderOnly = keyword OrderOnly
+
+-- | Destruction Only keyword: cannot be included in an Order deck.
+destructionOnly :: CardBuilder k ()
+destructionOnly = keyword DestructionOnly
+
+-- | Limit one Hero per zone: while a player controls this Hero in a
+-- zone, neither player may put another Hero into that same zone.
+limitOneHeroPerZone :: CardBuilder Unit ()
+limitOneHeroPerZone = keyword LimitOneHeroPerZone
+
+-- | Zone-restriction keywords for cards that may only enter play in a
+-- specific zone.
+kingdomOnly :: CardBuilder k ()
+kingdomOnly = keyword KingdomOnly
+
+questOnly :: CardBuilder k ()
+questOnly = keyword QuestOnly
+
+battlefieldOnly :: CardBuilder k ()
+battlefieldOnly = keyword BattlefieldOnly
+
 -- | Builder setter for a card's bespoke 'Receive' handler. The default
 -- (set by 'emptyCardDef') is 'noReceive' — a no-op.
 onReceive :: Receive k -> CardBuilder k ()
@@ -587,8 +616,9 @@ dwarfMasons = unit "core-009" "Dwarf Masons" do
   power 1
   hitPoints 3
   trait Engineer
+  -- FAQ 2.2: "After" → "When" on card text.
   body
-    "Forced: After this unit enters play, put the top card of your deck facedown into this zone as a development."
+    "Forced: When this unit enters play, put the top card of your deck facedown into this zone as a development."
   flavor "Put your faith in the rock, lad."
   -- AddDevelopment doesn't actually consume the top deck card today
   -- (deck draws happen via Draw; placing as a facedown dev just bumps
@@ -915,7 +945,8 @@ zhufbarEngineers = unit "core-002" "Zhufbar Engineers" do
   power 1
   hitPoints 3
   trait Engineer
-  body "Forced: After this unit leaves play, each opponent must sacrifice a unit in this corresponding zone."
+  -- FAQ 2.2: "After" → "When" on card text.
+  body "Forced: When this unit leaves play, each opponent must sacrifice a unit in this corresponding zone."
 
 hammererOfKarakAzul :: CardDef Unit
 hammererOfKarakAzul = unit "core-003" "Hammerer of Karak Azul" do
@@ -994,9 +1025,11 @@ bloodthirster = unit "core-092" "Bloodthirster" do
   hitPoints 8
   trait Daemon
   keyword DamageCannotBeCancelled
+  -- FAQ 2.2 General: "After your turn begins" → "At the beginning of
+  -- your turn". The trigger fires in Phase 0 (Beginning of the Turn).
   body
     "Damage cannot be cancelled.\n\
-    \Forced: After your turn begins, each player must sacrifice a unit in this corresponding zone."
+    \Forced: At the beginning of your turn, each player must sacrifice a unit in this corresponding zone."
   -- "Each player must sacrifice a unit in this corresponding zone"
   -- — block on each player's prompt in sequence. The engine
   -- suspends until each one answers; if a player has no eligible
@@ -1501,6 +1534,7 @@ dominionOfChaos = quest "the-ruinous-hordes-082" "Dominion of Chaos" do
   cost 0
   loyalty 3
   trait Mission
+  keyword PlayInOpponentArea
   body
     "Play in any opponent's zone under your control. \
     \When you assign combat damage to this zone, you may place any number of that combat damage on this quest instead. \
@@ -1683,9 +1717,10 @@ mariusLeitdorf = unit "core-037" "Marius Leitdorf" do
   power 3
   hitPoints 3
   traits [Hero, Warrior]
+  -- FAQ 2.2: "After" → "When".
   body
     "Limit one Hero per zone.\n\
-    \Forced: After this unit enters play, draw a card."
+    \Forced: When this unit enters play, draw a card."
   onReceive $ Receive \msg _owner self -> case msg of
     UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key ->
       push (Draw (Drawing StandardDraw self.controller))
@@ -1974,9 +2009,10 @@ teclis = unit "core-059" "Teclis" do
   power 2
   hitPoints 4
   traits [Hero, Sorcerer]
+  -- FAQ 2.2: "After" → "When".
   body
     "Limit one Hero per zone.\n\
-    \Forced: After this unit enters play, draw 2 cards."
+    \Forced: When this unit enters play, draw 2 cards."
   onReceive $ Receive \msg _owner self -> case msg of
     UnitEnteredPlay pk ukey | pk == self.controller && ukey == self.key -> do
       push (Draw (Drawing StandardDraw self.controller))
@@ -2530,9 +2566,10 @@ skarsnik = unit "core-107" "Skarsnik" do
   power 2
   hitPoints 3
   traits [Hero, Warrior]
+  -- FAQ 2.2: "After" → "When".
   body
     "Limit one Hero per zone.\n\
-    \Forced: After this unit enters play, search the top 3 cards of your deck for a Goblin unit and put it into play. Shuffle your deck."
+    \Forced: When this unit enters play, search the top 3 cards of your deck for a Goblin unit and put it into play. Shuffle your deck."
 
 gorbadIronclaw :: CardDef Unit
 gorbadIronclaw = unit "core-108" "Gorbad Ironclaw" do

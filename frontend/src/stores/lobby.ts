@@ -116,6 +116,7 @@ function createGame(input: {
   visibility: 'Public' | 'Private'
   password: string | null
   allowSpectators: boolean | null
+  autoSkipActionWindows: boolean | null
 }) {
   socket?.send({ tag: 'LobbyCreateGame', ...input })
 }

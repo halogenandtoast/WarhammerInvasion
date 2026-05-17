@@ -203,7 +203,7 @@ handleLobbyIn env user = \case
         atomically do
           pushLobbyChat env.lobby line
           broadcastLobby env.lobby LobbyChatNew {line}
-  LobbyCreateGame {name = gname, visibility, password, allowSpectators = mAllow} -> do
+  LobbyCreateGame {name = gname, visibility, password, allowSpectators = mAllow, autoSkipActionWindows = mAutoSkip} -> do
     let trimmedName = T.strip gname
     case validateGameName trimmedName of
       Just code -> notifyError env user code
@@ -218,8 +218,9 @@ handleLobbyIn env user = \case
                 Nothing -> case visibility of
                   Public -> True
                   Private -> False
+              autoSkip = fromMaybe False mAutoSkip
           slot <- atomically do
-            slot <- createGame env.lobby gid trimmedName user visibility password allowSpec token
+            slot <- createGame env.lobby gid trimmedName user visibility password allowSpec autoSkip token
             sm <- summariesSTM env.lobby
             broadcastLobby env.lobby LobbyGamesUpdate {games = sm}
             pure slot
@@ -512,19 +513,24 @@ handleGameIn env slot user = \case
                       case (engineDeckFromDb d1, engineDeckFromDb d2) of
                         (Left e, _) -> sendGameError slot user e
                         (_, Left e) -> sendGameError slot user e
-                        (Right ed1, Right ed2) -> case newGame ed1 ed2 of
-                          Left err -> sendGameError slot user (T.pack err)
-                          Right g0 -> do
-                            -- Spin up the per-game engine worker. It
-                            -- owns the engine state from here on; the
-                            -- WebSocket handlers post to its mailbox
-                            -- via 'postToEngine'. Setup + BeginGame
-                            -- are seeded by 'startEngineWorker'.
-                            startEngineWorker slot g0
-                            atomically do
-                              trySetStatus slot StatusPlaying
-                              summaries <- summariesSTM env.lobby
-                              broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
+                        (Right ed1, Right ed2) -> do
+                          let opts =
+                                Engine.GameOptions
+                                  { autoSkipActionWindows = slot.autoSkipActionWindows
+                                  }
+                          case newGame ed1 ed2 opts of
+                            Left err -> sendGameError slot user (T.pack err)
+                            Right g0 -> do
+                              -- Spin up the per-game engine worker. It
+                              -- owns the engine state from here on; the
+                              -- WebSocket handlers post to its mailbox
+                              -- via 'postToEngine'. Setup + BeginGame
+                              -- are seeded by 'startEngineWorker'.
+                              startEngineWorker slot g0
+                              atomically do
+                                trySetStatus slot StatusPlaying
+                                summaries <- summariesSTM env.lobby
+                                broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
   GamePassPriority -> do
     seatKey <- atomically do
       sm <- readTVar slot.seats

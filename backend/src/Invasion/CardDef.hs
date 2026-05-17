@@ -20,10 +20,29 @@ import {-# SOURCE #-} Invasion.Message (Message)
 data Keyword
   = Toughness Number
   | BattlefieldOnly
+  | KingdomOnly
+  | QuestOnly
   | Scout
   | Limited
   | DamageCannotBeCancelled
   | Counterstrike Int
+  | PlayInOpponentArea
+    -- ^ Quest enters play in the opponent's play area while remaining
+    -- under the playing player's control. Used by Dominion of Chaos.
+  | Ambush
+    -- ^ Triggerable only while the host development is facedown
+    -- (FAQ 2.2 v2.0 keyword). If an effect has flipped the development
+    -- face-up, its Ambush ability cannot fire.
+  | OrderOnly
+    -- ^ Neutral-card restriction: cannot be included in a Destruction
+    -- (Chaos / Orc / Dark Elf) deck.
+  | DestructionOnly
+    -- ^ Neutral-card restriction: cannot be included in an Order
+    -- (Empire / Dwarf / High Elf) deck.
+  | LimitOneHeroPerZone
+    -- ^ Hero restriction. While a player controls a Hero in a given
+    -- zone, neither player may put, play, or move another Hero into
+    -- that same zone (FAQ 2.2 clarification).
   deriving stock (Show, Eq)
 
 data Cost = PayResources Number | NoCost

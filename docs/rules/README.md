@@ -11,11 +11,18 @@ written with the engine in mind.
   condition, deckbuilding constraints.
 - [cards.md](./cards.md) — card types, anatomy, costs (printed + loyalty),
   uniqueness, developments.
-- [turn-sequence.md](./turn-sequence.md) — the four phases, action windows,
+- [turn-sequence.md](./turn-sequence.md) — the five phases (Phase 0
+  Beginning of the Turn through Phase 4 Battlefield), action windows,
   first-player penalty.
 - [combat.md](./combat.md) — battlefield phase in detail: the 5 combat steps.
 - [effects.md](./effects.md) — actions, forced effects, constant effects,
   keywords, corruption, sacrifice, control vs. ownership.
+- [timing.md](./timing.md) — FAQ 2.2 detailed timing structure: action
+  windows, trigger resolution, simultaneous effects, "just played",
+  triggered/conditional actions.
+- [damage.md](./damage.md) — combat / non-combat / indirect damage;
+  assigned vs. applied; cancelling, redirecting, moving damage; Toughness
+  vs. uncancellable.
 - [glossary.md](./glossary.md) — alphabetical lookup of terms.
 
 ## The Golden Rule
@@ -55,3 +62,19 @@ able to interpose.
   Do not collapse these.
 - Cancelled damage tokens return to the pool, they do not disappear into
   the void — preserve the token-pool model if you care about token economy.
+
+## Errata-driven terminology
+
+The FAQ 2.2 normalises several phrases. When you read older rule text
+or older card text, translate it before you act on it:
+
+| Old wording | Current wording |
+|---|---|
+| "After your turn begins…" | "At the beginning of your turn…" — fires in **Phase 0** |
+| "After this unit enters play…" / "After this unit leaves play…" | "When this unit enters / leaves play…" |
+| "damage dealt" / "damage assigned" / "damage just assigned" *on redirect cards* | "damage that would be dealt" |
+| "If you control a non-[faction] card…" | "If you control a faceup non-[faction] **unit or support card**…" |
+
+When in doubt, the *most recently printed* version of a card is the
+legal version. See [timing.md](./timing.md) for how trigger conditions
+actually fire.

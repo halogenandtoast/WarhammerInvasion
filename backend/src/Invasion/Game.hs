@@ -64,7 +64,11 @@ data ActionWindow = ActionWindow
 -- know what's actionable here) and for restricting which card effects
 -- can be played in this window.
 data ActionWindowTrigger
-  = KingdomActionWindow
+  = BeginningOfTurnActionWindow
+    -- ^ FAQ 2.2 Phase 0. Opened after every "at the beginning of the
+    -- turn" triggered Constant / Forced effect has resolved, before
+    -- the Kingdom phase begins. Either player may take actions here.
+  | KingdomActionWindow
     -- ^ Opened after resources are collected.
   | QuestActionWindow
     -- ^ Opened after quest-zone cards are drawn.
@@ -82,6 +86,9 @@ data ActionWindowTrigger
   | AfterDeclareDefenders
   | AfterAssignCombatDamage
   | AfterApplyCombatDamage
+  | EndOfTurnActionWindow
+    -- ^ FAQ 2.2 Phase 5. Opened at end of turn before "at the end of
+    -- the turn" triggers resolve and UntilEndOfTurn modifiers expire.
   deriving stock Show
 
 -- | The pass-bookkeeping needed to detect "both pass consecutively."
@@ -343,6 +350,12 @@ data Game = Game
     -- returns early as long as this is set, leaving the queue
     -- partially-drained so the wire layer can push the state and
     -- wait for the client's response.
+  , autoSkipActionWindows :: Bool
+    -- ^ Host-controlled setting captured at game creation. When 'True'
+    -- the engine auto-passes priority whenever the holder of a phase
+    -- action window has neither a Tactic card in hand nor an in-play
+    -- own card carrying an action ability. Combat sub-step windows
+    -- already auto-pass regardless of this flag.
   }
   deriving stock Show
 

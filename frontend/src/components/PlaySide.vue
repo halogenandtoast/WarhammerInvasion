@@ -28,8 +28,10 @@ import type {
   EngineCardDef,
   EngineLegend,
   EnginePlayer,
+  EngineQuest,
   EngineUnit,
   EngineZone,
+  PlayerKey,
   ZoneKind,
 } from '../api/protocol'
 import { zoneBurning, zoneHitPoints } from '../api/protocol'
@@ -40,9 +42,15 @@ import CardArt from './CardArt.vue'
 const props = defineProps<{
   player: EnginePlayer
   units: EngineUnit[]
+  quests: EngineQuest[]
   legend: EngineLegend | null
   perspective: 'self' | 'opponent'
   seatName: string
+  // Lookup of seat display names for both players. Used to label
+  // controller-overlay badges on quests whose controller differs from
+  // their zoneOwner (e.g. Dominion of Chaos played into the opponent's
+  // play area).
+  seatNames: Record<PlayerKey, string>
   isActive: boolean
   isFirstPlayer: boolean
   canPlayCard?: (card: EngineCardDef) => boolean
@@ -399,6 +407,12 @@ interface CardSlot {
   // Original EngineCard (only present for hand cards so the click
   // handler can pass it back up).
   handCard?: EngineCard | null
+  // Quest-only: when this slot belongs to a quest whose controller
+  // differs from the zoneOwner (i.e. Dominion of Chaos sitting in the
+  // opponent's area), render an overlay tagging the real controller.
+  controllerLabel?: string
+  // Quest-only: damage / counter tokens currently sitting on the quest.
+  tokens?: number
 }
 
 const cardSlots = computed<CardSlot[]>(() => {
@@ -481,10 +495,43 @@ const cardSlots = computed<CardSlot[]>(() => {
         })
       })
     } else {
-      // Portrait zone — kingdom / quest. Cards stack vertically.
+      // Portrait zone — kingdom / quest. Cards stack vertically. The
+      // quest zone also hosts any in-play quest cards whose zoneOwner
+      // is this player; we stack the quests above the units.
       const xSlot = tallStackX(zr.x, zr.w)
-      const ysLane = tallStackYs(zr.y + 26, zr.h - 26 - 30, units.length)
+      const zoneQuests =
+        zr.z.kind === 'QuestZone'
+          ? props.quests.filter((q) => q.zoneOwner === props.player.key)
+          : []
+      const ysLane = tallStackYs(
+        zr.y + 26,
+        zr.h - 26 - 30,
+        zoneQuests.length + units.length,
+      )
+
+      zoneQuests.forEach((q, i) => {
+        slots.push({
+          key: `quest-${q.key}`,
+          cardKey: q.key,
+          card: { code: q.cardDef.code, title: q.cardDef.title },
+          faceDown: false,
+          rotated: false,
+          clickable: false,
+          x: xSlot,
+          y: ysLane[i],
+          w: CARD_SM.w,
+          h: CARD_SM.h,
+          zIndex: 25 + i,
+          controllerLabel:
+            q.controller !== q.zoneOwner
+              ? props.seatNames[q.controller]
+              : undefined,
+          tokens: q.tokens > 0 ? q.tokens : undefined,
+        })
+      })
+
       units.forEach((u, i) => {
+        const yBase = ysLane[zoneQuests.length + i]
         u.attachments.forEach((att, ai) => {
           slots.push({
             key: `att-${att.key}`,
@@ -494,7 +541,7 @@ const cardSlots = computed<CardSlot[]>(() => {
             rotated: false,
             clickable: false,
             x: xSlot,
-            y: ysLane[i] + (u.attachments.length - ai) * ATTACHMENT_OFFSET,
+            y: yBase + (u.attachments.length - ai) * ATTACHMENT_OFFSET,
             w: CARD_SM.w,
             h: CARD_SM.h,
             zIndex: 30 + ai,
@@ -508,7 +555,7 @@ const cardSlots = computed<CardSlot[]>(() => {
           rotated: false,
           clickable: false,
           x: xSlot,
-          y: ysLane[i],
+          y: yBase,
           w: CARD_SM.w,
           h: CARD_SM.h,
           zIndex: 30 + u.attachments.length + 1,
@@ -810,6 +857,19 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
           :face-down="slot.faceDown"
           :rotated="slot.rotated"
         />
+        <!-- Controller-overlay banner: shown on quests whose controller
+             differs from the player whose zone visually houses them. -->
+        <div
+          v-if="slot.controllerLabel"
+          class="card-controller-banner"
+          :title="t('game.play.quest.controlled_by', { name: slot.controllerLabel })"
+        >
+          {{ t('game.play.quest.controlled_by', { name: slot.controllerLabel }) }}
+        </div>
+        <!-- Quest token counter (corruption / resource accumulator). -->
+        <div v-if="slot.tokens" class="card-token-badge">
+          {{ slot.tokens }}
+        </div>
       </div>
     </div>
   </div>
@@ -845,6 +905,47 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
 }
 .card-slot.clickable:hover {
   filter: drop-shadow(0 0 6px var(--accent, #c4634a));
+}
+
+.card-controller-banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: 2px 4px;
+  background: var(--accent-strong, #c4634a);
+  color: var(--on-accent, #fff);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  text-align: center;
+  border-top-left-radius: var(--card-radius);
+  border-top-right-radius: var(--card-radius);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-token-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--fg, #fff);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--accent-strong, #c4634a);
+  border-radius: 9px;
+  pointer-events: none;
 }
 
 .seat-name {

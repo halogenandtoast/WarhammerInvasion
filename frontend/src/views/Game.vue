@@ -145,8 +145,11 @@ const windowTriggerLabel = computed(() =>
 )
 
 // Which phase pip the open window belongs to. Every combat sub-step
-// trigger lives inside the Battlefield phase.
+// trigger lives inside the Battlefield phase. The FAQ-2.2 "Beginning of
+// turn" (Phase 0) and "End of turn" (Phase 5) windows have no dedicated
+// pip — they bracket the Kingdom and Battlefield phases respectively.
 const TRIGGER_TO_PHASE: Record<ActionWindowTrigger, Phase> = {
+  BeginningOfTurnActionWindow: 'KingdomPhase',
   KingdomActionWindow: 'KingdomPhase',
   QuestActionWindow: 'QuestPhase',
   CapitalActionWindow: 'CapitalPhase',
@@ -156,6 +159,7 @@ const TRIGGER_TO_PHASE: Record<ActionWindowTrigger, Phase> = {
   AfterDeclareDefenders: 'BattlefieldPhase',
   AfterAssignCombatDamage: 'BattlefieldPhase',
   AfterApplyCombatDamage: 'BattlefieldPhase',
+  EndOfTurnActionWindow: 'BattlefieldPhase',
 }
 const awPhase = computed<Phase | null>(() =>
   aw.value ? TRIGGER_TO_PHASE[aw.value.trigger] : null,
