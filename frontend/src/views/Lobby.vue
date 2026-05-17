@@ -48,10 +48,11 @@ onBeforeUnmount(() => {
 // bootstrap (ready flips false→true), sign-in, and sign-out. The
 // server hands back a fresh welcome that reflects whichever identity
 // we open the socket with (signed-in user or anonymous guest).
+// `lobby.connect()` is identity-aware: it no-ops if the live socket
+// already matches the current user.
 watch(
-  () => [auth.ready.value, auth.accessToken.value] as const,
+  () => [auth.ready.value, auth.user.value?.userId ?? null] as const,
   () => {
-    lobby.disconnect()
     lobby.connect()
   },
 )

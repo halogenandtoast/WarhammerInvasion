@@ -36,6 +36,13 @@ const _lastJoined = ref<{
 } | null>(null)
 
 let socket: TypedSocket<LobbyIn> | null = null
+// Identity (user id, or null for guest) the current socket was opened
+// with. Lets `connect()` notice when the live socket is bound to a
+// different identity than the current auth state — which happens when
+// the user signs in or out on a page that isn't the lobby and then
+// navigates back: the watcher in Lobby.vue is unmounted at that point,
+// so it can't trigger the reconnect itself.
+let openedAs: string | null = null
 
 function reset() {
   _you.value = null
@@ -88,12 +95,19 @@ function handle(msg: LobbyOut) {
 }
 
 function connect() {
-  if (socket) return
   // Wait for the auth bootstrap to settle so we don't open a guest
   // socket only to immediately replace it once the access token
   // arrives. Once `ready`, we open either authed (token present) or
   // guest (token null); the server handles both.
   if (!auth.ready.value) return
+  const identity = auth.user.value?.userId ?? null
+  if (socket && openedAs === identity) return
+  if (socket) {
+    socket.close()
+    socket = null
+    reset()
+  }
+  openedAs = identity
   const token = auth.accessToken.value
   socket = openSocket<LobbyOut, LobbyIn>(
     { url: '/ws/lobby', token },
@@ -111,6 +125,7 @@ function disconnect() {
     socket.close()
     socket = null
   }
+  openedAs = null
   reset()
 }
 
