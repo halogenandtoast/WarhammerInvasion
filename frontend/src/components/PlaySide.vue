@@ -35,7 +35,7 @@ import type {
   ZoneKind,
 } from '../api/protocol'
 import { zoneBurning, zoneHitPoints } from '../api/protocol'
-import { capitalImageFor, raceLabel } from '../lib/capital'
+import { capitalImageFor, raceLabel } from '../lib/race'
 import { CARD_SM } from '../lib/cardSize'
 import CardArt from './CardArt.vue'
 

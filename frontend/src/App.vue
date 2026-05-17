@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Rules from './views/Rules.vue'
 import Cards from './views/Cards.vue'
@@ -11,60 +11,9 @@ import DeckView from './views/DeckView.vue'
 import Lobby from './views/Lobby.vue'
 import Game from './views/Game.vue'
 import { auth } from './stores/auth'
-
-type Route =
-  | { name: 'rules' }
-  | { name: 'cards' }
-  | { name: 'login' }
-  | { name: 'register' }
-  | { name: 'decks' }
-  | { name: 'deck-view'; id: string }
-  | { name: 'deck-edit'; id: string }
-  | { name: 'lobby' }
-  | { name: 'game'; id: string; inviteToken: string | null; password: string | null }
+import { gateRoute, installRouter, navigate, route, uninstallRouter } from './router'
 
 const { t } = useI18n({ useScope: 'global' })
-
-function parseRoute(): Route {
-  const hash = window.location.hash.replace(/^#\/?/, '')
-  if (hash.startsWith('cards')) return { name: 'cards' }
-  if (hash === 'login') return { name: 'login' }
-  if (hash === 'register') return { name: 'register' }
-  if (hash === 'decks') return { name: 'decks' }
-  if (hash === 'rules') return { name: 'rules' }
-  if (hash === 'lobby' || hash === '') return { name: 'lobby' }
-  const gameMatch = /^games\/([\w-]+)(?:\?(.*))?$/.exec(hash)
-  if (gameMatch) {
-    const id = gameMatch[1]
-    const qs = new URLSearchParams(gameMatch[2] ?? '')
-    return {
-      name: 'game',
-      id,
-      inviteToken: qs.get('t'),
-      password: qs.get('password'),
-    }
-  }
-  const edit = /^decks\/([\w-]+)\/edit$/.exec(hash)
-  if (edit) return { name: 'deck-edit', id: edit[1] }
-  const view = /^decks\/([\w-]+)$/.exec(hash)
-  if (view) return { name: 'deck-view', id: view[1] }
-  return { name: 'lobby' }
-}
-
-const route = ref<Route>(parseRoute())
-
-function onHashChange() {
-  route.value = parseRoute()
-}
-
-function navigate(target: string) {
-  if (target.startsWith('#')) {
-    window.location.hash = target.slice(1)
-  } else {
-    window.location.hash = target
-  }
-  route.value = parseRoute()
-}
 
 function navClick(e: Event, target: string) {
   e.preventDefault()
@@ -91,34 +40,23 @@ const navItems = computed<{ id: string; href: string; key: NavKey }[]>(() => {
   return base
 })
 
+const effectiveRoute = computed(() =>
+  gateRoute(route.value, {
+    isAuthenticated: auth.isAuthenticated.value,
+    ready: auth.ready.value,
+  }),
+)
+
 const view = computed(() => {
-  switch (route.value.name) {
-    case 'rules':
-      return { component: Rules, props: {} as Record<string, unknown> }
-    case 'cards':
-      return { component: Cards, props: {} as Record<string, unknown> }
-    case 'login':
-      return { component: Login, props: {} }
-    case 'register':
-      return { component: Register, props: {} }
-    case 'decks':
-      if (!auth.isAuthenticated.value && auth.ready.value) {
-        navigate('#/login')
-        return { component: Login, props: {} }
-      }
-      return { component: Decks, props: {} }
-    case 'deck-view':
-      if (!auth.isAuthenticated.value && auth.ready.value) {
-        navigate('#/login')
-        return { component: Login, props: {} }
-      }
-      return { component: DeckView, props: { deckId: route.value.id } }
-    case 'deck-edit':
-      if (!auth.isAuthenticated.value && auth.ready.value) {
-        navigate('#/login')
-        return { component: Login, props: {} }
-      }
-      return { component: DeckEdit, props: { deckId: route.value.id } }
+  const r = effectiveRoute.value
+  switch (r.name) {
+    case 'rules': return { component: Rules, props: {} as Record<string, unknown> }
+    case 'cards': return { component: Cards, props: {} }
+    case 'login': return { component: Login, props: {} }
+    case 'register': return { component: Register, props: {} }
+    case 'decks': return { component: Decks, props: {} }
+    case 'deck-view': return { component: DeckView, props: { deckId: r.id } }
+    case 'deck-edit': return { component: DeckEdit, props: { deckId: r.id } }
     case 'lobby':
       // Lobby is the home page — signed in or not. Guests get a
       // read-only view (chat + games), with sign-in CTAs for the
@@ -130,48 +68,32 @@ const view = computed(() => {
       // the lobby UI before they navigate here.
       return {
         component: Game,
-        props: {
-          gameId: route.value.id,
-          inviteToken: route.value.inviteToken,
-          password: route.value.password,
-        },
+        props: { gameId: r.id, inviteToken: r.inviteToken, password: r.password },
       }
-    default:
-      return { component: Lobby, props: {} }
   }
 })
 
-const isActive = (key: string): boolean => {
-  if (key === 'rules') return route.value.name === 'rules'
-  if (key === 'cards') return route.value.name === 'cards'
-  if (key === 'decks')
-    return (
-      route.value.name === 'decks' ||
-      route.value.name === 'deck-view' ||
-      route.value.name === 'deck-edit'
-    )
-  if (key === 'play') return route.value.name === 'lobby' || route.value.name === 'game'
-  return false
+const NAV_ACTIVE: Record<NavKey, ReadonlySet<string>> = {
+  play: new Set(['lobby', 'game']),
+  rules: new Set(['rules']),
+  cards: new Set(['cards']),
+  decks: new Set(['decks', 'deck-view', 'deck-edit']),
 }
 
+const isActive = (key: NavKey): boolean => NAV_ACTIVE[key].has(route.value.name)
+
 onMounted(async () => {
-  window.addEventListener('hashchange', onHashChange)
+  installRouter()
   await auth.bootstrap()
-  // Re-evaluate the current route now that we know the auth state.
-  route.value = parseRoute()
 })
-onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
+onUnmounted(uninstallRouter)
 </script>
 
 <template>
   <div class="app-shell">
     <nav class="topnav" :aria-label="t('app.nav.primary_label')">
       <div class="topnav-inner">
-        <a
-          class="brand"
-          href="#/"
-          @click="navClick($event, '#/')"
-        >
+        <a class="brand" href="#/" @click="navClick($event, '#/')">
           <span class="brand-mark" aria-hidden="true">⚔</span>
           <span class="brand-text">{{ t('app.brand') }}</span>
         </a>
@@ -205,7 +127,7 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
         </div>
       </div>
     </nav>
-    <component :is="view.component" v-bind="view.props" @navigate="navigate" />
+    <component :is="view.component" v-bind="view.props" />
   </div>
 </template>
 

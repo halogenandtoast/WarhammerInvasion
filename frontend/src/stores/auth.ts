@@ -7,7 +7,14 @@
 // is still valid.
 
 import { computed, ref } from 'vue'
+import { ApiError, postUnauthed } from '../api/client'
 
+export { ApiError as AuthError }
+
+// Shape returned by the backend's `/api/auth/*` endpoints. See
+// `userJsonInline` in `backend/src/Invasion/Server.hs`. NOTE: the field
+// is `id`, not `userId` (the lobby/game wire types separately use
+// `userId` for the same UUID, so don't confuse them).
 export interface AuthUser {
   id: string
   email: string
@@ -26,81 +33,41 @@ const _ready = ref(false)
 
 let inflightRefresh: Promise<boolean> | null = null
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(body),
-    credentials: 'include',
-  })
-  if (res.status === 401) throw new AuthError(res.status, await safeError(res))
-  if (!res.ok) throw new AuthError(res.status, await safeError(res))
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
-}
-
-async function safeError(res: Response): Promise<string> {
-  try {
-    const j = await res.json()
-    if (j && typeof j === 'object' && typeof (j as { error?: string }).error === 'string') {
-      return (j as { error: string }).error
-    }
-  } catch {
-    /* ignore */
-  }
-  return `http_${res.status}`
-}
-
-export class AuthError extends Error {
-  status: number
-  code: string
-
-  constructor(status: number, code: string) {
-    super(code)
-    this.status = status
-    this.code = code
-  }
-}
-
 function apply(session: SessionResponse) {
   _user.value = session.user
   _accessToken.value = session.accessToken
 }
 
+function clearSession() {
+  _user.value = null
+  _accessToken.value = null
+}
+
 async function register(email: string, password: string, displayName: string) {
-  const s = await postJson<SessionResponse>('/api/auth/register', {
-    email,
-    password,
-    displayName,
-  })
-  apply(s)
+  apply(await postUnauthed<SessionResponse>('/api/auth/register', { email, password, displayName }))
 }
 
 async function login(email: string, password: string) {
-  const s = await postJson<SessionResponse>('/api/auth/login', { email, password })
-  apply(s)
+  apply(await postUnauthed<SessionResponse>('/api/auth/login', { email, password }))
 }
 
 async function logout() {
   try {
-    await postJson<void>('/api/auth/logout', {})
+    await postUnauthed<void>('/api/auth/logout', {})
   } catch {
     // server-side cleanup is best-effort; always drop local state
   }
-  _user.value = null
-  _accessToken.value = null
+  clearSession()
 }
 
 async function refresh(): Promise<boolean> {
   if (inflightRefresh) return inflightRefresh
   inflightRefresh = (async () => {
     try {
-      const s = await postJson<SessionResponse>('/api/auth/refresh', {})
-      apply(s)
+      apply(await postUnauthed<SessionResponse>('/api/auth/refresh', {}))
       return true
     } catch {
-      _user.value = null
-      _accessToken.value = null
+      clearSession()
       return false
     } finally {
       inflightRefresh = null

@@ -2,12 +2,16 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Card, CardStat, CardType, Race } from '../types/card'
+import { useCardCatalog } from '../composables/useCardCatalog'
+import { raceClass } from '../lib/race'
+import { cardImageUrl } from '../lib/assets'
 
 const { t } = useI18n({ useScope: 'global' })
 
-const allCards = ref<Card[]>([])
-const loading = ref(true)
-const loadError = ref<string | null>(null)
+const catalog = useCardCatalog()
+const allCards = catalog.cards
+const loading = computed(() => catalog.loading.value && !catalog.loaded.value)
+const loadError = catalog.error
 
 const search = ref('')
 const selectedCycle = ref<string | 'all'>('all')
@@ -20,17 +24,8 @@ const sidebarOpen = ref(false)
 
 const focusedCard = ref<Card | null>(null)
 
-onMounted(async () => {
+onMounted(() => {
   window.addEventListener('keydown', onKey)
-  try {
-    const res = await fetch('/cards.json')
-    if (!res.ok) throw new Error(`status ${res.status}`)
-    allCards.value = (await res.json()) as Card[]
-  } catch (err) {
-    loadError.value = (err as Error).message
-  } finally {
-    loading.value = false
-  }
 })
 
 onUnmounted(() => {
@@ -149,17 +144,6 @@ function closeCard() {
 
 function unique<T>(xs: T[]): T[] {
   return Array.from(new Set(xs))
-}
-
-const assetsBaseUrl = import.meta.env.VITE_ASSETS_BASE_URL ?? ''
-
-function imageUrl(c: Card): string | null {
-  return c.image ? `${assetsBaseUrl}/cards/${c.image}` : null
-}
-
-function raceClass(race: Race | null): string {
-  if (!race) return ''
-  return `race-${race.toLowerCase().replace(/\s+/g, '-')}`
 }
 
 function renderText(text: string | null): string {
@@ -335,8 +319,8 @@ function onKey(e: KeyboardEvent) {
           >
             <div class="img-wrap">
               <img
-                v-if="imageUrl(card)"
-                :src="imageUrl(card)!"
+                v-if="cardImageUrl(card)"
+                :src="cardImageUrl(card)!"
                 :alt="card.name"
                 loading="lazy"
                 decoding="async"
@@ -383,8 +367,8 @@ function onKey(e: KeyboardEvent) {
         </button>
         <div class="modal-image">
           <img
-            v-if="imageUrl(focusedCard)"
-            :src="imageUrl(focusedCard)!"
+            v-if="cardImageUrl(focusedCard)"
+            :src="cardImageUrl(focusedCard)!"
             :alt="focusedCard.name"
           />
           <div v-else class="no-img big">{{ t('cards.modal.no_image') }}</div>

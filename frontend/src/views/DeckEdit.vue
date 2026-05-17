@@ -10,28 +10,25 @@ import {
   hasFactionCards,
   isCardAllowedInDeck,
   isCardAllowedInFaction,
-  raceOfCapital,
   summarize,
   MAX_COPIES_PER_TITLE,
   MIN_DECK_SIZE,
   MAX_DECK_SIZE,
   type Capital,
 } from '../lib/deck'
+import { raceClass, slugOfCapital } from '../lib/race'
+import { cardImageUrl } from '../lib/assets'
+import { useCardCatalog } from '../composables/useCardCatalog'
+import { navigate } from '../router'
+import CapitalChip from '../components/CapitalChip.vue'
+import DeckStatsPanel from '../components/DeckStatsPanel.vue'
 
 const props = defineProps<{ deckId: string }>()
-const emit = defineEmits<{ (e: 'navigate', target: string): void }>()
 const { t } = useI18n({ useScope: 'global' })
-
-const assetsBaseUrl = import.meta.env.VITE_ASSETS_BASE_URL ?? ''
 
 // ----- data ----------------------------------------------------------------
 
-const allCards = ref<Card[]>([])
-const cardIndex = computed<Map<string, Card>>(() => {
-  const m = new Map<string, Card>()
-  for (const c of allCards.value) m.set(c.id, c)
-  return m
-})
+const catalog = useCardCatalog()
 
 const deck = ref<DeckRecord | null>(null)
 const counts = ref<Record<string, number>>({})
@@ -47,14 +44,7 @@ let saveTimer: number | null = null
 
 onMounted(async () => {
   try {
-    const [cardsRes, deckRes] = await Promise.all([
-      fetch('/cards.json').then((r) => {
-        if (!r.ok) throw new Error(`cards.json: ${r.status}`)
-        return r.json() as Promise<Card[]>
-      }),
-      getDeck(props.deckId),
-    ])
-    allCards.value = cardsRes
+    const [, deckRes] = await Promise.all([catalog.ensureLoaded(), getDeck(props.deckId)])
     deck.value = deckRes
     counts.value = { ...deckRes.cards }
     editingName.value = deckRes.name
@@ -151,7 +141,7 @@ async function destroyDeck() {
   if (!confirm(t('deck_edit.confirm_delete', { name: deck.value.name }))) return
   try {
     await deleteDeck(deck.value.id)
-    emit('navigate', '#/decks')
+    navigate('#/decks')
   } catch (e) {
     saveError.value = e instanceof ApiError ? e.code : 'delete_failed'
   }
@@ -171,14 +161,14 @@ const editingFaction = computed(() =>
 )
 
 const types = computed(() =>
-  Array.from(new Set(allCards.value.map((c) => c.type).filter((t): t is CardType => Boolean(t)))),
+  Array.from(new Set(catalog.cards.value.map((c) => c.type).filter((t): t is CardType => Boolean(t)))),
 )
 const races = computed(() =>
-  Array.from(new Set(allCards.value.map((c) => c.race).filter((r): r is Race => Boolean(r)))),
+  Array.from(new Set(catalog.cards.value.map((c) => c.race).filter((r): r is Race => Boolean(r)))),
 )
 const costs = computed(() => {
   const seen = new Set<number | 'X'>()
-  for (const c of allCards.value) {
+  for (const c of catalog.cards.value) {
     if (c.cost === null) continue
     if (typeof c.cost === 'number' && c.cost < 0) continue
     seen.add(c.cost)
@@ -193,7 +183,7 @@ const costs = computed(() => {
 
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
-  return allCards.value.filter((c) => {
+  return catalog.cards.value.filter((c) => {
     if (c.stub) return false
     if (!showOtherFaction.value && !isCardAllowedInFaction(c, editingFaction.value)) return false
     if (selectedType.value !== 'all' && c.type !== selectedType.value) return false
@@ -220,37 +210,16 @@ const availableFiltered = computed(() =>
 // ----- derived summary -----------------------------------------------------
 
 const summary = computed(() =>
-  summarize({ cards: counts.value, capital: editingCapital.value }, cardIndex.value),
+  summarize({ cards: counts.value, capital: editingCapital.value }, catalog.cardIndex.value),
 )
 const canChangeCapital = computed(
-  () => !hasFactionCards({ cards: counts.value }, cardIndex.value),
+  () => !hasFactionCards({ cards: counts.value }, catalog.cardIndex.value),
 )
-
-const maxCostBucket = computed(() =>
-  Math.max(1, ...summary.value.stats.costCurve.map((b) => b.count)),
-)
-function curveWidth(count: number): string {
-  return `${(count / maxCostBucket.value) * 100}%`
-}
 
 // ----- UI helpers ----------------------------------------------------------
 
-function imageUrl(c: Card): string | null {
-  return c.image ? `${assetsBaseUrl}/cards/${c.image}` : null
-}
-
-function raceClass(race: Race | null): string {
-  if (!race) return ''
-  return `race-${race.toLowerCase().replace(/\s+/g, '-')}`
-}
-
-function capitalLabel(c: Capital | null): string {
-  if (c === null) return t('decks.capital.unset')
-  return t(`decks.capital.${c}`)
-}
-
-function capitalRaceClass(c: Capital): string {
-  return `race-${raceOfCapital(c).toLowerCase().replace(/\s+/g, '-')}`
+function capitalTileClass(c: Capital): string {
+  return `race-${slugOfCapital(c)}`
 }
 
 function saveLabel(): string {
@@ -282,7 +251,7 @@ watch(editingCapital, () => scheduleSave())
 
     <template v-else-if="deck">
       <header class="page-head">
-        <button class="back" type="button" @click="emit('navigate', `#/decks/${deck.id}`)">
+        <button class="back" type="button" @click="navigate(`#/decks/${deck.id}`)">
           ← {{ t('deck_edit.back') }}
         </button>
         <div class="name-wrap">
@@ -321,7 +290,7 @@ watch(editingCapital, () => scheduleSave())
             <button
               type="button"
               class="capital-tile"
-              :class="[capitalRaceClass(c), { selected: editingCapital === c }]"
+              :class="[capitalTileClass(c), { selected: editingCapital === c }]"
               @click="pickCapital(c)"
             >
               <span class="tile-race">{{ t(`decks.capital.${c}`) }}</span>
@@ -385,7 +354,7 @@ watch(editingCapital, () => scheduleSave())
                 :class="raceClass(card.race)"
               >
                 <div class="img-wrap">
-                  <img v-if="imageUrl(card)" :src="imageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
+                  <img v-if="cardImageUrl(card)" :src="cardImageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
                   <div v-else class="no-img">{{ t('deck_edit.no_image') }}</div>
                   <span class="badge">
                     {{ counts[card.id] }} / {{ MAX_COPIES_PER_TITLE }}
@@ -426,7 +395,7 @@ watch(editingCapital, () => scheduleSave())
                 :class="[raceClass(card.race), { blocked: !isCardAllowedInDeck(card, editingCapital) }]"
               >
                 <div class="img-wrap">
-                  <img v-if="imageUrl(card)" :src="imageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
+                  <img v-if="cardImageUrl(card)" :src="cardImageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
                   <div v-else class="no-img">{{ t('deck_edit.no_image') }}</div>
                 </div>
                 <div class="tile-foot">
@@ -457,12 +426,7 @@ watch(editingCapital, () => scheduleSave())
         <aside class="deck-panel" :class="{ open: showDeckOnMobile }" :aria-label="t('deck_edit.panel_label')">
           <div class="panel-inner">
             <header class="panel-head">
-              <span
-                class="chip capital-chip"
-                :class="editingCapital ? capitalRaceClass(editingCapital) : 'capital-unset'"
-              >
-                {{ capitalLabel(editingCapital) }}
-              </span>
+              <CapitalChip :capital="editingCapital" />
               <span class="count" :class="`tone-${validationTone}`">
                 {{ summary.stats.total }} / {{ MIN_DECK_SIZE }}–{{ MAX_DECK_SIZE }}
               </span>
@@ -489,35 +453,7 @@ watch(editingCapital, () => scheduleSave())
               </li>
             </ul>
 
-            <section class="curve">
-              <h3>{{ t('deck_edit.cost_curve') }}</h3>
-              <ul class="curve-list" role="list">
-                <li v-for="b in summary.stats.costCurve" :key="b.bucket" class="curve-row">
-                  <span class="curve-label">{{ b.bucket }}</span>
-                  <span class="curve-bar"><span class="curve-fill" :style="{ width: curveWidth(b.count) }"></span></span>
-                  <span class="curve-count">{{ b.count }}</span>
-                </li>
-              </ul>
-            </section>
-
-            <section class="breakdown">
-              <div>
-                <h3>{{ t('deck_edit.by_type') }}</h3>
-                <dl>
-                  <template v-for="(n, ty) in summary.stats.byType" :key="ty">
-                    <dt>{{ ty }}</dt><dd>{{ n }}</dd>
-                  </template>
-                </dl>
-              </div>
-              <div>
-                <h3>{{ t('deck_edit.by_race') }}</h3>
-                <dl>
-                  <template v-for="(n, r) in summary.stats.byRace" :key="r">
-                    <dt>{{ r }}</dt><dd>{{ n }}</dd>
-                  </template>
-                </dl>
-              </div>
-            </section>
+            <DeckStatsPanel :stats="summary.stats" i18n-prefix="deck_edit" />
 
             <section class="card-list">
               <h3>{{ t('deck_edit.deck_list') }}</h3>
@@ -555,7 +491,7 @@ watch(editingCapital, () => scheduleSave())
 
   <main v-else class="edit-page">
     <p class="error">{{ loadError }}</p>
-    <button class="ghost" type="button" @click="emit('navigate', '#/decks')">{{ t('deck_edit.back') }}</button>
+    <button class="ghost" type="button" @click="navigate('#/decks')">{{ t('deck_edit.back') }}</button>
   </main>
 </template>
 
@@ -929,47 +865,6 @@ watch(editingCapital, () => scheduleSave())
   justify-content: space-between;
 }
 
-.chip {
-  display: inline-block;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  padding: 0.18rem 0.65rem;
-  border-radius: var(--radius-pill);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  text-transform: uppercase;
-}
-
-.chip.faction-order {
-  background: var(--faction-order);
-  color: var(--bg);
-  border-color: transparent;
-}
-
-.chip.faction-destruction {
-  background: var(--faction-destruction);
-  color: var(--on-accent);
-  border-color: transparent;
-}
-
-.capital-chip {
-  color: var(--bg);
-  border-color: transparent;
-  font-weight: 600;
-}
-.capital-chip.race-empire { background: var(--race-empire); }
-.capital-chip.race-dwarf { background: var(--race-dwarf); }
-.capital-chip.race-high-elf { background: var(--race-high-elf); }
-.capital-chip.race-chaos { background: var(--race-chaos); color: var(--on-accent); }
-.capital-chip.race-orc { background: var(--race-orc); }
-.capital-chip.race-dark-elf { background: var(--race-dark-elf); color: var(--on-accent); }
-.capital-chip.capital-unset {
-  background: var(--bg);
-  color: var(--fg-dim);
-  border-color: var(--border);
-}
-
 .change-capital {
   align-self: flex-start;
   background: transparent;
@@ -1104,78 +999,12 @@ watch(editingCapital, () => scheduleSave())
   border-left-color: var(--accent-strong);
 }
 
-.curve h3,
-.breakdown h3,
 .card-list h3 {
   margin: 0 0 0.5rem;
   font-size: 0.72rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--fg-faint);
-}
-
-.curve-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.curve-row {
-  display: grid;
-  grid-template-columns: 1.6em 1fr 2em;
-  gap: 0.5rem;
-  align-items: center;
-  font-size: 0.82rem;
-  color: var(--fg-dim);
-}
-
-.curve-bar {
-  position: relative;
-  background: var(--bg);
-  height: 8px;
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-}
-
-.curve-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  background: var(--accent);
-  border-radius: inherit;
-}
-
-.curve-count {
-  text-align: right;
-  color: var(--fg);
-}
-
-.breakdown {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
-}
-
-.breakdown dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.15rem 0.5rem;
-  font-size: 0.85rem;
-}
-
-.breakdown dt {
-  color: var(--fg-dim);
-}
-
-.breakdown dd {
-  margin: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 .card-list ul {

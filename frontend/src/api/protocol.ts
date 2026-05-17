@@ -2,6 +2,8 @@
 // Mirror of backend/src/Invasion/Server/Protocol.hs. When that file
 // changes, this one changes in the same PR.
 
+import type { Capital } from '../lib/race'
+
 export interface UserInfo {
   userId: string
   displayName: string
@@ -29,12 +31,12 @@ export interface MaintenanceState {
 export interface DeckView {
   deckId: string
   name: string
-  capital: string | null
+  capital: Capital | null
   size: number
 }
 
 export interface SeatView {
-  seat: string // "Player1" | "Player2"
+  seat: PlayerKey
   user: UserInfo
   isHost: boolean
   deck: DeckView | null

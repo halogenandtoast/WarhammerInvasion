@@ -1,28 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { MaintenanceState } from '../api/protocol'
+import { useNow } from '../composables/useNow'
+import { pad2 } from '../lib/format'
 
 const props = defineProps<{ state: MaintenanceState | null }>()
 const { t } = useI18n({ useScope: 'global' })
 
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | null = null
-
-onMounted(() => {
-  timer = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
-})
-
-onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
-})
+const now = useNow(1000)
 
 const untilMs = computed(() => {
   if (!props.state) return null
-  const t = Date.parse(props.state.until)
-  return Number.isNaN(t) ? null : t
+  const ms = Date.parse(props.state.until)
+  return Number.isNaN(ms) ? null : ms
 })
 
 const remaining = computed(() => {
@@ -38,15 +29,9 @@ const countdown = computed(() => {
   const totalSec = Math.floor(remaining.value / 1000)
   const min = Math.floor(totalSec / 60)
   const sec = totalSec % 60
-  if (min >= 1) {
-    return t('maintenance.countdown_minutes', { min, sec: pad(sec) })
-  }
+  if (min >= 1) return t('maintenance.countdown_minutes', { min, sec: pad2(sec) })
   return t('maintenance.countdown_seconds', { sec })
 })
-
-function pad(n: number): string {
-  return n < 10 ? `0${n}` : String(n)
-}
 </script>
 
 <template>

@@ -1,50 +1,24 @@
 // Pure deck model — validation, stats, faction logic. UI-agnostic.
+//
+// Race / Capital / Faction enums and the conversions between them live
+// in `./race.ts`. This file owns deck-shaped data: counts, summaries,
+// validation rules, and the import parser.
 
 import type { Card, CardStat, Race } from '../types/card'
+import {
+  ALL_CAPITALS,
+  capitalOfRace,
+  catalogRaceFaction,
+  factionOfCapital,
+  raceOfCapital,
+  type CardFaction,
+  type Capital,
+  type Faction,
+} from './race'
 
-export type Faction = 'order' | 'destruction'
-
-// Capital values are the wire format (snake_case) of the six playable races.
-// One capital = one race; the faction is derived from it.
-export type Capital = 'empire' | 'dwarf' | 'high_elf' | 'chaos' | 'orc' | 'dark_elf'
-
-export const ALL_CAPITALS: readonly Capital[] = [
-  'empire',
-  'dwarf',
-  'high_elf',
-  'chaos',
-  'orc',
-  'dark_elf',
-] as const
-
-export const ORDER_RACES: readonly Race[] = ['Empire', 'Dwarf', 'High Elf'] as const
-export const DESTRUCTION_RACES: readonly Race[] = ['Chaos', 'Orc', 'Dark Elf'] as const
-
-const CAPITAL_TO_RACE: Record<Capital, Race> = {
-  empire: 'Empire',
-  dwarf: 'Dwarf',
-  high_elf: 'High Elf',
-  chaos: 'Chaos',
-  orc: 'Orc',
-  dark_elf: 'Dark Elf',
-}
-
-const CAPITAL_TO_FACTION: Record<Capital, Faction> = {
-  empire: 'order',
-  dwarf: 'order',
-  high_elf: 'order',
-  chaos: 'destruction',
-  orc: 'destruction',
-  dark_elf: 'destruction',
-}
-
-export function raceOfCapital(c: Capital): Race {
-  return CAPITAL_TO_RACE[c]
-}
-
-export function factionOfCapital(c: Capital): Faction {
-  return CAPITAL_TO_FACTION[c]
-}
+// Re-export the race-side enums so existing call sites that import them
+// from `lib/deck` continue to work.
+export { ALL_CAPITALS, factionOfCapital, raceOfCapital, type Capital, type Faction, type CardFaction }
 
 export const MIN_DECK_SIZE = 50
 export const MAX_DECK_SIZE = 100
@@ -59,14 +33,8 @@ export interface SavedDeck {
   updatedAt: string
 }
 
-export type CardFaction = Faction | 'neutral' | 'unknown'
-
 export function cardFaction(card: Pick<Card, 'race'>): CardFaction {
-  if (card.race == null) return 'unknown'
-  if (card.race === 'Neutral') return 'neutral'
-  if ((ORDER_RACES as readonly Race[]).includes(card.race)) return 'order'
-  if ((DESTRUCTION_RACES as readonly Race[]).includes(card.race)) return 'destruction'
-  return 'unknown'
+  return catalogRaceFaction(card.race)
 }
 
 /**
@@ -230,16 +198,6 @@ export function hasFactionCards(
   return false
 }
 
-const RACE_TO_CAPITAL: Record<Race, Capital | null> = {
-  Empire: 'empire',
-  Dwarf: 'dwarf',
-  'High Elf': 'high_elf',
-  Chaos: 'chaos',
-  Orc: 'orc',
-  'Dark Elf': 'dark_elf',
-  Neutral: null,
-}
-
 export interface ParsedDeckList {
   /** Card-id → count, ready to drop into a DeckInput. */
   counts: Record<string, number>
@@ -330,7 +288,7 @@ export function parseDeckList(text: string, cards: Card[]): ParsedDeckList {
       bestRace = race
     }
   }
-  const capital = bestRace ? RACE_TO_CAPITAL[bestRace] : null
+  const capital = bestRace ? capitalOfRace(bestRace) : null
 
   return { counts, total, capital, raceCounts, unknown, parseErrors }
 }

@@ -6,16 +6,14 @@ import {
   MIN_DECK_SIZE,
   MAX_DECK_SIZE,
   parseDeckList,
-  raceOfCapital,
-  type Capital,
   type ParsedDeckList,
 } from '../lib/deck'
-import type { Card } from '../types/card'
 import { ApiError } from '../api/client'
+import { useCardCatalog } from '../composables/useCardCatalog'
+import { navigate } from '../router'
+import CapitalChip from '../components/CapitalChip.vue'
 
 const { t } = useI18n({ useScope: 'global' })
-
-const emit = defineEmits<{ (e: 'navigate', target: string): void }>()
 
 const decks = ref<DeckRecord[]>([])
 const loading = ref(true)
@@ -29,9 +27,10 @@ const showImport = ref(false)
 const importing = ref(false)
 const importName = ref('')
 const importText = ref('')
-const allCards = ref<Card[]>([])
-const cardsLoaded = ref(false)
-const cardsError = ref<string | null>(null)
+
+// Card catalog is shared across views via the composable; we only
+// need to kick the fetch when the import form opens.
+const catalog = useCardCatalog({ eager: false })
 
 onMounted(async () => {
   try {
@@ -44,14 +43,11 @@ onMounted(async () => {
 })
 
 async function loadCardsIfNeeded() {
-  if (cardsLoaded.value || cardsError.value) return
+  if (catalog.loaded.value || catalog.error.value) return
   try {
-    const res = await fetch('/cards.json')
-    if (!res.ok) throw new Error(`cards.json: ${res.status}`)
-    allCards.value = (await res.json()) as Card[]
-    cardsLoaded.value = true
-  } catch (e) {
-    cardsError.value = e instanceof Error ? e.message : 'cards_load_failed'
+    await catalog.ensureLoaded()
+  } catch {
+    /* error surfaced via catalog.error */
   }
 }
 
@@ -67,9 +63,9 @@ function openNew() {
 }
 
 const parsed = computed<ParsedDeckList | null>(() => {
-  if (!cardsLoaded.value) return null
+  if (!catalog.loaded.value) return null
   if (importText.value.trim().length === 0) return null
-  return parseDeckList(importText.value, allCards.value)
+  return parseDeckList(importText.value, catalog.cards.value)
 })
 
 async function submitNew() {
@@ -83,7 +79,7 @@ async function submitNew() {
       capital: null,
       cards: {},
     })
-    emit('navigate', `#/decks/${deck.id}/edit`)
+    navigate(`#/decks/${deck.id}/edit`)
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.code : 'create_failed'
   } finally {
@@ -102,7 +98,7 @@ async function submitImport() {
       capital: p.capital,
       cards: p.counts,
     })
-    emit('navigate', `#/decks/${deck.id}/edit`)
+    navigate(`#/decks/${deck.id}/edit`)
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.code : 'create_failed'
   } finally {
@@ -139,16 +135,6 @@ function validityLabel(size: number): { label: string; tone: 'ok' | 'warn' } {
     return { label: t('decks.list.size_over', { size, max: MAX_DECK_SIZE }), tone: 'warn' }
   }
   return { label: t('decks.list.size_ok', { size }), tone: 'ok' }
-}
-
-function capitalLabel(c: Capital | null): string {
-  if (c === null) return t('decks.capital.unset')
-  return t(`decks.capital.${c}`)
-}
-
-function capitalRaceClass(c: Capital | null): string {
-  if (c === null) return 'capital-unset'
-  return `race-${raceOfCapital(c).toLowerCase().replace(/\s+/g, '-')}`
 }
 
 const empty = computed(() => !loading.value && decks.value.length === 0)
@@ -207,7 +193,7 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
       </label>
       <p class="hint">{{ t('decks.list.import_form.paste_hint') }}</p>
 
-      <p v-if="cardsError" class="error">{{ cardsError }}</p>
+      <p v-if="catalog.error.value" class="error">{{ catalog.error.value }}</p>
 
       <section v-if="parsed" class="import-preview" aria-live="polite">
         <h3>{{ t('decks.list.import_form.preview_heading') }}</h3>
@@ -217,9 +203,7 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
         <p class="preview-capital">
           <template v-if="parsed.capital">
             {{ t('decks.list.import_form.preview_capital', { capital: t(`decks.capital.${parsed.capital}`) }) }}
-            <span class="chip capital-chip" :class="capitalRaceClass(parsed.capital)">
-              {{ t(`decks.capital.${parsed.capital}`) }}
-            </span>
+            <CapitalChip :capital="parsed.capital" />
           </template>
           <template v-else>{{ t('decks.list.import_form.preview_capital_none') }}</template>
         </p>
@@ -240,7 +224,7 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
           </ul>
         </div>
       </section>
-      <p v-else-if="cardsLoaded" class="hint">{{ t('decks.list.import_form.empty') }}</p>
+      <p v-else-if="catalog.loaded.value" class="hint">{{ t('decks.list.import_form.empty') }}</p>
 
       <button
         class="primary"
@@ -258,12 +242,10 @@ const empty = computed(() => !loading.value && decks.value.length === 0)
 
     <ul v-else class="deck-grid" role="list">
       <li v-for="deck in decks" :key="deck.id" class="deck-card">
-        <a class="deck-link" :href="`#/decks/${deck.id}`" @click.prevent="emit('navigate', `#/decks/${deck.id}`)">
+        <a class="deck-link" :href="`#/decks/${deck.id}`" @click.prevent="navigate(`#/decks/${deck.id}`)">
           <header>
             <h2>{{ deck.name }}</h2>
-            <span class="chip capital-chip" :class="capitalRaceClass(deck.capital)">
-              {{ capitalLabel(deck.capital) }}
-            </span>
+            <CapitalChip :capital="deck.capital" />
           </header>
           <p class="size" :class="`tone-${validityLabel(deckSize(deck)).tone}`">
             {{ validityLabel(deckSize(deck)).label }}
@@ -551,46 +533,6 @@ h1 {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
-}
-
-.chip {
-  display: inline-block;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  padding: 0.15rem 0.6rem;
-  border-radius: var(--radius-pill);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-}
-
-.chip.faction-order {
-  background: var(--faction-order);
-  color: var(--bg);
-  border-color: transparent;
-}
-
-.chip.faction-destruction {
-  background: var(--faction-destruction);
-  color: var(--on-accent);
-  border-color: transparent;
-}
-
-.capital-chip {
-  color: var(--bg);
-  border-color: transparent;
-  font-weight: 600;
-}
-.capital-chip.race-empire { background: var(--race-empire); }
-.capital-chip.race-dwarf { background: var(--race-dwarf); }
-.capital-chip.race-high-elf { background: var(--race-high-elf); }
-.capital-chip.race-chaos { background: var(--race-chaos); color: var(--on-accent); }
-.capital-chip.race-orc { background: var(--race-orc); }
-.capital-chip.race-dark-elf { background: var(--race-dark-elf); color: var(--on-accent); }
-.capital-chip.capital-unset {
-  background: var(--bg);
-  color: var(--fg-dim);
-  border-color: var(--border);
 }
 
 .hint {

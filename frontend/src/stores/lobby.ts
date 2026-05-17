@@ -100,7 +100,7 @@ function connect() {
   // arrives. Once `ready`, we open either authed (token present) or
   // guest (token null); the server handles both.
   if (!auth.ready.value) return
-  const identity = auth.user.value?.userId ?? null
+  const identity = auth.user.value?.id ?? null
   if (socket && openedAs === identity) return
   if (socket) {
     socket.close()

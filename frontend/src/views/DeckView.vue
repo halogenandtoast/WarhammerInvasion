@@ -1,46 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Card, CardType, Race } from '../types/card'
+import type { Card, CardType } from '../types/card'
 import { ApiError } from '../api/client'
 import { deleteDeck, getDeck, type DeckRecord } from '../api/decks'
 import {
   factionOfCapital,
-  raceOfCapital,
   summarize,
   MIN_DECK_SIZE,
   MAX_DECK_SIZE,
-  type Capital,
 } from '../lib/deck'
+import { raceClass } from '../lib/race'
+import { cardImageUrl } from '../lib/assets'
+import { useCardCatalog } from '../composables/useCardCatalog'
+import { navigate } from '../router'
+import CapitalChip from '../components/CapitalChip.vue'
+import DeckStatsPanel from '../components/DeckStatsPanel.vue'
 
 const props = defineProps<{ deckId: string }>()
-const emit = defineEmits<{ (e: 'navigate', target: string): void }>()
 const { t } = useI18n({ useScope: 'global' })
 
-const assetsBaseUrl = import.meta.env.VITE_ASSETS_BASE_URL ?? ''
-
-const allCards = ref<Card[]>([])
+const catalog = useCardCatalog()
 const deck = ref<DeckRecord | null>(null)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 const deleting = ref(false)
 
-const cardIndex = computed<Map<string, Card>>(() => {
-  const m = new Map<string, Card>()
-  for (const c of allCards.value) m.set(c.id, c)
-  return m
-})
-
 onMounted(async () => {
   try {
-    const [cards, deckRes] = await Promise.all([
-      fetch('/cards.json').then((r) => {
-        if (!r.ok) throw new Error(`cards.json: ${r.status}`)
-        return r.json() as Promise<Card[]>
-      }),
-      getDeck(props.deckId),
-    ])
-    allCards.value = cards
+    const [, deckRes] = await Promise.all([catalog.ensureLoaded(), getDeck(props.deckId)])
     deck.value = deckRes
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'load_failed'
@@ -51,7 +39,7 @@ onMounted(async () => {
 
 const summary = computed(() => {
   if (!deck.value) return null
-  return summarize({ cards: deck.value.cards, capital: deck.value.capital }, cardIndex.value)
+  return summarize({ cards: deck.value.cards, capital: deck.value.capital }, catalog.cardIndex.value)
 })
 
 const TYPE_ORDER: CardType[] = ['Unit', 'Support', 'Tactic', 'Quest', 'Legend', 'Fulcrum']
@@ -80,47 +68,18 @@ const groupedByType = computed(() => {
   })
 })
 
-const maxCostBucket = computed(() => {
-  const s = summary.value
-  if (!s) return 1
-  return Math.max(1, ...s.stats.costCurve.map((b) => b.count))
-})
-
-function curveWidth(count: number): string {
-  return `${(count / maxCostBucket.value) * 100}%`
-}
-
 async function destroyDeck() {
   if (!deck.value || deleting.value) return
   if (!confirm(t('deck_view.confirm_delete', { name: deck.value.name }))) return
   deleting.value = true
   try {
     await deleteDeck(deck.value.id)
-    emit('navigate', '#/decks')
+    navigate('#/decks')
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.code : 'delete_failed'
   } finally {
     deleting.value = false
   }
-}
-
-function imageUrl(c: Card): string | null {
-  return c.image ? `${assetsBaseUrl}/cards/${c.image}` : null
-}
-
-function raceClass(race: Race | null): string {
-  if (!race) return ''
-  return `race-${race.toLowerCase().replace(/\s+/g, '-')}`
-}
-
-function capitalLabel(c: Capital | null): string {
-  if (c === null) return t('decks.capital.unset')
-  return t(`decks.capital.${c}`)
-}
-
-function capitalRaceClass(c: Capital | null): string {
-  if (c === null) return 'capital-unset'
-  return `race-${raceOfCapital(c).toLowerCase().replace(/\s+/g, '-')}`
 }
 
 const validationTone = computed<'ok' | 'warn'>(() => {
@@ -136,18 +95,13 @@ const validationTone = computed<'ok' | 'warn'>(() => {
 
     <template v-else-if="deck && summary">
       <header class="page-head">
-        <button class="back" type="button" @click="emit('navigate', '#/decks')">
+        <button class="back" type="button" @click="navigate('#/decks')">
           ← {{ t('deck_view.back') }}
         </button>
         <div class="title-wrap">
           <h1>{{ deck.name }}</h1>
           <div class="meta">
-            <span
-              class="chip capital-chip"
-              :class="capitalRaceClass(deck.capital)"
-            >
-              {{ capitalLabel(deck.capital) }}
-            </span>
+            <CapitalChip :capital="deck.capital" />
             <span
               v-if="deck.capital"
               class="chip faction-chip"
@@ -161,7 +115,7 @@ const validationTone = computed<'ok' | 'warn'>(() => {
           </div>
         </div>
         <div class="actions">
-          <button class="primary" type="button" @click="emit('navigate', `#/decks/${deck.id}/edit`)">
+          <button class="primary" type="button" @click="navigate(`#/decks/${deck.id}/edit`)">
             {{ t('deck_view.edit') }}
           </button>
           <button class="ghost danger" type="button" :disabled="deleting" @click="destroyDeck">
@@ -184,37 +138,7 @@ const validationTone = computed<'ok' | 'warn'>(() => {
 
       <div class="layout">
         <aside class="stats" :aria-label="t('deck_edit.panel_label')">
-          <section class="curve">
-            <h3>{{ t('deck_view.cost_curve') }}</h3>
-            <ul class="curve-list" role="list">
-              <li v-for="b in summary.stats.costCurve" :key="b.bucket" class="curve-row">
-                <span class="curve-label">{{ b.bucket }}</span>
-                <span class="curve-bar">
-                  <span class="curve-fill" :style="{ width: curveWidth(b.count) }"></span>
-                </span>
-                <span class="curve-count">{{ b.count }}</span>
-              </li>
-            </ul>
-          </section>
-
-          <section class="breakdown">
-            <div>
-              <h3>{{ t('deck_view.by_type') }}</h3>
-              <dl>
-                <template v-for="(n, ty) in summary.stats.byType" :key="ty">
-                  <dt>{{ ty }}</dt><dd>{{ n }}</dd>
-                </template>
-              </dl>
-            </div>
-            <div>
-              <h3>{{ t('deck_view.by_race') }}</h3>
-              <dl>
-                <template v-for="(n, r) in summary.stats.byRace" :key="r">
-                  <dt>{{ r }}</dt><dd>{{ n }}</dd>
-                </template>
-              </dl>
-            </div>
-          </section>
+          <DeckStatsPanel :stats="summary.stats" i18n-prefix="deck_view" />
         </aside>
 
         <section class="groups">
@@ -232,8 +156,8 @@ const validationTone = computed<'ok' | 'warn'>(() => {
               >
                 <div class="img-wrap">
                   <img
-                    v-if="imageUrl(entry.card)"
-                    :src="imageUrl(entry.card)!"
+                    v-if="cardImageUrl(entry.card)"
+                    :src="cardImageUrl(entry.card)!"
                     :alt="entry.card.name"
                     loading="lazy"
                     decoding="async"
@@ -251,7 +175,7 @@ const validationTone = computed<'ok' | 'warn'>(() => {
 
     <template v-else-if="loadError">
       <p class="error">{{ loadError }}</p>
-      <button class="ghost" type="button" @click="emit('navigate', '#/decks')">
+      <button class="ghost" type="button" @click="navigate('#/decks')">
         ← {{ t('deck_view.back') }}
       </button>
     </template>
@@ -354,23 +278,6 @@ h1 {
   background: var(--faction-destruction);
   color: var(--on-accent);
   border-color: transparent;
-}
-
-.capital-chip {
-  color: var(--bg);
-  border-color: transparent;
-  font-weight: 600;
-}
-.capital-chip.race-empire { background: var(--race-empire); }
-.capital-chip.race-dwarf { background: var(--race-dwarf); }
-.capital-chip.race-high-elf { background: var(--race-high-elf); }
-.capital-chip.race-chaos { background: var(--race-chaos); color: var(--on-accent); }
-.capital-chip.race-orc { background: var(--race-orc); }
-.capital-chip.race-dark-elf { background: var(--race-dark-elf); color: var(--on-accent); }
-.capital-chip.capital-unset {
-  background: var(--bg);
-  color: var(--fg-dim);
-  border-color: var(--border);
 }
 
 .count {
@@ -480,76 +387,6 @@ h1 {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 1rem 1.1rem;
-}
-
-.stats h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
-}
-
-.curve-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.curve-row {
-  display: grid;
-  grid-template-columns: 1.6em 1fr 2em;
-  gap: 0.5rem;
-  align-items: center;
-  font-size: 0.82rem;
-  color: var(--fg-dim);
-}
-
-.curve-bar {
-  position: relative;
-  background: var(--bg);
-  height: 8px;
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-}
-
-.curve-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: var(--accent);
-  border-radius: inherit;
-}
-
-.curve-count {
-  text-align: right;
-  color: var(--fg);
-}
-
-.breakdown {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
-}
-
-.breakdown dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.15rem 0.5rem;
-  font-size: 0.85rem;
-}
-
-.breakdown dt {
-  color: var(--fg-dim);
-}
-
-.breakdown dd {
-  margin: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 .groups {
