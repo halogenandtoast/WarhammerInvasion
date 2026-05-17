@@ -154,8 +154,9 @@ runLobbyConn env muser conn = do
     hist <- chatHistorySTM env.lobby.chat
     games <- summariesSTM env.lobby
     users <- uniqueUsersSTM env.lobby
+    maint <- readMaintenanceSTM env.lobby
     pure
-      ( LobbyWelcome {you = muser, users, games, chat = hist}
+      ( LobbyWelcome {you = muser, users, games, chat = hist, maintenance = maint}
       , users
       )
   -- Send welcome only to this connection.
@@ -205,9 +206,12 @@ handleLobbyIn env user = \case
           broadcastLobby env.lobby LobbyChatNew {line}
   LobbyCreateGame {name = gname, visibility, password, allowSpectators = mAllow, autoSkipActionWindows = mAutoSkip} -> do
     let trimmedName = T.strip gname
+    inMaint <- atomically (fmap (maybe False (const True)) (readMaintenanceSTM env.lobby))
     case validateGameName trimmedName of
       Just code -> notifyError env user code
-      Nothing -> case visibility of
+      Nothing
+        | inMaint -> notifyError env user "maintenance_in_progress"
+        | otherwise -> case visibility of
         Private | maybe False badPw password -> notifyError env user "invalid_password"
         _ -> do
           gid <- nextRandom
@@ -351,8 +355,11 @@ runGameConn env slot muser conn = do
       WS.sendClose conn ("full" :: ByteString)
     _ -> do
       cid <- atomically (attachGameConn slot muser outbox kind)
-      welcomeView <- atomically (gameViewSTM slot muser)
-      atomically (sendTo outbox GameWelcome {you = muser, game = welcomeView})
+      (welcomeView, maint) <- atomically do
+        v <- gameViewSTM slot muser
+        m <- readMaintenanceSTM env.lobby
+        pure (v, m)
+      atomically (sendTo outbox GameWelcome {you = muser, game = welcomeView, maintenance = maint})
       -- Inform other connections + lobby listings about the new viewer.
       atomically do
         v <- gameViewSTM slot muser

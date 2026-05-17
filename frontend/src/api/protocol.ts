@@ -17,6 +17,15 @@ export type Visibility = 'Public' | 'Private'
 
 export type GameStatus = 'StatusWaiting' | 'StatusPlaying' | 'StatusEnded'
 
+// Scheduled-deploy window. While the server holds a non-null value,
+// clients render a banner with a countdown to `until` and the server
+// refuses new game creation. Cleared by the admin endpoint or by a
+// server restart. `until` is an ISO timestamp.
+export interface MaintenanceState {
+  until: string
+  message: string | null
+}
+
 export interface DeckView {
   deckId: string
   name: string
@@ -365,12 +374,14 @@ export type LobbyOut =
       users: UserInfo[]
       games: GameSummary[]
       chat: ChatLine[]
+      maintenance: MaintenanceState | null
     }
   | { tag: 'LobbyChatNew'; line: ChatLine }
   | { tag: 'LobbyUsersUpdate'; users: UserInfo[] }
   | { tag: 'LobbyGamesUpdate'; games: GameSummary[] }
   | { tag: 'LobbyGameCreated'; gameId: string; inviteToken: string | null }
   | { tag: 'LobbyGameJoinOk'; gameId: string; inviteToken: string | null }
+  | { tag: 'LobbyMaintenance'; state: MaintenanceState | null }
   | { tag: 'LobbyError'; code: string }
 
 // ---------------------------------------------------------------------------
@@ -396,8 +407,14 @@ export type GameIn =
 
 export type GameOut =
   // Null `you` indicates a guest spectator (no signed-in account).
-  | { tag: 'GameWelcome'; you: UserInfo | null; game: GameView }
+  | {
+      tag: 'GameWelcome'
+      you: UserInfo | null
+      game: GameView
+      maintenance: MaintenanceState | null
+    }
   | { tag: 'GameUpdate'; game: GameView }
   | { tag: 'GameChatNew'; line: ChatLine }
   | { tag: 'GameError'; code: string }
   | { tag: 'GameClosed'; reason: string }
+  | { tag: 'GameMaintenance'; state: MaintenanceState | null }

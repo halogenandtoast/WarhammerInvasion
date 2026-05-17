@@ -18,6 +18,7 @@ import { priorityHolder } from '../api/protocol'
 import SeatBody from './SeatBody'
 import PlayView from './PlayView.vue'
 import PromptPanel from '../components/PromptPanel.vue'
+import MaintenanceBanner from '../components/MaintenanceBanner.vue'
 
 const props = defineProps<{
   gameId: string
@@ -456,6 +457,8 @@ function formatTime(at: string): string {
         <span class="phase-heading">{{ phaseHeading }}</span>
       </div>
     </header>
+
+    <MaintenanceBanner :state="game.maintenance.value" />
 
     <p v-if="errorBanner" class="error" role="alert">{{ errorBanner }}</p>
 

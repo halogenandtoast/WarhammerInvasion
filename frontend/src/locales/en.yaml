@@ -766,9 +766,17 @@ lobby:
     game_full: That game already has two players.
     wrong_password: Wrong password.
     unauthorized: Sign in to do that.
+    maintenance_in_progress: New games are paused while a deploy is rolling out. Try again in a few minutes.
   guest_banner:
     lead: You're browsing as a guest — you can read the hall and spectate public games.
     cta: Sign in to chat and play.
+
+maintenance:
+  heading: Scheduled server restart
+  default_message: We're rolling out an update. New games are paused; in-progress games will end when the server restarts.
+  countdown_minutes: "Restarts in ~{min}m {sec}s"
+  countdown_seconds: "Restarts in ~{sec}s"
+  imminent: Restart is imminent — finish up where you can.
 
 game:
   page_title: Game

@@ -19,6 +19,7 @@
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 module Invasion.Server (App (..), runServer) where
 
+import Control.Concurrent.STM (atomically)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Logger (NoLoggingT)
 import Control.Monad.Trans.Resource (ResourceT)
@@ -55,7 +56,13 @@ import Invasion.DB (DbPool, runDB)
 import Invasion.Engine (runSetup)
 import Invasion.Model
 import Invasion.Prelude
-import Invasion.Server.Lobby (LobbyState)
+import Invasion.Server.Lobby
+  ( LobbyState
+  , broadcastMaintenance
+  , readMaintenanceSTM
+  , setMaintenanceSTM
+  )
+import Invasion.Server.Protocol (MaintenanceState (..))
 import Invasion.Server.WebSocket (WsEnv (..), idleSweeperLoop, wsMiddleware)
 import Network.HTTP.Types.Status
   ( Status
@@ -83,18 +90,22 @@ data App = App
   , refreshTtl :: NominalDiffTime
   , cookieSecure :: Bool
   , lobby :: LobbyState
+  , adminToken :: Maybe Text
+    -- ^ Shared secret for @/api/admin/*@. 'Nothing' (WHI_ADMIN_TOKEN
+    -- unset) disables the admin endpoints entirely.
   }
 
 mkYesod "App" [parseRoutes|
-/api/health           HealthR    GET
-/api/game             GameR      POST
-/api/auth/register    RegisterR  POST
-/api/auth/login       LoginR     POST
-/api/auth/refresh     RefreshR   POST
-/api/auth/logout      LogoutR    POST
-/api/auth/me          MeR        GET
-/api/decks            DecksR     GET POST
-/api/decks/#UUID      DeckR      GET PUT DELETE
+/api/health                HealthR        GET
+/api/game                  GameR          POST
+/api/auth/register         RegisterR      POST
+/api/auth/login            LoginR         POST
+/api/auth/refresh          RefreshR       POST
+/api/auth/logout           LogoutR        POST
+/api/auth/me               MeR            GET
+/api/decks                 DecksR         GET POST
+/api/decks/#UUID           DeckR          GET PUT DELETE
+/api/admin/maintenance     MaintenanceR   GET POST DELETE
 |]
 
 instance Yesod App where
@@ -126,6 +137,59 @@ postGameR = do
   case result of
     Left err -> sendStatusJSON status400 $ errorObj (T.pack err)
     Right game -> pure $ Aeson.toJSON game
+
+-- ----------------------------------------------------------------------------
+-- Admin: maintenance window
+
+data MaintenanceReq = MaintenanceReq
+  { mrUntil :: UTCTime
+  , mrMessage :: Maybe Text
+  }
+
+instance FromJSON MaintenanceReq where
+  parseJSON = Aeson.withObject "MaintenanceReq" $ \o ->
+    MaintenanceReq <$> o .: "until" <*> o .:? "message"
+
+getMaintenanceR :: Handler Value
+getMaintenanceR = do
+  requireAdmin
+  app <- getYesod
+  ms <- liftIO (atomically (readMaintenanceSTM app.lobby))
+  pure (Aeson.toJSON ms)
+
+postMaintenanceR :: Handler Value
+postMaintenanceR = do
+  requireAdmin
+  MaintenanceReq{mrUntil, mrMessage} <- requireCheckJsonBody
+  app <- getYesod
+  let ms = MaintenanceState {until = mrUntil, message = mrMessage}
+  liftIO $ atomically do
+    setMaintenanceSTM app.lobby (Just ms)
+    broadcastMaintenance app.lobby (Just ms)
+  sendStatusJSON status200 (Aeson.toJSON ms)
+
+deleteMaintenanceR :: Handler Value
+deleteMaintenanceR = do
+  requireAdmin
+  app <- getYesod
+  liftIO $ atomically do
+    setMaintenanceSTM app.lobby Nothing
+    broadcastMaintenance app.lobby Nothing
+  sendNoContent
+
+-- | Bearer-token auth for admin endpoints. If 'WHI_ADMIN_TOKEN' is unset
+-- the admin endpoints are disabled (every call 404s in spirit, but
+-- 401 is what we surface — the route still exists).
+requireAdmin :: Handler ()
+requireAdmin = do
+  app <- getYesod
+  case app.adminToken of
+    Nothing -> sendStatusJSON status401 (errorObj "admin_disabled")
+    Just expected -> do
+      mbearer <- lookupBearer
+      case mbearer of
+        Just tok | tok == expected -> pure ()
+        _ -> sendStatusJSON status401 (errorObj "unauthorized")
 
 -- ----------------------------------------------------------------------------
 -- Auth: register / login / refresh / logout / me

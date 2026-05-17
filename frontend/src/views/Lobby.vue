@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { auth } from '../stores/auth'
 import { lobby } from '../stores/lobby'
+import MaintenanceBanner from '../components/MaintenanceBanner.vue'
 import type { GameSummary } from '../api/protocol'
 
 const { t } = useI18n({ useScope: 'global' })
@@ -140,10 +141,13 @@ function errorMessage(code: string): string {
     'game_full',
     'wrong_password',
     'unauthorized',
+    'maintenance_in_progress',
   ]
   if (known.includes(code)) return t(`lobby.errors.${code}`)
   return code
 }
+
+const inMaintenance = computed(() => lobby.maintenance.value !== null)
 
 function sendChat() {
   if (isGuest.value) return
@@ -262,6 +266,8 @@ function formatTime(at: string): string {
       </div>
     </header>
 
+    <MaintenanceBanner :state="lobby.maintenance.value" />
+
     <p v-if="isGuest" class="guest-banner">
       {{ t('lobby.guest_banner.lead') }}
       <button class="link-button" type="button" @click="goSignIn">
@@ -329,7 +335,14 @@ function formatTime(at: string): string {
         <section class="games-panel">
           <header class="panel-head with-action">
             <h2>{{ t('lobby.games.heading') }}</h2>
-            <button v-if="!isGuest" class="ghost" type="button" @click="openHost">
+            <button
+              v-if="!isGuest"
+              class="ghost"
+              type="button"
+              :disabled="inMaintenance"
+              :title="inMaintenance ? t('lobby.errors.maintenance_in_progress') : undefined"
+              @click="openHost"
+            >
               {{ showHost ? t('lobby.games.cancel_host') : t('lobby.games.host_button') }}
             </button>
             <button v-else class="ghost" type="button" @click="goSignIn">
@@ -337,7 +350,7 @@ function formatTime(at: string): string {
             </button>
           </header>
 
-          <form v-if="showHost" class="new-form" @submit.prevent="submitHost">
+          <form v-if="showHost && !inMaintenance" class="new-form" @submit.prevent="submitHost">
             <label class="field">
               <span class="field-label">{{ t('lobby.games.new_form.name_label') }}</span>
               <input

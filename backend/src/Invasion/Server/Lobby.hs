@@ -41,6 +41,10 @@ module Invasion.Server.Lobby
   , trySetStatus
   , markGameEmptyIfIdle
   , sweepIdle
+    -- * Maintenance
+  , readMaintenanceSTM
+  , setMaintenanceSTM
+  , broadcastMaintenance
     -- * Constants
   , chatHistoryLimit
   , idleTtl
@@ -149,6 +153,10 @@ data LobbyState = LobbyState
   , chat :: TVar (Seq ChatLine)
   , games :: TVar (Map UUID GameSlot)
   , nextConnId :: TVar ConnId
+  , maintenance :: TVar (Maybe MaintenanceState)
+    -- ^ When 'Just', the server is in a scheduled-deploy window. New
+    -- games cannot be created and clients render a banner. Cleared by
+    -- the admin endpoint or by a server restart.
   }
 
 newLobbyState :: IO LobbyState
@@ -157,6 +165,7 @@ newLobbyState = atomically do
   chat <- newTVar Seq.empty
   games <- newTVar Map.empty
   nextConnId <- newTVar 1
+  maintenance <- newTVar Nothing
   pure LobbyState {..}
 
 freshConnId :: LobbyState -> STM ConnId
@@ -418,6 +427,24 @@ sweepIdle st now = do
   unless (null dead) do
     writeTVar st.games (foldr Map.delete slots (map fst dead))
   pure (map snd dead)
+
+-- ----------------------------------------------------------------------------
+-- Maintenance
+
+readMaintenanceSTM :: LobbyState -> STM (Maybe MaintenanceState)
+readMaintenanceSTM st = readTVar st.maintenance
+
+setMaintenanceSTM :: LobbyState -> Maybe MaintenanceState -> STM ()
+setMaintenanceSTM st = writeTVar st.maintenance
+
+-- | Push 'LobbyMaintenance' to every lobby socket and 'GameMaintenance'
+-- to every game-slot socket. Caller holds responsibility for storing
+-- the state via 'setMaintenanceSTM' first.
+broadcastMaintenance :: LobbyState -> Maybe MaintenanceState -> STM ()
+broadcastMaintenance st ms = do
+  broadcastLobby st LobbyMaintenance {state = ms}
+  slots <- readTVar st.games
+  traverse_ (\s -> broadcastGame s GameMaintenance {state = ms}) (Map.elems slots)
 
 -- ----------------------------------------------------------------------------
 -- Constants

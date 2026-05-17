@@ -10,6 +10,7 @@ import type {
   GameIn,
   GameOut,
   GameView,
+  MaintenanceState,
   UserInfo,
   ZoneKind,
 } from '../api/protocol'
@@ -19,6 +20,7 @@ const _status = ref<SocketStatus>('idle')
 const _gameId = ref<string | null>(null)
 const _you = ref<UserInfo | null>(null)
 const _view = ref<GameView | null>(null)
+const _maintenance = ref<MaintenanceState | null>(null)
 const _lastError = ref<{ code: string; at: number } | null>(null)
 const _closed = ref<{ reason: string; at: number } | null>(null)
 
@@ -29,6 +31,7 @@ function reset() {
   _gameId.value = null
   _you.value = null
   _view.value = null
+  _maintenance.value = null
   _lastError.value = null
   _closed.value = null
 }
@@ -72,6 +75,7 @@ function handle(msg: GameOut) {
       // First frame — no prior state to animate from, so skip the
       // transition wrapper.
       _view.value = msg.game
+      _maintenance.value = msg.maintenance
       break
     case 'GameUpdate':
       withViewTransition(() => {
@@ -89,6 +93,9 @@ function handle(msg: GameOut) {
       break
     case 'GameClosed':
       _closed.value = { reason: msg.reason, at: Date.now() }
+      break
+    case 'GameMaintenance':
+      _maintenance.value = msg.state
       break
   }
 }
@@ -195,6 +202,7 @@ export const game = {
   // Convenience: pulls the engine snapshot off the latest view. Null
   // until the game is started.
   engine: computed(() => _view.value?.engine ?? null),
+  maintenance: computed(() => _maintenance.value),
   lastError: computed(() => _lastError.value),
   closed: computed(() => _closed.value),
   connect,

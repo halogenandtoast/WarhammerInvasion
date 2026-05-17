@@ -19,6 +19,7 @@ module Invasion.Server.Protocol
   , SeatView (..)
   , DeckView (..)
   , GameView (..)
+  , MaintenanceState (..)
     -- * Lobby socket
   , LobbyIn (..)
   , LobbyOut (..)
@@ -61,6 +62,17 @@ data GameStatus
   = StatusWaiting
   | StatusPlaying
   | StatusEnded
+  deriving stock (Show, Eq, Generic)
+
+-- | A scheduled-deploy / maintenance window. When 'Just' on the lobby,
+-- clients render a banner and the server refuses 'LobbyCreateGame'.
+-- The server itself does not auto-shutdown at 'until' — the deploy
+-- pipeline owns the actual restart; this is purely a player-facing
+-- heads-up. Cleared by the admin endpoint or by a server restart.
+data MaintenanceState = MaintenanceState
+  { until :: UTCTime
+  , message :: Maybe Text
+  }
   deriving stock (Show, Eq, Generic)
 
 data DeckView = DeckView
@@ -151,6 +163,7 @@ data LobbyOut
       , users :: [UserInfo]
       , games :: [GameSummary]
       , chat :: [ChatLine]
+      , maintenance :: Maybe MaintenanceState
       }
   | LobbyChatNew { line :: ChatLine }
   | LobbyUsersUpdate { users :: [UserInfo] }
@@ -163,6 +176,9 @@ data LobbyOut
       { gameId :: UUID
       , inviteToken :: Maybe Text
       }
+  | -- | Broadcast when the server enters or leaves a maintenance window.
+    -- 'Nothing' clears the banner; 'Just' starts or updates it.
+    LobbyMaintenance { state :: Maybe MaintenanceState }
   | LobbyError { code :: Text }
   deriving stock (Show, Generic)
 
@@ -236,6 +252,7 @@ data GameOut
       { you :: Maybe UserInfo
         -- ^ 'Nothing' for guest spectators (no signed-in account).
       , game :: GameView
+      , maintenance :: Maybe MaintenanceState
       }
   | GameUpdate { game :: GameView }
   | GameChatNew { line :: ChatLine }
@@ -243,6 +260,8 @@ data GameOut
   | -- | Sent when the slot is being torn down. Frontend should redirect
     -- back to the lobby.
     GameClosed { reason :: Text }
+  | -- | Mirror of 'LobbyMaintenance' for clients connected to a game.
+    GameMaintenance { state :: Maybe MaintenanceState }
   deriving stock (Show, Generic)
 
 mconcat
@@ -254,6 +273,7 @@ mconcat
   , deriveJSON defaultOptions ''SeatView
   , deriveJSON defaultOptions ''GameSummary
   , deriveJSON defaultOptions ''GameView
+  , deriveJSON defaultOptions ''MaintenanceState
   , deriveJSON defaultOptions ''LobbyIn
   , deriveJSON defaultOptions ''LobbyOut
   , deriveJSON defaultOptions ''ZoneTarget

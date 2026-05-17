@@ -9,6 +9,7 @@ import type {
   GameSummary,
   LobbyIn,
   LobbyOut,
+  MaintenanceState,
   UserInfo,
 } from '../api/protocol'
 import { auth } from './auth'
@@ -18,6 +19,7 @@ const _you = ref<UserInfo | null>(null)
 const _users = ref<UserInfo[]>([])
 const _games = ref<GameSummary[]>([])
 const _chat = ref<ChatLine[]>([])
+const _maintenance = ref<MaintenanceState | null>(null)
 
 // One-off events: keyed by an ever-increasing counter so listeners can
 // be re-set up across re-renders without missing late deliveries.
@@ -40,6 +42,7 @@ function reset() {
   _users.value = []
   _games.value = []
   _chat.value = []
+  _maintenance.value = null
   _status.value = 'idle'
 }
 
@@ -50,6 +53,7 @@ function handle(msg: LobbyOut) {
       _users.value = msg.users
       _games.value = msg.games
       _chat.value = msg.chat
+      _maintenance.value = msg.maintenance
       break
     case 'LobbyChatNew':
       _chat.value = [..._chat.value, msg.line].slice(-200)
@@ -73,6 +77,9 @@ function handle(msg: LobbyOut) {
         inviteToken: msg.inviteToken,
         at: Date.now(),
       }
+      break
+    case 'LobbyMaintenance':
+      _maintenance.value = msg.state
       break
     case 'LobbyError':
       _lastError.value = { code: msg.code, at: Date.now() }
@@ -135,6 +142,7 @@ export const lobby = {
   users: computed(() => _users.value),
   games: computed(() => _games.value),
   chat: computed(() => _chat.value),
+  maintenance: computed(() => _maintenance.value),
   lastError: computed(() => _lastError.value),
   lastCreated: computed(() => _lastCreated.value),
   lastJoined: computed(() => _lastJoined.value),

@@ -23,6 +23,7 @@ main = do
   accessTtl <- envSeconds "WHI_JWT_ACCESS_TTL_SECONDS" (15 * 60)
   refreshTtl <- envSeconds "WHI_JWT_REFRESH_TTL_SECONDS" (60 * 60 * 24 * 30)
   cookieSecure <- envBool "WHI_COOKIE_SECURE" False
+  adminToken <- envTextOptional "WHI_ADMIN_TOKEN"
   bracket (openPool (BS8.pack (T.unpack dbUrl)) poolSize) closePool $ \pool -> do
     lobby <- newLobbyState
     let app =
@@ -33,6 +34,7 @@ main = do
             , refreshTtl = refreshTtl
             , cookieSecure = cookieSecure
             , lobby = lobby
+            , adminToken = adminToken
             }
     runServer app port
 
@@ -45,6 +47,13 @@ envText name = do
   case m of
     Just v | not (null v) -> pure (T.pack v)
     _ -> die (name <> " is required (set it in .env or the environment)")
+
+envTextOptional :: String -> IO (Maybe T.Text)
+envTextOptional name = do
+  m <- lookupEnv name
+  pure $ case m of
+    Just v | not (null v) -> Just (T.pack v)
+    _ -> Nothing
 
 envInt :: String -> Int -> IO Int
 envInt name def =
