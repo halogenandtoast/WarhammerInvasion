@@ -31,6 +31,7 @@ import Data.Map.Strict qualified as Map
 import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (getCurrentTime)
+import Data.UUID (UUID)
 import Data.UUID qualified as UUID
 import Data.UUID.V4 (nextRandom)
 import Database.Persist qualified as P
@@ -157,18 +158,12 @@ runLobbyConn env muser conn = do
   -- Notify everyone (including us) of the new user list.
   atomically $ broadcastLobby env.lobby LobbyUsersUpdate {users = usersNow}
 
-  let cleanup = do
-        now <- getCurrentTime
-        users' <- atomically do
-          removeLobbyConn env.lobby cid
-          us <- uniqueUsersSTM env.lobby
-          broadcastLobby env.lobby LobbyUsersUpdate {users = us}
-          pure us
-        -- Suppress warning
-        pure (now, users')
-  _ <- try @SomeException (race_ (lobbyWriter conn outbox) (lobbyReader env muser outbox conn))
-  _ <- cleanup
-  pure ()
+  _ <- try @SomeException $
+    race_ (lobbyWriter conn outbox) (lobbyReader env muser outbox conn)
+  atomically do
+    removeLobbyConn env.lobby cid
+    us <- uniqueUsersSTM env.lobby
+    broadcastLobby env.lobby LobbyUsersUpdate {users = us}
 
 lobbyWriter :: WS.Connection -> TQueue LobbyOut -> IO ()
 lobbyWriter conn outbox = forever do
@@ -199,7 +194,7 @@ handleLobbyIn env user = \case
           broadcastLobby env.lobby LobbyChatNew {line}
   LobbyCreateGame {name = gname, visibility, password, allowSpectators = mAllow, autoSkipActionWindows = mAutoSkip} -> do
     let trimmedName = T.strip gname
-    inMaint <- atomically (fmap (maybe False (const True)) (readMaintenanceSTM env.lobby))
+    inMaint <- atomically $ isJust <$> readMaintenanceSTM env.lobby
     case validateGameName trimmedName of
       Just code -> notifyError env user code
       Nothing
@@ -224,30 +219,33 @@ handleLobbyIn env user = \case
           -- Reply directly to the creator with the created game + token.
           notifyMe env user
             LobbyGameCreated {gameId = slot.gameId, inviteToken = Just token}
-  LobbyJoinPublic {gameId = gid} -> do
-    mslot <- atomically $ gameLookup env.lobby gid
-    case mslot of
-      Nothing -> notifyError env user "game_not_found"
-      Just slot -> case slot.visibility of
-        Private -> notifyError env user "game_is_private"
-        Public -> do
-          ok <- atomically $ canJoinAsAnything slot user
-          if ok
-            then notifyMe env user LobbyGameJoinOk {gameId = gid, inviteToken = Nothing}
-            else notifyError env user "game_full"
-  LobbyJoinWithPassword {gameId = gid, password = mpw} -> do
-    mslot <- atomically $ gameLookup env.lobby gid
-    case mslot of
-      Nothing -> notifyError env user "game_not_found"
-      Just slot -> case (slot.password, mpw) of
-        (Just expected, Just pw) | expected == pw -> do
-          ok <- atomically $ canJoinAsAnything slot user
-          if ok
-            then notifyMe env user LobbyGameJoinOk {gameId = gid, inviteToken = Nothing}
-            else notifyError env user "game_full"
-        _ -> notifyError env user "wrong_password"
+  LobbyJoinPublic {gameId = gid} ->
+    withSlot env user gid \slot -> case slot.visibility of
+      Private -> notifyError env user "game_is_private"
+      Public -> tryJoin env user slot gid
+  LobbyJoinWithPassword {gameId = gid, password = mpw} ->
+    withSlot env user gid \slot -> case (slot.password, mpw) of
+      (Just expected, Just pw) | expected == pw -> tryJoin env user slot gid
+      _ -> notifyError env user "wrong_password"
   where
     badPw t = T.length t < 1 || T.length t > 60
+
+-- | Look up a game slot by id and pass it to the action; reply
+-- @game_not_found@ if missing.
+withSlot :: WsEnv -> UserInfo -> UUID -> (GameSlot -> IO ()) -> IO ()
+withSlot env user gid action = do
+  mslot <- atomically $ gameLookup env.lobby gid
+  case mslot of
+    Nothing -> notifyError env user "game_not_found"
+    Just slot -> action slot
+
+-- | Reply with 'LobbyGameJoinOk' or @game_full@ depending on slot capacity.
+tryJoin :: WsEnv -> UserInfo -> GameSlot -> UUID -> IO ()
+tryJoin env user slot gid = do
+  ok <- atomically $ canJoinAsAnything slot user
+  if ok
+    then notifyMe env user LobbyGameJoinOk {gameId = gid, inviteToken = Nothing}
+    else notifyError env user "game_full"
 
 notifyMe :: WsEnv -> UserInfo -> LobbyOut -> IO ()
 notifyMe env user msg = atomically do
@@ -493,15 +491,10 @@ handleGameIn env slot user = \case
           then sendGameError slot user "already_started"
           else do
             sm <- readTVarIO slot.seats
-            let ready = Map.size sm == 2
-                  && all (\r -> case r.deck of Just _ -> True; Nothing -> False)
-                       (Map.elems sm)
-            if not ready
-              then sendGameError slot user "not_ready"
-              else case (,) <$> (Map.lookup "Player1" sm >>= (.deck))
-                            <*> (Map.lookup "Player2" sm >>= (.deck)) of
-                Nothing -> sendGameError slot user "not_ready"
-                Just (dv1, dv2) -> do
+            case (,) <$> (Map.lookup "Player1" sm >>= (.deck))
+                     <*> (Map.lookup "Player2" sm >>= (.deck)) of
+              Nothing -> sendGameError slot user "not_ready"
+              Just (dv1, dv2) -> do
                   md1 <- runDB env.dbPool (P.get (DeckKey dv1.deckId))
                   md2 <- runDB env.dbPool (P.get (DeckKey dv2.deckId))
                   case (md1, md2) of

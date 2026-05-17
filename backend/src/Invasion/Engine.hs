@@ -410,8 +410,7 @@ instance Run Game where
     EndPhase phase -> do
       -- Fire any scheduled end-of-phase effects for this phase before
       -- handing off.
-      pending <- gets (.pendingEndOfPhase)
-      let (mine, rest) = (filter ((== phase) . fst) pending, filter ((/= phase) . fst) pending)
+      (mine, rest) <- gets (partition ((== phase) . fst) . (.pendingEndOfPhase))
       modify \g -> g {pendingEndOfPhase = rest}
       traverse_ (firePendingEffect . snd) mine
       modify \g -> g {phase = Nothing}
@@ -531,50 +530,20 @@ instance Run Game where
       let n = zonePower g k QuestZone
       logIt LogSystem "log.quest.draw" [("player", playerParam k)]
       replicateM_ n (send (Draw (Drawing StandardDraw k)))
-    PlayUnit pk cardKey zone -> do
-      g <- get
-      let player = lookupPlayer pk g
-      case takeUnitFromHand cardKey player of
-        Nothing -> pure ()
-        Just (cardDef, playerWithoutCard)
-          | not (canPlayCard pk cardDef g) -> pure ()
-          | otherwise -> case cardDef.cost of
-              Variable -> pure ()
-              Fixed printed -> do
-                let n = effectiveUnitCost g pk cardDef printed
-                when (player.resources >= Resources n) $ do
-                  markPlayedLimited cardDef
-                  -- Reuse the card's existing key as its in-play
-                  -- UnitKey. This is what lets the frontend's
-                  -- view-transition map a hand card to its zone
-                  -- landing spot.
-                  let paidPlayer =
-                        playerWithoutCard
-                          {resources = player.resources - Resources n}
-                      unitDetails =
-                        UnitDetails
-                          { key = cardKey
-                          , controller = pk
-                          , zone
-                          , cardDef
-                          , damage = Damage 0
-                          , corrupted = False
-                          , attachments = []
-                          , experiences = []
-                          , effectivePower = cardDef.power
-                          , effectiveMaxHP = unitPrintedHPFromDef cardDef
-                          }
-                  modify \gx ->
-                    (setPlayer pk paidPlayer gx)
-                      { units = unitDetails : gx.units
-                      }
-                  logIt LogPlayerAction
-                    "log.unit.played"
-                    [ ("player", playerParam pk)
-                    , ("card", T.pack cardDef.title)
-                    , ("cost", tshow n)
-                    ]
-                  send $ UnitEnteredPlay pk cardKey
+    PlayUnit pk cardKey zone ->
+      -- Reuse the card's existing key as its in-play UnitKey. This is
+      -- what lets the frontend's view-transition map a hand card to its
+      -- zone landing spot.
+      withPaidPlay pk (takeUnitFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
+        \cardDef paidPlayer n -> do
+          let unit = freshUnit cardKey pk zone cardDef
+          modify \gx -> (setPlayer pk paidPlayer gx) {units = unit : gx.units}
+          logIt LogPlayerAction "log.unit.played"
+            [ ("player", playerParam pk)
+            , ("card", T.pack cardDef.title)
+            , ("cost", tshow n)
+            ]
+          send $ UnitEnteredPlay pk cardKey
     PlayUnitOnQuest pk cardKey questKey -> do
       g <- get
       let player = lookupPlayer pk g
@@ -727,8 +696,8 @@ instance Run Game where
             , ("amount", tshow amount)
             ]
     DestroyUnit ukey -> do
-      g <- get
-      whenJust (findUnit ukey g) \u -> do
+      munit <- gets (findUnit ukey)
+      whenJust munit \u -> do
           -- Remove the unit and all its attachments. Each card lands in
           -- its OWN controller's discard pile carrying the same key it
           -- had in play, so the frontend's view-transition continues to
@@ -736,26 +705,13 @@ instance Run Game where
           --
           -- Attachments may be controlled by either side — Branded by
           -- Khorne is the canonical hostile attachment.
-          let dropUnitCard pl =
-                pl {discard = mkCard u.key (UnitCardDef u.cardDef) : pl.discard}
-              dropSupport gx attach =
-                let owner = lookupPlayer attach.controller gx
-                    owner' =
-                      owner
-                        { discard =
-                            mkCard attach.key (SupportCardDef attach.cardDef)
-                              : owner.discard
-                        }
-                 in setPlayer attach.controller owner' gx
-              gAfterUnit =
-                let owner = lookupPlayer u.controller g
-                    owner' = dropUnitCard owner
-                 in (setPlayer u.controller owner' g)
-                      {units = filter (\v -> v.key /= ukey) g.units}
-              gFinal = foldl dropSupport gAfterUnit u.attachments
-          put gFinal
-          modify \gx ->
-            gx {unitsDiscardedThisTurn = gx.unitsDiscardedThisTurn + 1}
+          discardToController u.controller $ mkCard u.key (UnitCardDef u.cardDef)
+          for_ u.attachments \a ->
+            discardToController a.controller $ mkCard a.key (SupportCardDef a.cardDef)
+          modify \gx -> gx
+            { units = removeById ukey gx.units
+            , unitsDiscardedThisTurn = gx.unitsDiscardedThisTurn + 1
+            }
           logIt LogSystem
             "log.unit.destroyed"
             [ ("player", playerParam u.controller)
@@ -817,151 +773,66 @@ instance Run Game where
           (u : _) -> send $ CleanseUnit u.key
           [] -> pure ()
     PlayAttachment pk cardKey targetKey -> do
-      g <- get
-      let player = lookupPlayer pk g
-      case (takeSupportFromHand cardKey player, findUnit targetKey g) of
-        (Just (cardDef, playerWithoutCard), Just host)
-          | not (canPlayCard pk cardDef g) -> pure ()
-          | otherwise -> case cardDef.cost of
-              Variable -> pure ()
-              Fixed _ -> do
-                let baseCost = effectiveTotalCost g pk cardDef
-                    targetTax = extraTargetTax pk (TargetUnit targetKey) g
-                    n = baseCost + targetTax
-                when (player.resources >= Resources n) $ do
-                  markPlayedLimited cardDef
-                  let paidPlayer =
-                        playerWithoutCard
-                          {resources = player.resources - Resources n}
-                      attachment =
-                        SupportDetails
-                          { key = cardKey
-                          , controller = pk
-                          , zone = host.zone
-                          , cardDef
-                          , attachedTo = Just targetKey
-                          , tokens = 0
-                          }
-                      host' =
-                        (host {attachments = attachment : host.attachments})
-                          :: UnitDetails
-                  modify \gx ->
-                    (setPlayer pk paidPlayer gx)
-                      { units = replaceUnit host' gx.units
-                      }
-                  logIt LogPlayerAction
-                    "log.attachment.played"
-                    [ ("player", playerParam pk)
-                    , ("card", T.pack cardDef.title)
-                    , ("target", T.pack host.cardDef.title)
-                    , ("cost", tshow n)
-                    ]
-                  send $ SupportEnteredPlay pk cardKey
-        _ -> pure ()
+      mhost <- gets (findUnit targetKey)
+      whenJust mhost \host ->
+        withPaidPlay pk (takeSupportFromHand cardKey)
+          (\g cd -> effectiveTotalCost g pk cd
+                  + extraTargetTax pk (TargetUnit targetKey) g)
+          \cardDef paidPlayer n -> do
+            let attachment = freshSupport cardKey pk host.zone (Just targetKey) cardDef
+                host' = (host {attachments = attachment : host.attachments}) :: UnitDetails
+            modify \gx -> (setPlayer pk paidPlayer gx) {units = replaceUnit host' gx.units}
+            logIt LogPlayerAction "log.attachment.played"
+              [ ("player", playerParam pk)
+              , ("card", T.pack cardDef.title)
+              , ("target", T.pack host.cardDef.title)
+              , ("cost", tshow n)
+              ]
+            send $ SupportEnteredPlay pk cardKey
     SupportEnteredPlay _pk _key ->
       -- 'dispatchToInPlayUnits' walks attachments via their host; any
       -- bespoke reaction lives in the support card's 'receive'.
       pure ()
-    PlaySupport pk cardKey zone -> do
-      g <- get
-      let player = lookupPlayer pk g
-      case takeSupportFromHand cardKey player of
-        Nothing -> pure ()
-        Just (cardDef, playerWithoutCard)
-          | not (canPlayCard pk cardDef g) -> pure ()
-          | otherwise -> case cardDef.cost of
-              Variable -> pure ()
-              Fixed _ -> do
-                let n = effectiveTotalCost g pk cardDef
-                when (player.resources >= Resources n) $ do
-                  markPlayedLimited cardDef
-                  let paidPlayer =
-                        playerWithoutCard
-                          {resources = player.resources - Resources n}
-                      support =
-                        SupportDetails
-                          { key = cardKey
-                          , controller = pk
-                          , zone
-                          , cardDef
-                          , attachedTo = Nothing
-                          , tokens = 0
-                          }
-                  modify \gx ->
-                    (setPlayer pk paidPlayer gx)
-                      { supports = support : gx.supports
-                      }
-                  logIt LogPlayerAction
-                    "log.support.played"
-                    [ ("player", playerParam pk)
-                    , ("card", T.pack cardDef.title)
-                    , ("cost", tshow n)
-                    ]
-                  send $ SupportEnteredPlay pk cardKey
-    PlaySupportFromDeck pk cardKey zone -> do
-      g <- get
-      let player = lookupPlayer pk g
-      case takeSupportFromDeck cardKey player of
-        Nothing -> pure ()
-        Just (cardDef, playerWithoutCard) -> do
-          let support =
-                SupportDetails
-                  { key = cardKey
-                  , controller = pk
-                  , zone
-                  , cardDef
-                  , attachedTo = Nothing
-                  , tokens = 0
-                  }
-          modify \gx ->
-            (setPlayer pk playerWithoutCard gx)
-              { supports = support : gx.supports
-              }
-          logIt LogSystem
-            "log.support.played_from_deck"
+    PlaySupport pk cardKey zone ->
+      withPaidPlay pk (takeSupportFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
+        \cardDef paidPlayer n -> do
+          let support = freshSupport cardKey pk zone Nothing cardDef
+          modify \gx -> (setPlayer pk paidPlayer gx) {supports = support : gx.supports}
+          logIt LogPlayerAction "log.support.played"
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
+            , ("cost", tshow n)
             ]
           send $ SupportEnteredPlay pk cardKey
-    PlayQuest pk cardKey -> do
-      g <- get
-      let player = lookupPlayer pk g
-      case takeQuestFromHand cardKey player of
-        Nothing -> pure ()
-        Just (cardDef, playerWithoutCard)
-          | not (canPlayCard pk cardDef g) -> pure ()
-          | otherwise -> case cardDef.cost of
-              Variable -> pure ()
-              Fixed _ -> do
-                let n = effectiveTotalCost g pk cardDef
-                when (player.resources >= Resources n) $ do
-                  markPlayedLimited cardDef
-                  let paidPlayer =
-                        playerWithoutCard
-                          {resources = player.resources - Resources n}
-                      hostPlayer
-                        | PlayInOpponentArea `elem` cardDef.keywords = pk.next
-                        | otherwise = pk
-                      quest =
-                        QuestDetails
-                          { key = cardKey
-                          , controller = pk
-                          , zoneOwner = hostPlayer
-                          , cardDef
-                          , tokens = 0
-                          , questingUnit = Nothing
-                          }
-                  modify \gx ->
-                    (setPlayer pk paidPlayer gx)
-                      { quests = quest : gx.quests
-                      }
-                  logIt LogPlayerAction
-                    "log.quest.played"
-                    [ ("player", playerParam pk)
-                    , ("card", T.pack cardDef.title)
-                    , ("cost", tshow n)
-                    ]
-                  send $ QuestEnteredPlay pk cardKey
+    PlaySupportFromDeck pk cardKey zone -> do
+      player <- getPlayerS pk
+      whenJust (takeSupportFromDeck cardKey player) \(cardDef, playerWithoutCard) -> do
+        let support = freshSupport cardKey pk zone Nothing cardDef
+        modify \gx -> (setPlayer pk playerWithoutCard gx) {supports = support : gx.supports}
+        logIt LogSystem "log.support.played_from_deck"
+          [("player", playerParam pk), ("card", T.pack cardDef.title)]
+        send $ SupportEnteredPlay pk cardKey
+    PlayQuest pk cardKey ->
+      withPaidPlay pk (takeQuestFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
+        \cardDef paidPlayer n -> do
+          let hostPlayer
+                | PlayInOpponentArea `elem` cardDef.keywords = pk.next
+                | otherwise = pk
+              quest = QuestDetails
+                { key = cardKey
+                , controller = pk
+                , zoneOwner = hostPlayer
+                , cardDef
+                , tokens = 0
+                , questingUnit = Nothing
+                }
+          modify \gx -> (setPlayer pk paidPlayer gx) {quests = quest : gx.quests}
+          logIt LogPlayerAction "log.quest.played"
+            [ ("player", playerParam pk)
+            , ("card", T.pack cardDef.title)
+            , ("cost", tshow n)
+            ]
+          send $ QuestEnteredPlay pk cardKey
     QuestEnteredPlay _pk _key ->
       -- Per-card reactions fire via dispatch (see
       -- 'dispatchToInPlayUnits' which now also walks 'Game.supports'
@@ -990,42 +861,22 @@ instance Run Game where
             , ("count", tshow n)
             ]
     DestroySupport skey -> do
-      g <- get
-      whenJust (findSupport skey g) \s -> do
-          let owner = lookupPlayer s.controller g
-              owner' =
-                owner
-                  { discard =
-                      mkCard s.key (SupportCardDef s.cardDef) : owner.discard
-                  }
-          modify \gx ->
-            (setPlayer s.controller owner' gx)
-              {supports = filter (\v -> v.key /= skey) gx.supports}
-          logIt LogSystem
-            "log.support.destroyed"
-            [ ("player", playerParam s.controller)
-            , ("card", T.pack s.cardDef.title)
-            ]
-          send $ SupportLeftPlay s.controller skey s.cardDef.code
+      msupport <- gets (findSupport skey)
+      whenJust msupport \s -> do
+        discardToController s.controller $ mkCard s.key (SupportCardDef s.cardDef)
+        modify \gx -> gx {supports = removeById skey gx.supports}
+        logIt LogSystem "log.support.destroyed"
+          [("player", playerParam s.controller), ("card", T.pack s.cardDef.title)]
+        send $ SupportLeftPlay s.controller skey s.cardDef.code
     SupportLeftPlay _pk _skey _code -> pure ()
     DestroyQuest qkey -> do
-      g <- get
-      whenJust (findQuest qkey g) \q -> do
-          let owner = lookupPlayer q.controller g
-              owner' =
-                owner
-                  { discard =
-                      mkCard q.key (QuestCardDef q.cardDef) : owner.discard
-                  }
-          modify \gx ->
-            (setPlayer q.controller owner' gx)
-              {quests = filter (\v -> v.key /= qkey) gx.quests}
-          logIt LogSystem
-            "log.quest.destroyed"
-            [ ("player", playerParam q.controller)
-            , ("card", T.pack q.cardDef.title)
-            ]
-          send $ QuestLeftPlay q.controller qkey q.cardDef.code
+      mquest <- gets (findQuest qkey)
+      whenJust mquest \q -> do
+        discardToController q.controller $ mkCard q.key (QuestCardDef q.cardDef)
+        modify \gx -> gx {quests = removeById qkey gx.quests}
+        logIt LogSystem "log.quest.destroyed"
+          [("player", playerParam q.controller), ("card", T.pack q.cardDef.title)]
+        send $ QuestLeftPlay q.controller qkey q.cardDef.code
     QuestLeftPlay _pk _qkey _code -> pure ()
     AttachExperience hostKey expCode -> do
       g <- get
@@ -1494,81 +1345,35 @@ instance Run Game where
           }
       logIt LogSystem "log.combat.ends" []
     PutUnitIntoPlay pk cardKey zone -> do
-      g <- get
-      let player = lookupPlayer pk g
-      case takeUnitFromHand cardKey player of
-        Nothing -> pure ()
-        Just (cardDef, playerWithoutCard) -> do
-          -- Skip cost; same wiring as 'PlayUnit' but no resource debit
-          -- and no Variable-cost gate.
-          let unitDetails =
-                UnitDetails
-                  { key = cardKey
-                  , controller = pk
-                  , zone
-                  , cardDef
-                  , damage = Damage 0
-                  , corrupted = False
-                  , attachments = []
-                  , experiences = []
-                  , effectivePower = cardDef.power
-                  , effectiveMaxHP = unitPrintedHPFromDef cardDef
-                  }
-          modify \gx ->
-            (setPlayer pk playerWithoutCard gx)
-              { units = unitDetails : gx.units
-              }
-          logIt LogSystem
-            "log.unit.summoned_free"
-            [ ("player", playerParam pk)
-            , ("card", T.pack cardDef.title)
-            ]
-          send $ UnitEnteredPlay pk cardKey
+      -- Skip cost; same wiring as 'PlayUnit' but no resource debit and
+      -- no Variable-cost gate.
+      player <- getPlayerS pk
+      whenJust (takeUnitFromHand cardKey player) \(cardDef, playerWithoutCard) -> do
+        let unit = freshUnit cardKey pk zone cardDef
+        modify \gx -> (setPlayer pk playerWithoutCard gx) {units = unit : gx.units}
+        logIt LogSystem "log.unit.summoned_free"
+          [("player", playerParam pk), ("card", T.pack cardDef.title)]
+        send $ UnitEnteredPlay pk cardKey
     PutUnitIntoPlayFromDiscard pk cardKey zone -> do
-      g <- get
-      let player = lookupPlayer pk g
-      case takeUnitFromDiscard cardKey player of
-        Nothing -> pure ()
-        Just (cardDef, playerWithoutCard) -> do
-          let unitDetails =
-                UnitDetails
-                  { key = cardKey
-                  , controller = pk
-                  , zone
-                  , cardDef
-                  , damage = Damage 0
-                  , corrupted = False
-                  , attachments = []
-                  , experiences = []
-                  , effectivePower = cardDef.power
-                  , effectiveMaxHP = unitPrintedHPFromDef cardDef
-                  }
-          modify \gx ->
-            (setPlayer pk playerWithoutCard gx)
-              { units = unitDetails : gx.units
-              -- If a combat is in progress with this player as
-              -- attacker, also add the fresh unit to its attackers
-              -- list (Reckless Attack relies on this).
-              , combat = case gx.combat of
-                  Just cs
-                    | cs.attackingPlayer == pk ->
-                        Just
-                          ( cs {attackers = cardKey : cs.attackers}
-                            :: CombatState
-                          )
-                  other -> other
-              , attackersThisPhase =
-                  case gx.combat of
-                    Just cs
-                      | cs.attackingPlayer == pk -> cardKey : gx.attackersThisPhase
-                    _ -> gx.attackersThisPhase
-              }
-          logIt LogSystem
-            "log.unit.summoned_from_discard"
-            [ ("player", playerParam pk)
-            , ("card", T.pack cardDef.title)
-            ]
-          send $ UnitEnteredPlay pk cardKey
+      player <- getPlayerS pk
+      whenJust (takeUnitFromDiscard cardKey player) \(cardDef, playerWithoutCard) -> do
+        let unit = freshUnit cardKey pk zone cardDef
+            -- If a combat is in progress with this player as attacker,
+            -- also add the fresh unit to its attackers list (Reckless
+            -- Attack relies on this).
+            joinAsAttacker cs = cs {attackers = cardKey : cs.attackers} :: CombatState
+        modify \gx -> (setPlayer pk playerWithoutCard gx)
+          { units = unit : gx.units
+          , combat = case gx.combat of
+              Just cs | cs.attackingPlayer == pk -> Just $ joinAsAttacker cs
+              other -> other
+          , attackersThisPhase = case gx.combat of
+              Just cs | cs.attackingPlayer == pk -> cardKey : gx.attackersThisPhase
+              _ -> gx.attackersThisPhase
+          }
+        logIt LogSystem "log.unit.summoned_from_discard"
+          [("player", playerParam pk), ("card", T.pack cardDef.title)]
+        send $ UnitEnteredPlay pk cardKey
     InstallModifier target modifier -> do
       modify \g ->
         g
@@ -1615,45 +1420,27 @@ instance Run Game where
               send $ DestroyUnit toKey
         _ -> pure ()
     PlayLegend pk cardKey -> do
-      g <- get
       -- One legend per player at a time. If one is already in play for
       -- this player, silently refuse.
-      case legendOf pk g of
-        Just _ -> pure ()
-        Nothing -> do
-          let player = lookupPlayer pk g
-          case takeLegendFromHand cardKey player of
-            Nothing -> pure ()
-            Just (cardDef, playerWithoutCard)
-              | not (canPlayCard pk cardDef g) -> pure ()
-              | otherwise -> case cardDef.cost of
-                  Variable -> pure ()
-                  Fixed _ -> do
-                    let n = effectiveTotalCost g pk cardDef
-                    when (player.resources >= Resources n) $ do
-                      markPlayedLimited cardDef
-                      let paidPlayer =
-                            playerWithoutCard
-                              {resources = player.resources - Resources n}
-                          legendDetails =
-                            LegendDetails
-                              { key = cardKey
-                              , controller = pk
-                              , zone = BattlefieldZone
-                              , cardDef
-                              , damage = Damage 0
-                              }
-                      modify \gx ->
-                        (setPlayer pk paidPlayer gx)
-                          { legends = legendDetails : gx.legends
-                          }
-                      logIt LogPlayerAction
-                        "log.legend.played"
-                        [ ("player", playerParam pk)
-                        , ("card", T.pack cardDef.title)
-                        , ("cost", tshow n)
-                        ]
-                      send $ LegendEnteredPlay pk cardKey
+      hasLegend <- gets (isJust . legendOf pk)
+      unless hasLegend $
+        withPaidPlay pk (takeLegendFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
+          \cardDef paidPlayer n -> do
+            let legendDetails = LegendDetails
+                  { key = cardKey
+                  , controller = pk
+                  , zone = BattlefieldZone
+                  , cardDef
+                  , damage = Damage 0
+                  }
+            modify \gx -> (setPlayer pk paidPlayer gx) {legends = legendDetails : gx.legends}
+            logIt LogPlayerAction
+              "log.legend.played"
+              [ ("player", playerParam pk)
+              , ("card", T.pack cardDef.title)
+              , ("cost", tshow n)
+              ]
+            send $ LegendEnteredPlay pk cardKey
     LegendEnteredPlay pk _key ->
       logIt LogSystem "log.legend.entered_play" [("player", playerParam pk)]
     DealDamageToLegend lkey amount -> do
@@ -1674,23 +1461,13 @@ instance Run Game where
           when (total >= hp) $
             send $ DestroyLegend lkey
     DestroyLegend lkey -> do
-      g <- get
-      whenJust (findLegend lkey g) \l -> do
-          let owner = lookupPlayer l.controller g
-              owner' =
-                owner
-                  { discard =
-                      mkCard l.key (LegendCardDef l.cardDef) : owner.discard
-                  }
-          modify \gx ->
-            (setPlayer l.controller owner' gx)
-              {legends = filter (\v -> v.key /= lkey) gx.legends}
-          logIt LogSystem
-            "log.legend.destroyed"
-            [ ("player", playerParam l.controller)
-            , ("card", T.pack l.cardDef.title)
-            ]
-          send $ LegendLeftPlay l.controller lkey l.cardDef.code
+      mlegend <- gets (findLegend lkey)
+      whenJust mlegend \l -> do
+        discardToController l.controller $ mkCard l.key (LegendCardDef l.cardDef)
+        modify \gx -> gx {legends = removeById lkey gx.legends}
+        logIt LogSystem "log.legend.destroyed"
+          [("player", playerParam l.controller), ("card", T.pack l.cardDef.title)]
+        send $ LegendLeftPlay l.controller lkey l.cardDef.code
     LegendLeftPlay _pk _lkey _code -> pure ()
 
 -- | First-turn penalty: the starting player skips Quest and Battlefield
@@ -1783,6 +1560,90 @@ lookupPlayer Player2 g = g.player2
 setPlayer :: PlayerKey -> Player -> Game -> Game
 setPlayer Player1 p g = g {player1 = p}
 setPlayer Player2 p g = g {player2 = p}
+
+-- | 'lookupPlayer' lifted into the engine's 'StateT Game' carrier.
+getPlayerS :: Monad m => PlayerKey -> StateT Game m Player
+getPlayerS pk = gets (lookupPlayer pk)
+
+-- | Apply @f@ to the named player and write the result back. The new
+-- player value is observed via 'lookupPlayer' on the current state, so
+-- this composes correctly with other in-flight mutations to the same
+-- 'Game'.
+modifyPlayer :: Monad m => PlayerKey -> (Player -> Player) -> StateT Game m ()
+modifyPlayer pk f = modify \g -> setPlayer pk (f (lookupPlayer pk g)) g
+
+-- | Drop the element whose 'key' matches. The dual of 'replaceById'.
+-- Works on any keyed in-play record (units, supports, quests, legends).
+removeById :: HasField "key" a UnitKey => UnitKey -> [a] -> [a]
+removeById k = filter ((/= k) . (.key))
+
+-- | Construct the @InPlay Unit@ wrapper for a freshly-entering unit.
+-- Used by the various play paths ('PlayUnit', 'PutUnitIntoPlay', …)
+-- so they don't each have to spell out the same 11-field record.
+freshUnit :: UnitKey -> PlayerKey -> ZoneKind -> CardDef Unit -> UnitDetails
+freshUnit key controller zone cardDef = UnitDetails
+  { key
+  , controller
+  , zone
+  , cardDef
+  , damage = Damage 0
+  , corrupted = False
+  , attachments = []
+  , experiences = []
+  , effectivePower = cardDef.power
+  , effectiveMaxHP = unitPrintedHPFromDef cardDef
+  }
+
+-- | Construct the @InPlay Support@ wrapper for a fresh support. Pass
+-- @Just hostKey@ for an attachment, @Nothing@ for a free-standing
+-- support.
+freshSupport
+  :: UnitKey
+  -> PlayerKey
+  -> ZoneKind
+  -> Maybe UnitKey
+  -> CardDef Support
+  -> SupportDetails
+freshSupport key controller zone attachedTo cardDef = SupportDetails
+  { key
+  , controller
+  , zone
+  , cardDef
+  , attachedTo
+  , tokens = 0
+  }
+
+-- | Push a card onto the named player's discard pile.
+discardToController
+  :: Monad m => PlayerKey -> Card -> StateT Game m ()
+discardToController pk c = modifyPlayer pk \p -> p {discard = c : p.discard}
+
+-- | The "I can pay for it" preamble shared by the vanilla play handlers
+-- (PlayUnit, PlaySupport, PlayQuest, PlayLegend, and PlayTactic / …
+-- with their own pre-flight checks). Runs the @install@ body with the
+-- card def, the player record after the cost has been debited, and the
+-- final cost. Silently no-ops on missing card, failed 'canPlayCard',
+-- 'Variable' cost, or insufficient resources.
+withPaidPlay
+  :: PlayerKey
+  -> (Player -> Maybe (CardDef k, Player))
+  -> (Game -> CardDef k -> Int)
+  -> (CardDef k -> Player -> Int -> StateT Game GameT ())
+  -> StateT Game GameT ()
+withPaidPlay pk extract costFn install = do
+  g <- get
+  let player = lookupPlayer pk g
+  whenJust (extract player) \(cardDef, playerWithoutCard) ->
+    when (canPlayCard pk cardDef g) case cardDef.cost of
+      Variable -> pure ()
+      Fixed _ -> do
+        let n = costFn g cardDef
+        when (player.resources >= Resources n) do
+          markPlayedLimited cardDef
+          let paidPlayer = playerWithoutCard
+                { resources = player.resources - Resources n
+                }
+          install cardDef paidPlayer n
 
 -- | A 'Pile' is a getter/setter pair for one of a 'Player'\'s card
 -- collections. Lets 'takeFromPile' work uniformly across hand, deck
@@ -2394,31 +2255,21 @@ dispatchPromptCallback cb result = case (cb, result) of
 -- side and corrupt damaged enemies they were dealing damage to.
 firePerSourceCombatEffects :: Game -> CombatState -> StateT Game GameT ()
 firePerSourceCombatEffects g cs = do
-  let damaged = g.damagedInCurrentCombat
-      damagedEnemiesOf side =
-        [ k
-        | k <- damaged
-        , Just u <- [findUnit k g]
-        , u.controller /= side
-        , not u.corrupted
-        ]
-      hasCorruptOnDamage u = u.cardDef.extras.corruptsOnCombatDamage
-      attackerSources =
-        [ u
-        | k <- cs.attackers
-        , Just u <- [findUnit k g]
-        , hasCorruptOnDamage u
-        ]
-      defenderSources =
-        [ u
-        | k <- cs.defenders
-        , Just u <- [findUnit k g]
-        , hasCorruptOnDamage u
-        ]
-  when (not (null attackerSources)) $
-    traverse_ (send . CorruptUnit) (damagedEnemiesOf cs.attackingPlayer)
-  when (not (null defenderSources)) $
-    traverse_ (send . CorruptUnit) (damagedEnemiesOf cs.defendingPlayer)
+  fireFor cs.attackingPlayer cs.attackers
+  fireFor cs.defendingPlayer cs.defenders
+  where
+    damagedEnemiesOf side =
+      [ k
+      | k <- g.damagedInCurrentCombat
+      , Just u <- [findUnit k g]
+      , u.controller /= side
+      , not u.corrupted
+      ]
+    hasCorruptOnDamage u = u.cardDef.extras.corruptsOnCombatDamage
+    fireFor side keys = do
+      let sources = mapMaybe (`findUnit` g) keys
+      when (any hasCorruptOnDamage sources) $
+        traverse_ (send . CorruptUnit) (damagedEnemiesOf side)
 
 -- | Per-turn damage caps that some cards impose on themselves —
 -- e.g. Daemonettes of Slaanesh "cannot be assigned more than 1

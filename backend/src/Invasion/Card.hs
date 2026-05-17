@@ -1764,11 +1764,9 @@ berserkFury = tactic "the-warpstone-chronicles-094" "Berserk Fury" do
   -- 'ClearScopedModifiers UntilEndOfTurn'.
   onResolve \_owner self _target -> do
     g <- getGame
-    case filter (\u -> u.controller == self.controller) g.units of
-      (target : _) -> do
-        buffPowerUntilEoT target.key 3
-        push $ DeferDamageToUnitUntilEoT target.key 2
-      [] -> pure ()
+    whenJust (firstFriendlyUnit self.controller g) \target -> do
+      buffPowerUntilEoT target.key 3
+      push $ DeferDamageToUnitUntilEoT target.key 2
 
 daemonsword :: CardDef Support
 daemonsword = support "the-warpstone-chronicles-095" "Daemonsword" do
@@ -2055,9 +2053,8 @@ witchHunter = unit "core-029" "Witch Hunter" do
   body "Forced: When this unit enters play, destroy one target corrupted unit."
   onEnterPlay \_owner self -> do
     g <- getGame
-    case filter (\u -> u.corrupted && u.controller /= self.controller) g.units of
-      (target : _) -> push $ DestroyUnit target.key
-      [] -> pure ()
+    whenJust (find (\u -> u.corrupted && u.controller /= self.controller) g.units) \target ->
+      push $ DestroyUnit target.key
 
 greatswordsOfNuln :: CardDef Unit
 greatswordsOfNuln = unit "core-030" "Greatswords of Nuln" do

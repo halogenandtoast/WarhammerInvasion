@@ -56,7 +56,6 @@ import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM
 import Control.Monad (forM)
 import Data.Aeson (toJSON)
-import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Sequence (Seq, (|>))
@@ -321,12 +320,14 @@ broadcastGame slot msg = do
   traverse_ (\c -> writeTQueue c.outbox msg) (Map.elems conns)
 
 setSeatDeck :: GameSlot -> Text -> DeckView -> STM ()
-setSeatDeck slot seatKey dv = modifyTVar' slot.seats \m ->
-  Map.adjust (\row -> SeatRow {user = row.user, deck = Just dv}) seatKey m
+setSeatDeck slot seatKey dv = updateSeatDeck slot seatKey $ Just dv
 
 clearSeatDeck :: GameSlot -> Text -> STM ()
-clearSeatDeck slot seatKey = modifyTVar' slot.seats \m ->
-  Map.adjust (\row -> SeatRow {user = row.user, deck = Nothing}) seatKey m
+clearSeatDeck slot seatKey = updateSeatDeck slot seatKey Nothing
+
+updateSeatDeck :: GameSlot -> Text -> Maybe DeckView -> STM ()
+updateSeatDeck slot seatKey mdv = modifyTVar' slot.seats $
+  Map.adjust (\row -> (row {deck = mdv}) :: SeatRow) seatKey
 
 -- | Try to seat the user. Returns the seat key they ended up in (existing
 -- seat if they already had one, or the next vacant seat). Returns
