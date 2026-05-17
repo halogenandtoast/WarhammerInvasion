@@ -8,7 +8,7 @@ FROM haskell:9.10.1 AS builder
 WORKDIR /build
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libgmp-dev zlib1g-dev \
+  && apt-get install -y --no-install-recommends libgmp-dev zlib1g-dev libpq-dev pkg-config \
   && rm -rf /var/lib/apt/lists/*
 
 # Pull in just the dependency descriptors first so dependency compilation
@@ -27,6 +27,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
        libgmp10 \
        libtinfo6 \
+       libpq5 \
        ca-certificates \
        netbase \
   && rm -rf /var/lib/apt/lists/* \
