@@ -22,6 +22,8 @@ write_files:
       WHI_COOKIE_SECURE=1
       WHI_IDLE_TTL_SECONDS=${whi_idle_ttl_seconds}
       WHI_DEBUG=${whi_debug}
+      WHI_PUBLIC_HOSTS=${public_hosts}
+      ACME_EMAIL=${acme_email}
 
   - path: /etc/systemd/system/whi-migrate.service
     permissions: "0644"

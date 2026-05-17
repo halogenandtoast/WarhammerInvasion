@@ -1,0 +1,27 @@
+{
+	email {$ACME_EMAIL:}
+}
+
+# Site address list comes from WHI_PUBLIC_HOSTS. Compose injects :80 as the
+# fallback for local; prod sets the real hostnames so Caddy auto-provisions
+# Let's Encrypt certs and redirects HTTP -> HTTPS.
+{$WHI_PUBLIC_HOSTS} {
+	@www host www.warhammerinvasion.app
+	redir @www https://warhammerinvasion.app{uri} permanent
+
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	handle /ws/* {
+		reverse_proxy backend:3000
+	}
+
+	handle {
+		root * /usr/share/caddy
+		try_files {path} /index.html
+		file_server
+	}
+}

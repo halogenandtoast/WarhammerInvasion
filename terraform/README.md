@@ -103,11 +103,6 @@ The script reads the droplet IP from `terraform output ipv4_address`; set
 
 ## Things this does NOT do
 
-- No domain or TLS. Add an `acme.sh` / certbot step + a DO DNS record if
-  you want HTTPS. The nginx config in `frontend/nginx.conf` only listens
-  on port 80. **Note: refresh-token cookies are sent with `Secure=1` on
-  the droplet, which means logins won't work over plain HTTP. Either add
-  TLS or set `WHI_COOKIE_SECURE=0` in `/etc/whi.env` while you do.**
 - No off-droplet backups. DO managed Postgres takes daily backups
   automatically (7-day retention on the default tier); rely on those for
   recovery, or add a `pg_dump` cron if you want belt-and-braces.

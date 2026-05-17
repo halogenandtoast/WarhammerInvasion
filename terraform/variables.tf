@@ -106,6 +106,18 @@ variable "dbmate_version" {
   default     = "2.20.0"
 }
 
+variable "domain_name" {
+  description = "Public domain served by Caddy on the droplet. Used for DNS records and for the WHI_PUBLIC_HOSTS env var passed into the frontend container."
+  type        = string
+  default     = "warhammerinvasion.app"
+}
+
+variable "acme_email" {
+  description = "Contact email passed to Let's Encrypt by Caddy. Optional but recommended (you'll get expiry/renewal-failure warnings)."
+  type        = string
+  default     = ""
+}
+
 variable "jwt_secret_override" {
   description = "Override the auto-generated JWT signing secret. Leave empty to let terraform generate one and keep it in state."
   type        = string

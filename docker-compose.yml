@@ -70,9 +70,20 @@ services:
     container_name: whi-frontend
     depends_on:
       - backend
+    environment:
+      # When unset locally, fall back to :80 so Caddy serves plain HTTP for
+      # docker-compose smoke tests against localhost.
+      WHI_PUBLIC_HOSTS: "${WHI_PUBLIC_HOSTS:-:80}"
+      ACME_EMAIL: "${ACME_EMAIL:-}"
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
     restart: unless-stopped
 
 volumes:
   whi-db-data:
+  caddy-data:
+  caddy-config:

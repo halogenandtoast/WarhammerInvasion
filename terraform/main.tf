@@ -39,7 +39,17 @@ resource "digitalocean_droplet" "app" {
     jwt_access_ttl_seconds  = var.jwt_access_ttl_seconds
     jwt_refresh_ttl_seconds = var.jwt_refresh_ttl_seconds
     dbmate_version          = var.dbmate_version
+    public_hosts            = "${var.domain_name}, www.${var.domain_name}"
+    acme_email              = var.acme_email
   })
+
+  # cloud-init only runs on first boot, so changes to user_data on an
+  # existing droplet are meaningless. Ignore them so terraform never tries
+  # to force-replace the box — which would wipe everything on disk
+  # (cert state, on-host config, etc.).
+  lifecycle {
+    ignore_changes = [user_data]
+  }
 }
 
 # --- Database ----------------------------------------------------------------
@@ -98,10 +108,17 @@ resource "digitalocean_firewall" "app" {
     source_addresses = var.ssh_allowed_cidrs
   }
 
-  # HTTP — nginx in the frontend container
+  # HTTP — Caddy serves on :80, also needed for ACME http-01 challenges.
   inbound_rule {
     protocol         = "tcp"
     port_range       = "80"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  # HTTPS — Caddy terminates TLS for warhammerinvasion.app.
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "443"
     source_addresses = ["0.0.0.0/0", "::/0"]
   }
 
@@ -134,5 +151,8 @@ resource "digitalocean_project" "app" {
   description = "Warhammer: Invasion online 1v1 LCG"
   purpose     = "Web Application"
   environment = "Production"
-  resources   = [digitalocean_droplet.app.urn]
+  resources = [
+    digitalocean_droplet.app.urn,
+    digitalocean_domain.app.urn,
+  ]
 }

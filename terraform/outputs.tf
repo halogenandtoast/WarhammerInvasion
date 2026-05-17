@@ -14,7 +14,12 @@ output "ipv6_address" {
 }
 
 output "app_url" {
-  description = "Plain-HTTP URL to reach the app once cloud-init finishes."
+  description = "Public URL once Caddy has issued a certificate."
+  value       = "https://${var.domain_name}"
+}
+
+output "droplet_ip_url" {
+  description = "Plain-IP HTTP URL — useful for connectivity tests before DNS propagates."
   value       = "http://${digitalocean_droplet.app.ipv4_address}"
 }
 
