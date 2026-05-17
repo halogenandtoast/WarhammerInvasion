@@ -89,7 +89,7 @@ data ActionWindowTrigger
   | EndOfTurnActionWindow
     -- ^ FAQ 2.2 Phase 5. Opened at end of turn before "at the end of
     -- the turn" triggers resolve and UntilEndOfTurn modifiers expire.
-  deriving stock Show
+  deriving stock (Show, Eq)
 
 -- | The pass-bookkeeping needed to detect "both pass consecutively."
 -- An action taken by either player resets the state to 'NoPasses', with
