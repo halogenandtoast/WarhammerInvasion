@@ -21,9 +21,7 @@ import Data.Aeson.KeyMap qualified as KM
 import Data.ByteArray qualified as BA
 import Data.ByteArray.Encoding qualified as BAE
 import Data.ByteString (ByteString)
-import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
-import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8', encodeUtf8)
 import Data.Time (UTCTime, diffUTCTime, getCurrentTime, NominalDiffTime, addUTCTime)
@@ -137,19 +135,13 @@ jwtAlgOk o = case KM.lookup "alg" o of
 
 -- base64url WITHOUT padding (per JWT spec).
 b64url :: ByteString -> ByteString
-b64url = stripPadding . BAE.convertToBase BAE.Base64URLUnpadded
-  where
-    stripPadding = id  -- BAE.Base64URLUnpadded already strips, but keep hook
+b64url = BAE.convertToBase BAE.Base64URLUnpadded
 
 b64urlDecode :: ByteString -> Maybe ByteString
-b64urlDecode bs =
-  case BAE.convertFromBase BAE.Base64URLUnpadded bs of
-    Right ok -> Just ok
-    Left _ -> Nothing
+b64urlDecode = eitherToMaybe . BAE.convertFromBase BAE.Base64URLUnpadded
 
 orLeft :: Maybe a -> e -> Either e a
-orLeft (Just a) _ = Right a
-orLeft Nothing e = Left e
+orLeft = flip maybeToEither
 
 lookupText :: Aeson.Key -> Aeson.Object -> Either JwtError Text
 lookupText k o = case KM.lookup k o of
@@ -162,9 +154,4 @@ lookupNumber k o = case KM.lookup k o of
   _ -> Left MalformedToken
 
 decodeUtf8OrEmpty :: ByteString -> Text
-decodeUtf8OrEmpty bs = case decodeUtf8' bs of
-  Right t -> t
-  Left _ -> T.empty
-
-_unused :: BS.ByteString
-_unused = BS.empty
+decodeUtf8OrEmpty = either (const T.empty) id . decodeUtf8'

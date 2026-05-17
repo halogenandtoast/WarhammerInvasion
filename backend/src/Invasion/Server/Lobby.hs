@@ -54,19 +54,15 @@ module Invasion.Server.Lobby
 
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM
-import Control.Monad (forM, unless, when)
-import Data.Aeson qualified as Aeson
+import Control.Monad (forM)
 import Data.Aeson (toJSON)
-import Data.ByteString.Lazy qualified as BSL
-import Data.List (find, sortOn)
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (isNothing)
 import Data.Sequence (Seq, (|>))
 import Data.Sequence qualified as Seq
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.Text (Text)
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime)
 import Data.UUID (UUID)
 import Invasion.Engine (EngineMail)
@@ -276,7 +272,7 @@ summariesSTM st = do
       , name = s.name
       , host = s.host
       , visibility = s.visibility
-      , hasPassword = isNothing s.password == False
+      , hasPassword = isJust s.password
       , filledSeats = Map.size sm
       , status = sts
       , allowSpectators = s.allowSpectators
@@ -389,7 +385,7 @@ gameViewSTM slot viewer = do
     , name = slot.name
     , host = slot.host
     , visibility = slot.visibility
-    , hasPassword = case slot.password of Just _ -> True; Nothing -> False
+    , hasPassword = isJust slot.password
     , allowSpectators = slot.allowSpectators
     , spectatorCount = spec
     , inviteToken = tokenForViewer

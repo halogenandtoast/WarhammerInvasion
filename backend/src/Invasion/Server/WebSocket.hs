@@ -18,7 +18,7 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (race_)
 import Control.Concurrent.STM
 import Control.Exception (SomeException, try)
-import Control.Monad (forever, unless, when)
+import Control.Monad (forever)
 import Crypto.Random (getRandomBytes)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Key qualified as Aeson.Key
@@ -28,16 +28,12 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe)
-import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Encoding (decodeUtf8, encodeUtf8)
-import Data.Time (UTCTime, getCurrentTime)
-import Data.UUID (UUID)
+import Data.Text.Encoding (decodeUtf8)
+import Data.Time (getCurrentTime)
 import Data.UUID qualified as UUID
 import Data.UUID.V4 (nextRandom)
 import Database.Persist qualified as P
-import Database.Persist.Sql (Entity (..))
 import Invasion.Auth.Jwt
   ( JwtClaims (..)
   , JwtSecret
@@ -57,18 +53,15 @@ import Invasion.Engine
       , PlaySupport
       , PlayTactic
       , PlayUnit
-      , ResolvePrompt
       , Setup
       , TriggerCardAction
       )
-  , applyMessage
   , newGame
   )
-import Invasion.Game (Prompt (..), PromptResult (..))
 import Invasion.Engine qualified as Engine
-import Invasion.Game (Game (..))
-import Invasion.Player (Player (..))
+import Invasion.Game (Game (..), Prompt (..), PromptResult (..))
 import Invasion.Model
+import Invasion.Player (Player (..))
 import Invasion.Prelude
 import Invasion.Server.Lobby
 import Invasion.Server.Protocol
@@ -81,7 +74,7 @@ import Invasion.Types
   , ZoneKind
   )
 import Network.HTTP.Types (Query, parseQuery)
-import Network.Wai (Application, rawPathInfo, rawQueryString)
+import Network.Wai (Application)
 import Network.Wai.Handler.WebSockets (websocketsOr)
 import Network.WebSockets qualified as WS
 
@@ -148,7 +141,7 @@ handleLobby env pending qs = do
 runLobbyConn :: WsEnv -> Maybe UserInfo -> WS.Connection -> IO ()
 runLobbyConn env muser conn = do
   outbox <- atomically newTQueue
-  cid <- atomically (addLobbyConn env.lobby muser outbox)
+  cid <- atomically $ addLobbyConn env.lobby muser outbox
   -- Build the welcome inside one transaction so the snapshot is consistent.
   (welcome, usersNow) <- atomically do
     hist <- chatHistorySTM env.lobby.chat
@@ -160,9 +153,9 @@ runLobbyConn env muser conn = do
       , users
       )
   -- Send welcome only to this connection.
-  atomically (sendTo outbox welcome)
+  atomically $ sendTo outbox welcome
   -- Notify everyone (including us) of the new user list.
-  atomically (broadcastLobby env.lobby LobbyUsersUpdate {users = usersNow})
+  atomically $ broadcastLobby env.lobby LobbyUsersUpdate {users = usersNow}
 
   let cleanup = do
         now <- getCurrentTime
@@ -179,7 +172,7 @@ runLobbyConn env muser conn = do
 
 lobbyWriter :: WS.Connection -> TQueue LobbyOut -> IO ()
 lobbyWriter conn outbox = forever do
-  msg <- atomically (readTQueue outbox)
+  msg <- atomically $ readTQueue outbox
   WS.sendTextData conn (Aeson.encode msg)
 
 lobbyReader :: WsEnv -> Maybe UserInfo -> TQueue LobbyOut -> WS.Connection -> IO ()
@@ -190,7 +183,7 @@ lobbyReader env muser outbox conn = forever do
     Right msg -> case muser of
       -- Guests reach this only if they raced the UI (we hide the
       -- affordances). Surface an explicit code rather than dropping it.
-      Nothing -> atomically (sendTo outbox LobbyError {code = "unauthorized"})
+      Nothing -> atomically $ sendTo outbox LobbyError {code = "unauthorized"}
       Just user -> handleLobbyIn env user msg
 
 handleLobbyIn :: WsEnv -> UserInfo -> LobbyIn -> IO ()
@@ -232,23 +225,23 @@ handleLobbyIn env user = \case
           notifyMe env user
             LobbyGameCreated {gameId = slot.gameId, inviteToken = Just token}
   LobbyJoinPublic {gameId = gid} -> do
-    mslot <- atomically (gameLookup env.lobby gid)
+    mslot <- atomically $ gameLookup env.lobby gid
     case mslot of
       Nothing -> notifyError env user "game_not_found"
       Just slot -> case slot.visibility of
         Private -> notifyError env user "game_is_private"
         Public -> do
-          ok <- atomically (canJoinAsAnything slot user)
+          ok <- atomically $ canJoinAsAnything slot user
           if ok
             then notifyMe env user LobbyGameJoinOk {gameId = gid, inviteToken = Nothing}
             else notifyError env user "game_full"
   LobbyJoinWithPassword {gameId = gid, password = mpw} -> do
-    mslot <- atomically (gameLookup env.lobby gid)
+    mslot <- atomically $ gameLookup env.lobby gid
     case mslot of
       Nothing -> notifyError env user "game_not_found"
       Just slot -> case (slot.password, mpw) of
         (Just expected, Just pw) | expected == pw -> do
-          ok <- atomically (canJoinAsAnything slot user)
+          ok <- atomically $ canJoinAsAnything slot user
           if ok
             then notifyMe env user LobbyGameJoinOk {gameId = gid, inviteToken = Nothing}
             else notifyError env user "game_full"
@@ -259,11 +252,9 @@ handleLobbyIn env user = \case
 notifyMe :: WsEnv -> UserInfo -> LobbyOut -> IO ()
 notifyMe env user msg = atomically do
   cs <- readTVar env.lobby.connections
-  traverse_
-    (\c -> case c.user of
-        Just u | u.userId == user.userId -> sendTo c.outbox msg
-        _ -> pure ())
-    (Map.elems cs)
+  for_ (Map.elems cs) \c -> case c.user of
+    Just u | u.userId == user.userId -> sendTo c.outbox msg
+    _ -> pure ()
 
 notifyError :: WsEnv -> UserInfo -> Text -> IO ()
 notifyError env user code = notifyMe env user LobbyError {code}
@@ -283,7 +274,7 @@ handleGame env pending qs gidBs = case UUID.fromASCIIBytes gidBs of
   Just gid -> do
     -- Guests are accepted as spectators only (see 'canEnter').
     muser <- resolveUser env qs
-    mslot <- atomically (gameLookup env.lobby gid)
+    mslot <- atomically $ gameLookup env.lobby gid
     case mslot of
       Nothing -> WS.rejectRequest pending "game not found"
       Just slot -> do
@@ -345,7 +336,7 @@ runGameConn env slot muser conn = do
   -- spectator instead.
   mSeat <- case muser of
     Nothing -> pure Nothing
-    Just user -> atomically (reserveSeat slot user)
+    Just user -> atomically $ reserveSeat slot user
   let kind = case mSeat of
         Just _ -> ConnSeated
         Nothing -> ConnSpectator
@@ -354,12 +345,12 @@ runGameConn env slot muser conn = do
       WS.sendTextData conn (Aeson.encode GameError {code = "no_seat"})
       WS.sendClose conn ("full" :: ByteString)
     _ -> do
-      cid <- atomically (attachGameConn slot muser outbox kind)
+      cid <- atomically $ attachGameConn slot muser outbox kind
       (welcomeView, maint) <- atomically do
         v <- gameViewSTM slot muser
         m <- readMaintenanceSTM env.lobby
         pure (v, m)
-      atomically (sendTo outbox GameWelcome {you = muser, game = welcomeView, maintenance = maint})
+      atomically $ sendTo outbox GameWelcome {you = muser, game = welcomeView, maintenance = maint}
       -- Inform other connections + lobby listings about the new viewer.
       atomically do
         v <- gameViewSTM slot muser
@@ -427,12 +418,12 @@ postToEngine slot mail = do
   case mmb of
     Nothing -> pure False
     Just mb -> do
-      atomically (writeTQueue mb mail)
+      atomically $ writeTQueue mb mail
       pure True
 
 gameWriter :: WS.Connection -> TQueue GameOut -> IO ()
 gameWriter conn outbox = forever do
-  msg <- atomically (readTQueue outbox)
+  msg <- atomically $ readTQueue outbox
   WS.sendTextData conn (Aeson.encode msg)
 
 gameReader :: WsEnv -> GameSlot -> Maybe UserInfo -> TQueue GameOut -> WS.Connection -> IO ()
@@ -441,7 +432,7 @@ gameReader env slot muser outbox conn = forever do
   case Aeson.eitherDecode raw of
     Left _ -> pure ()
     Right msg -> case muser of
-      Nothing -> atomically (sendTo outbox GameError {code = "unauthorized"})
+      Nothing -> atomically $ sendTo outbox GameError {code = "unauthorized"}
       Just user -> handleGameIn env slot user msg
 
 handleGameIn :: WsEnv -> GameSlot -> UserInfo -> GameIn -> IO ()
@@ -538,69 +529,43 @@ handleGameIn env slot user = \case
                                 trySetStatus slot StatusPlaying
                                 summaries <- summariesSTM env.lobby
                                 broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
-  GamePassPriority -> do
-    seatKey <- atomically do
-      sm <- readTVar slot.seats
-      pure $ findSeatFor user sm
-    case seatKey >>= seatKeyToPlayerKey of
-      Nothing -> sendGameError slot user "not_seated"
-      Just pk -> do
-        ok <- postToEngine slot (Engine.EngineMsg (PassPriority pk))
-        unless ok (sendGameError slot user "game_not_started")
-  GamePlayCard {cardKey, zone, target} -> do
-    mGame <- readTVarIO slot.engine
-    case mGame of
-      Nothing -> sendGameError slot user "game_not_started"
-      Just g -> do
-        seatKey <- atomically do
-          sm <- readTVar slot.seats
-          pure $ findSeatFor user sm
-        case seatKey >>= seatKeyToPlayerKey of
-          Nothing -> sendGameError slot user "not_seated"
-          Just pk -> case findHandCard pk cardKey g of
-            Nothing -> sendGameError slot user "card_not_in_hand"
-            Just someCard -> case playMessageFor pk cardKey zone target someCard of
-              Left code -> sendGameError slot user code
-              Right msg -> do
-                ok <- postToEngine slot (Engine.EngineMsg msg)
-                unless ok (sendGameError slot user "game_not_started")
-  GameTriggerAction {source, actionIndex, target, targetZone} -> do
-    seatKey <- atomically do
-      sm <- readTVar slot.seats
-      pure $ findSeatFor user sm
-    case seatKey >>= seatKeyToPlayerKey of
-      Nothing -> sendGameError slot user "not_seated"
-      Just pk -> do
-        let actionTarget = case (target, targetZone) of
-              (Just u, _) -> CardDef.TargetUnit u
-              (_, Just (Proto.ZoneTarget {player = zp, kind = zk})) ->
-                CardDef.TargetZone zp zk
-              _ -> CardDef.NoTarget
-        ok <-
-          postToEngine slot
-            (Engine.EngineMsg (TriggerCardAction pk source actionIndex actionTarget))
-        unless ok (sendGameError slot user "game_not_started")
-  GameResolvePrompt {result} -> do
-    mGame <- readTVarIO slot.engine
-    case mGame of
-      Nothing -> sendGameError slot user "game_not_started"
-      Just g -> do
-        seatKey <- atomically do
-          sm <- readTVar slot.seats
-          pure $ findSeatFor user sm
-        case seatKey >>= seatKeyToPlayerKey of
-          Nothing -> sendGameError slot user "not_seated"
-          Just pk -> case g.pendingPrompt of
-            Nothing -> sendGameError slot user "no_pending_prompt"
-            Just p
-              | p.player /= pk -> sendGameError slot user "not_your_prompt"
-              | otherwise -> do
-                  let engineResult = case result of
-                        PromptUnitsWire {unitKeys = ks} -> PickUnits ks
-                        PromptBoolWire {yes = b} -> PickBool b
-                        PromptNoneWire -> PickNone
-                  ok <- postToEngine slot (Engine.EnginePromptAnswer engineResult)
-                  unless ok (sendGameError slot user "game_not_started")
+  GamePassPriority ->
+    withSeatedPlayer slot user \pk ->
+      postEngineMsg slot user (PassPriority pk)
+  GamePlayCard {cardKey, zone, target} ->
+    withSeatedPlayer slot user \pk -> do
+      mGame <- readTVarIO slot.engine
+      case mGame of
+        Nothing -> sendGameError slot user "game_not_started"
+        Just g -> case findHandCard pk cardKey g of
+          Nothing -> sendGameError slot user "card_not_in_hand"
+          Just someCard -> case playMessageFor pk cardKey zone target someCard of
+            Left code -> sendGameError slot user code
+            Right msg -> postEngineMsg slot user msg
+  GameTriggerAction {source, actionIndex, target, targetZone} ->
+    withSeatedPlayer slot user \pk -> do
+      let actionTarget = case (target, targetZone) of
+            (Just u, _) -> CardDef.TargetUnit u
+            (_, Just (Proto.ZoneTarget {player = zp, kind = zk})) ->
+              CardDef.TargetZone zp zk
+            _ -> CardDef.NoTarget
+      postEngineMsg slot user $ TriggerCardAction pk source actionIndex actionTarget
+  GameResolvePrompt {result} ->
+    withSeatedPlayer slot user \pk -> do
+      mGame <- readTVarIO slot.engine
+      case mGame of
+        Nothing -> sendGameError slot user "game_not_started"
+        Just g -> case g.pendingPrompt of
+          Nothing -> sendGameError slot user "no_pending_prompt"
+          Just p
+            | p.player /= pk -> sendGameError slot user "not_your_prompt"
+            | otherwise -> do
+                let engineResult = case result of
+                      PromptUnitsWire {unitKeys = ks} -> PickUnits ks
+                      PromptBoolWire {yes = b} -> PickBool b
+                      PromptNoneWire -> PickNone
+                ok <- postToEngine slot (Engine.EnginePromptAnswer engineResult)
+                unless ok $ sendGameError slot user "game_not_started"
   GameLeave -> do
     sts <- readTVarIO slot.status
     -- A "leave" while playing ends the game — but only if the leaver
@@ -615,20 +580,11 @@ handleGameIn env slot user = \case
       broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
       -- Push a Closed notice to this user's connections so the UI can
       -- redirect them back to the lobby cleanly.
-      conns <- readTVar slot.connections
-      traverse_
-        (\c -> case c.user of
-            Just u | u.userId == user.userId ->
-              sendTo c.outbox GameClosed {reason = "left"}
-            _ -> pure ())
-        (Map.elems conns)
+      sendToUserConnsSTM slot user GameClosed {reason = "left"}
 
 findSeatFor :: UserInfo -> Map.Map Text SeatRow -> Maybe Text
-findSeatFor user m =
-  let matches = [k | (k, r) <- Map.toList m, r.user.userId == user.userId]
-   in case matches of
-        (k : _) -> Just k
-        [] -> Nothing
+findSeatFor user =
+  fmap fst . find (\(_, r) -> r.user.userId == user.userId) . Map.toList
 
 seatKeyToPlayerKey :: Text -> Maybe PlayerKey
 seatKeyToPlayerKey = \case
@@ -636,15 +592,30 @@ seatKeyToPlayerKey = \case
   "Player2" -> Just Player2
   _ -> Nothing
 
+-- | Resolve the caller to the 'PlayerKey' for their seat in this slot
+-- and pass it to the action. Emits @\"not_seated\"@ to the caller if
+-- they aren't seated (spectators or wrong slot).
+withSeatedPlayer :: GameSlot -> UserInfo -> (PlayerKey -> IO ()) -> IO ()
+withSeatedPlayer slot user action = do
+  seatKey <- atomically $ findSeatFor user <$> readTVar slot.seats
+  case seatKey >>= seatKeyToPlayerKey of
+    Nothing -> sendGameError slot user "not_seated"
+    Just pk -> action pk
+
+-- | Post an engine 'Message' to this slot's worker. Emits
+-- @\"game_not_started\"@ to the caller if the engine isn't running.
+postEngineMsg :: GameSlot -> UserInfo -> Message -> IO ()
+postEngineMsg slot user msg = do
+  ok <- postToEngine slot $ Engine.EngineMsg msg
+  unless ok $ sendGameError slot user "game_not_started"
+
 -- | Find the card instance in a player's hand by its 'UnitKey'.
 findHandCard :: PlayerKey -> UnitKey -> Game -> Maybe SomeCardDef
 findHandCard pk k g =
   let player = case pk of
         Player1 -> g.player1
         Player2 -> g.player2
-   in case [c.def | c <- player.hand, c.key == k] of
-        (d : _) -> Just d
-        [] -> Nothing
+   in (.def) <$> find ((== k) . (.key)) player.hand
 
 -- | Choose the engine 'Message' that corresponds to the player's
 -- 'GamePlayCard' request, based on the card's static kind. Returns a
@@ -681,13 +652,18 @@ tacticTargetFor (Just u) _ = CardDef.TargetUnit u
 tacticTargetFor _ _ = CardDef.NoTarget
 
 sendGameError :: GameSlot -> UserInfo -> Text -> IO ()
-sendGameError slot user code = atomically do
-  cs <- readTVar slot.connections
-  traverse_
-    (\c -> case c.user of
-        Just u | u.userId == user.userId -> sendTo c.outbox GameError {code}
-        _ -> pure ())
-    (Map.elems cs)
+sendGameError slot user code =
+  atomically $ sendToUserConnsSTM slot user GameError {code}
+
+-- | Deliver a 'GameOut' to every connection on this slot whose user
+-- matches @user@. Used for per-user replies that shouldn't broadcast to
+-- the whole slot.
+sendToUserConnsSTM :: GameSlot -> UserInfo -> GameOut -> STM ()
+sendToUserConnsSTM slot user msg = do
+  conns <- readTVar slot.connections
+  for_ (Map.elems conns) \c -> case c.user of
+    Just u | u.userId == user.userId -> sendTo c.outbox msg
+    _ -> pure ()
 
 countCards :: Aeson.Value -> Int
 countCards v = sum [n | (_, n) <- deckCardCounts v]

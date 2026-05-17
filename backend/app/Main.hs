@@ -24,50 +24,51 @@ main = do
   refreshTtl <- envSeconds "WHI_JWT_REFRESH_TTL_SECONDS" (60 * 60 * 24 * 30)
   cookieSecure <- envBool "WHI_COOKIE_SECURE" False
   adminToken <- envTextOptional "WHI_ADMIN_TOKEN"
-  bracket (openPool (BS8.pack (T.unpack dbUrl)) poolSize) closePool $ \pool -> do
+  bracket (openPool (textToBs dbUrl) poolSize) closePool \pool -> do
     lobby <- newLobbyState
-    let app =
-          App
-            { dbPool = pool
-            , jwtSecret = JwtSecret (BS8.pack (T.unpack jwtSecret))
-            , accessTtl = accessTtl
-            , refreshTtl = refreshTtl
-            , cookieSecure = cookieSecure
-            , lobby = lobby
-            , adminToken = adminToken
-            }
+    let app = App
+          { dbPool = pool
+          , jwtSecret = JwtSecret $ textToBs jwtSecret
+          , accessTtl
+          , refreshTtl
+          , cookieSecure
+          , lobby
+          , adminToken
+          }
     runServer app port
+  where
+    textToBs = BS8.pack . T.unpack
 
 -- ----------------------------------------------------------------------------
 -- env helpers
 
-envText :: String -> IO T.Text
-envText name = do
-  m <- lookupEnv name
-  case m of
-    Just v | not (null v) -> pure (T.pack v)
-    _ -> die (name <> " is required (set it in .env or the environment)")
-
-envTextOptional :: String -> IO (Maybe T.Text)
-envTextOptional name = do
-  m <- lookupEnv name
+-- | Read a non-empty env var. @Nothing@ for missing or empty; @Just t@
+-- otherwise.
+envOptional :: T.Text -> IO (Maybe T.Text)
+envOptional name = do
+  m <- lookupEnv $ T.unpack name
   pure $ case m of
-    Just v | not (null v) -> Just (T.pack v)
+    Just v | not (null v) -> Just $ T.pack v
     _ -> Nothing
 
-envInt :: String -> Int -> IO Int
+envText :: T.Text -> IO T.Text
+envText name =
+  envOptional name >>= maybe (die $ T.unpack name <> " is required (set it in .env or the environment)") pure
+
+envTextOptional :: T.Text -> IO (Maybe T.Text)
+envTextOptional = envOptional
+
+envInt :: T.Text -> Int -> IO Int
 envInt name def =
-  fmap (maybe def id . (>>= readMaybe)) (lookupEnv name)
+  fromMaybe def . (>>= readMaybe . T.unpack) <$> envOptional name
 
-envSeconds :: String -> NominalDiffTime -> IO NominalDiffTime
-envSeconds name def = do
-  i <- envInt name (round def)
-  pure (fromIntegral i)
+envSeconds :: T.Text -> NominalDiffTime -> IO NominalDiffTime
+envSeconds name def = fromIntegral <$> envInt name (round def)
 
-envBool :: String -> Bool -> IO Bool
+envBool :: T.Text -> Bool -> IO Bool
 envBool name def = do
-  m <- lookupEnv name
-  pure $ case fmap (map toLowerChar) m of
+  m <- envOptional name
+  pure $ case T.toLower <$> m of
     Just "1" -> True
     Just "true" -> True
     Just "yes" -> True
@@ -75,12 +76,8 @@ envBool name def = do
     Just "false" -> False
     Just "no" -> False
     _ -> def
-  where
-    toLowerChar c
-      | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
-      | otherwise = c
 
 die :: String -> IO a
 die msg = do
-  hPutStrLn stderr ("fatal: " <> msg)
+  hPutStrLn stderr $ "fatal: " <> msg
   exitFailure

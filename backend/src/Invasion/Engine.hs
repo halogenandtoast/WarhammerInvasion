@@ -299,7 +299,7 @@ instance Run Player where
           deck' <- gets (.deck)
           elim <- gets (.eliminated)
           when (null deck' && not elim) $
-            send (Eliminate drawing.player DeckedOut)
+            send $ Eliminate drawing.player DeckedOut
     ReturnResources k -> onKey k $
       modify \p -> p {resources = Resources 0}
     -- CollectResources and QuestDraw set the right values from
@@ -340,7 +340,7 @@ instance Run Game where
       fp <- gets (.firstPlayer)
       modify \g -> g {lifecycle = GamePlaying}
       logIt LogSystem "log.game.begins" []
-      send (BeginTurn fp)
+      send $ BeginTurn fp
     BeginTurn k -> do
       modify \g ->
         g
@@ -359,21 +359,21 @@ instance Run Game where
       -- effects fire on BeginTurn itself via card receive hooks, then
       -- this action window lets either player respond before the
       -- Kingdom phase begins.
-      send (OpenActionWindow BeginningOfTurnActionWindow)
-      send (BeginPhase KingdomPhase)
+      send $ OpenActionWindow BeginningOfTurnActionWindow
+      send $ BeginPhase KingdomPhase
     EndTurn k -> do
       -- Phase 5 (FAQ 2.2): action window first, then "at end of turn"
       -- triggered effects fire, then UntilEndOfTurn modifiers expire.
-      send (OpenActionWindow EndOfTurnActionWindow)
+      send $ OpenActionWindow EndOfTurnActionWindow
       -- Fire scheduled end-of-turn effects after the window closes.
       pending <- gets (.pendingEndOfTurn)
       modify \g -> g {pendingEndOfTurn = []}
       traverse_ firePendingEffect pending
       -- Drop UntilEndOfTurn modifiers.
-      send (ClearScopedModifiers UntilEndOfTurn)
+      send $ ClearScopedModifiers UntilEndOfTurn
       modify \g -> g {phase = Nothing}
       logIt LogTurn "log.turn.ends" [("player", playerParam k)]
-      send (BeginTurn k.next)
+      send $ BeginTurn k.next
     BeginPhase phase -> do
       g <- get
       modify \gx ->
@@ -387,26 +387,26 @@ instance Run Game where
       if shouldSkipFirstTurnPhase phase g
         then do
           logIt LogPhase "log.phase.skipped" [("phase", phaseParam phase)]
-          send (EndPhase phase)
+          send $ EndPhase phase
         else do
           logIt LogPhase "log.phase.begins" [("phase", phaseParam phase)]
           let active = g.currentPlayer
           case phase of
             KingdomPhase -> do
-              send (ReturnResources active)
-              send (RestoreOneCorruptCard active)
-              send (CollectResources active)
-              send (OpenActionWindow KingdomActionWindow)
+              send $ ReturnResources active
+              send $ RestoreOneCorruptCard active
+              send $ CollectResources active
+              send $ OpenActionWindow KingdomActionWindow
             QuestPhase -> do
-              send (QuestDraw active)
-              send (OpenActionWindow QuestActionWindow)
+              send $ QuestDraw active
+              send $ OpenActionWindow QuestActionWindow
             CapitalPhase ->
-              send (OpenActionWindow CapitalActionWindow)
+              send $ OpenActionWindow CapitalActionWindow
             BattlefieldPhase ->
               -- With no units yet, the active player has no attack to
               -- declare; the single window suffices. Combat will later
               -- emit the 5-step sub-sequence here.
-              send (OpenActionWindow BattlefieldActionWindow)
+              send $ OpenActionWindow BattlefieldActionWindow
     EndPhase phase -> do
       -- Fire any scheduled end-of-phase effects for this phase before
       -- handing off.
@@ -417,10 +417,10 @@ instance Run Game where
       modify \g -> g {phase = Nothing}
       logIt LogPhase "log.phase.ends" [("phase", phaseParam phase)]
       case nextPhase phase of
-        Just np -> send (BeginPhase np)
+        Just np -> send $ BeginPhase np
         Nothing -> do
           current <- gets (.currentPlayer)
-          send (EndTurn current)
+          send $ EndTurn current
     OpenActionWindow trigger -> do
       current <- gets (.currentPlayer)
       let aw = ActionWindow {trigger, awaiting = NoPasses current}
@@ -476,7 +476,7 @@ instance Run Game where
         Just AfterAssignCombatDamage -> send AdvanceCombatToApply
         Just AfterApplyCombatDamage -> send EndCombat
         _ -> case g.phase of
-          Just p -> send (EndPhase p)
+          Just p -> send $ EndPhase p
           Nothing -> pure ()
     Eliminate k reason -> do
       -- A player whose elimination is being processed loses immediately;
@@ -525,7 +525,7 @@ instance Run Game where
       modify (setPlayer k p')
       logIt LogSystem
         "log.resources.collected"
-        [("player", playerParam k), ("count", T.pack (show n))]
+        [("player", playerParam k), ("count", tshow n)]
     QuestDraw k -> do
       g <- get
       let n = zonePower g k QuestZone
@@ -572,9 +572,9 @@ instance Run Game where
                     "log.unit.played"
                     [ ("player", playerParam pk)
                     , ("card", T.pack cardDef.title)
-                    , ("cost", T.pack (show n))
+                    , ("cost", tshow n)
                     ]
-                  send (UnitEnteredPlay pk cardKey)
+                  send $ UnitEnteredPlay pk cardKey
     PlayUnitOnQuest pk cardKey questKey -> do
       g <- get
       let player = lookupPlayer pk g
@@ -617,9 +617,9 @@ instance Run Game where
                       [ ("player", playerParam pk)
                       , ("card", T.pack cardDef.title)
                       , ("quest", T.pack q.cardDef.title)
-                      , ("cost", T.pack (show n))
+                      , ("cost", tshow n)
                       ]
-                    send (UnitEnteredPlay pk cardKey)
+                    send $ UnitEnteredPlay pk cardKey
         _ -> pure ()
     UnitEnteredPlay pk _key ->
       -- The card's own 'receive' fires via 'dispatchToInPlayUnits'.
@@ -644,9 +644,7 @@ instance Run Game where
         _ -> pure ()
     DealDamageToUnit ukey amount -> do
       g <- get
-      case findUnit ukey g of
-        Nothing -> pure ()
-        Just u -> do
+      whenJust (findUnit ukey g) \u -> do
           -- Passive multiplier (Bloodletter doubles all damage) applies
           -- to the raw assignment; Toughness then cancels off the top,
           -- then per-turn caps (Daemonettes of Slaanesh) clip the
@@ -662,7 +660,7 @@ instance Run Game where
             logIt LogSystem
               "log.damage.cancelled"
               [ ("card", T.pack u.cardDef.title)
-              , ("amount", T.pack (show cancelled))
+              , ("amount", tshow cancelled)
               ]
           when (landing > 0) $ do
             let Damage existing = u.damage
@@ -681,16 +679,14 @@ instance Run Game where
             logIt LogSystem
               "log.unit.damaged"
               [ ("card", T.pack u.cardDef.title)
-              , ("amount", T.pack (show landing))
+              , ("amount", tshow landing)
               ]
             let Damage total = newDmg
             when (total >= u.effectiveMaxHP) $
-              send (DestroyUnit ukey)
+              send $ DestroyUnit ukey
     DealDamageToUnitUncancellable ukey amount -> do
       g <- get
-      case findUnit ukey g of
-        Nothing -> pure ()
-        Just u -> do
+      whenJust (findUnit ukey g) \u -> do
           -- Uncancellable damage still respects per-turn caps
           -- (Daemonettes) — the cap is independent of cancellation.
           let inflated = applyDamageMultipliers g (max 0 amount)
@@ -713,16 +709,14 @@ instance Run Game where
             logIt LogSystem
               "log.unit.damaged"
               [ ("card", T.pack u.cardDef.title)
-              , ("amount", T.pack (show landing))
+              , ("amount", tshow landing)
               ]
             let Damage total = newDmg
             when (total >= u.effectiveMaxHP) $
-              send (DestroyUnit ukey)
+              send $ DestroyUnit ukey
     HealUnit ukey amount -> do
       g <- get
-      case findUnit ukey g of
-        Nothing -> pure ()
-        Just u -> do
+      whenJust (findUnit ukey g) \u -> do
           let Damage existing = u.damage
               healed = max 0 (existing - max 0 amount)
               u' = (u {damage = Damage healed}) :: UnitDetails
@@ -730,13 +724,11 @@ instance Run Game where
           logIt LogSystem
             "log.unit.healed"
             [ ("card", T.pack u.cardDef.title)
-            , ("amount", T.pack (show amount))
+            , ("amount", tshow amount)
             ]
     DestroyUnit ukey -> do
       g <- get
-      case findUnit ukey g of
-        Nothing -> pure ()
-        Just u -> do
+      whenJust (findUnit ukey g) \u -> do
           -- Remove the unit and all its attachments. Each card lands in
           -- its OWN controller's discard pile carrying the same key it
           -- had in play, so the frontend's view-transition continues to
@@ -769,7 +761,7 @@ instance Run Game where
             [ ("player", playerParam u.controller)
             , ("card", T.pack u.cardDef.title)
             ]
-          send (UnitLeftPlay u.controller ukey u.zone u.cardDef.code)
+          send $ UnitLeftPlay u.controller ukey u.zone u.cardDef.code
     UnitLeftPlay _pk ukey _zone _code -> do
       -- If the departed unit was questing on a quest, clear the slot
       -- and dump accumulated resource tokens.
@@ -822,7 +814,7 @@ instance Run Game where
         , u.corrupted
         ]
         of
-          (u : _) -> send (CleanseUnit u.key)
+          (u : _) -> send $ CleanseUnit u.key
           [] -> pure ()
     PlayAttachment pk cardKey targetKey -> do
       g <- get
@@ -862,9 +854,9 @@ instance Run Game where
                     [ ("player", playerParam pk)
                     , ("card", T.pack cardDef.title)
                     , ("target", T.pack host.cardDef.title)
-                    , ("cost", T.pack (show n))
+                    , ("cost", tshow n)
                     ]
-                  send (SupportEnteredPlay pk cardKey)
+                  send $ SupportEnteredPlay pk cardKey
         _ -> pure ()
     SupportEnteredPlay _pk _key ->
       -- 'dispatchToInPlayUnits' walks attachments via their host; any
@@ -903,9 +895,9 @@ instance Run Game where
                     "log.support.played"
                     [ ("player", playerParam pk)
                     , ("card", T.pack cardDef.title)
-                    , ("cost", T.pack (show n))
+                    , ("cost", tshow n)
                     ]
-                  send (SupportEnteredPlay pk cardKey)
+                  send $ SupportEnteredPlay pk cardKey
     PlaySupportFromDeck pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
@@ -930,7 +922,7 @@ instance Run Game where
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
             ]
-          send (SupportEnteredPlay pk cardKey)
+          send $ SupportEnteredPlay pk cardKey
     PlayQuest pk cardKey -> do
       g <- get
       let player = lookupPlayer pk g
@@ -967,9 +959,9 @@ instance Run Game where
                     "log.quest.played"
                     [ ("player", playerParam pk)
                     , ("card", T.pack cardDef.title)
-                    , ("cost", T.pack (show n))
+                    , ("cost", tshow n)
                     ]
-                  send (QuestEnteredPlay pk cardKey)
+                  send $ QuestEnteredPlay pk cardKey
     QuestEnteredPlay _pk _key ->
       -- Per-card reactions fire via dispatch (see
       -- 'dispatchToInPlayUnits' which now also walks 'Game.supports'
@@ -977,35 +969,29 @@ instance Run Game where
       pure ()
     AdjustSupportTokens skey delta -> do
       g <- get
-      case findSupport skey g of
-        Nothing -> pure ()
-        Just s -> do
+      whenJust (findSupport skey g) \s -> do
           let n = max 0 (s.tokens + delta)
               s' = (s {tokens = n}) :: SupportDetails
           modify \gx -> gx {supports = replaceSupport s' gx.supports}
           logIt LogSystem
             "log.support.tokens"
             [ ("card", T.pack s.cardDef.title)
-            , ("count", T.pack (show n))
+            , ("count", tshow n)
             ]
     AdjustQuestTokens qkey delta -> do
       g <- get
-      case findQuest qkey g of
-        Nothing -> pure ()
-        Just q -> do
+      whenJust (findQuest qkey g) \q -> do
           let n = max 0 (q.tokens + delta)
               q' = (q {tokens = n}) :: QuestDetails
           modify \gx -> gx {quests = replaceQuest q' gx.quests}
           logIt LogSystem
             "log.quest.tokens"
             [ ("card", T.pack q.cardDef.title)
-            , ("count", T.pack (show n))
+            , ("count", tshow n)
             ]
     DestroySupport skey -> do
       g <- get
-      case findSupport skey g of
-        Nothing -> pure ()
-        Just s -> do
+      whenJust (findSupport skey g) \s -> do
           let owner = lookupPlayer s.controller g
               owner' =
                 owner
@@ -1020,13 +1006,11 @@ instance Run Game where
             [ ("player", playerParam s.controller)
             , ("card", T.pack s.cardDef.title)
             ]
-          send (SupportLeftPlay s.controller skey s.cardDef.code)
+          send $ SupportLeftPlay s.controller skey s.cardDef.code
     SupportLeftPlay _pk _skey _code -> pure ()
     DestroyQuest qkey -> do
       g <- get
-      case findQuest qkey g of
-        Nothing -> pure ()
-        Just q -> do
+      whenJust (findQuest qkey g) \q -> do
           let owner = lookupPlayer q.controller g
               owner' =
                 owner
@@ -1041,19 +1025,17 @@ instance Run Game where
             [ ("player", playerParam q.controller)
             , ("card", T.pack q.cardDef.title)
             ]
-          send (QuestLeftPlay q.controller qkey q.cardDef.code)
+          send $ QuestLeftPlay q.controller qkey q.cardDef.code
     QuestLeftPlay _pk _qkey _code -> pure ()
     AttachExperience hostKey expCode -> do
       g <- get
-      case findUnit hostKey g of
-        Nothing -> pure ()
-        Just u -> do
+      whenJust (findUnit hostKey g) \u -> do
           let u' = (u {experiences = expCode : u.experiences}) :: UnitDetails
           modify \gx -> gx {units = replaceUnit u' gx.units}
           logIt LogSystem
             "log.unit.experience_attached"
             [ ("card", T.pack u.cardDef.title)
-            , ("count", T.pack (show (length u'.experiences)))
+            , ("count", tshow (length u'.experiences))
             ]
     PlayTactic pk cardKey target -> do
       g <- get
@@ -1087,9 +1069,9 @@ instance Run Game where
                     "log.tactic.played"
                     [ ("player", playerParam pk)
                     , ("card", T.pack cardDef.title)
-                    , ("cost", T.pack (show n))
+                    , ("cost", tshow n)
                     ]
-                  send (TacticResolved pk cardDef.code target)
+                  send $ TacticResolved pk cardDef.code target
     TacticResolved pk code target -> do
       g <- get
       case Map.lookup code allCards of
@@ -1134,7 +1116,7 @@ instance Run Game where
                     [ ("player", playerParam pk)
                     , ("card", T.pack (actionSourceTitle src))
                     , ("action", name)
-                    , ("cost", T.pack (show totalCost))
+                    , ("cost", tshow totalCost)
                     ]
                   fireAction src idx pk target
     DeferDamageToUnitUntilEoT ukey n -> do
@@ -1142,7 +1124,7 @@ instance Run Game where
         g {pendingEndOfTurn = PEDealDamageToUnit ukey n : g.pendingEndOfTurn}
       logIt LogSystem
         "log.effect.deferred_damage"
-        [ ("amount", T.pack (show n))
+        [ ("amount", tshow n)
         , ("trigger", "EndTurn")
         ]
     DealDamageToZone targetPlayer zoneKind raw -> do
@@ -1172,7 +1154,7 @@ instance Run Game where
           "log.zone.damaged"
           [ ("player", playerParam targetPlayer)
           , ("zone", zoneParam zoneKind)
-          , ("amount", T.pack (show amount))
+          , ("amount", tshow amount)
           ]
         when justBurned $ do
           logIt LogResult
@@ -1183,7 +1165,7 @@ instance Run Game where
           -- Check for elimination (two burned zones = lose).
           let burnedNow = burnedZoneCount target'.capital
           when (burnedNow >= 2) $
-            send (Eliminate targetPlayer CapitalBurned)
+            send $ Eliminate targetPlayer CapitalBurned
     HealCapital pk raw -> do
       -- Heal up to N total damage tokens off the capital, spending the
       -- budget greedily on the most-damaged unburned zone, then the
@@ -1215,7 +1197,7 @@ instance Run Game where
         modify (setPlayer pk player')
         logIt LogSystem
           "log.capital.healed"
-          [("player", playerParam pk), ("amount", T.pack (show budget))]
+          [("player", playerParam pk), ("amount", tshow budget)]
     HealZone pk zone raw -> do
       let amount = max 0 raw
       when (amount > 0) $ do
@@ -1232,7 +1214,7 @@ instance Run Game where
             "log.zone.healed"
             [ ("player", playerParam pk)
             , ("zone", zoneParam zone)
-            , ("amount", T.pack (show taken))
+            , ("amount", tshow taken)
             ]
     AddDevelopment pk zone -> do
       g <- get
@@ -1256,7 +1238,7 @@ instance Run Game where
             [("player", playerParam pk), ("zone", zoneParam zone)]
           -- Decking-out check: AddDevelopment can empty the deck too.
           when (null restDeck) $
-            send (Eliminate pk DeckedOut)
+            send $ Eliminate pk DeckedOut
     DealDamageToEachEnemyUnitInZone pk zone raw -> do
       let amount = max 0 raw
       when (amount > 0) $ do
@@ -1300,7 +1282,7 @@ instance Run Game where
            in gx {combat = Just cs'}
       logIt LogSystem
         "log.damage.cancelled_pending"
-        [("amount", T.pack (show cap))]
+        [("amount", tshow cap)]
     CancelAllAssignedDamage -> do
       modify \gx -> case gx.combat of
         Nothing -> gx
@@ -1338,7 +1320,7 @@ instance Run Game where
         modify (setPlayer pk player')
         logIt LogSystem
           "log.resources.gained"
-          [("player", playerParam pk), ("amount", T.pack (show amount))]
+          [("player", playerParam pk), ("amount", tshow amount)]
     SpendResources pk raw -> do
       let amount = max 0 raw
       when (amount > 0) $ do
@@ -1350,7 +1332,7 @@ instance Run Game where
         modify (setPlayer pk player')
         logIt LogSystem
           "log.resources.spent"
-          [("player", playerParam pk), ("amount", T.pack (show spent))]
+          [("player", playerParam pk), ("amount", tshow spent)]
     BeginCombat attacker zone attackerKeys -> do
       g <- get
       let defender = attacker.next
@@ -1424,11 +1406,11 @@ instance Run Game where
           when paidRune $
             logIt LogSystem
               "log.combat.rune_paid"
-              [("amount", T.pack (show runeCost))]
+              [("amount", tshow runeCost)]
           when (penalty > 0) $
             logIt LogSystem
               "log.combat.rune_penalty"
-              [("amount", T.pack (show penalty))]
+              [("amount", tshow penalty)]
           -- Step 1 done (target + attackers committed). Open the
           -- AfterDeclareCombatTarget window on top of the current
           -- BattlefieldActionWindow; auto-pass for now since the
@@ -1440,7 +1422,7 @@ instance Run Game where
       g <- get
       case g.combat of
         Nothing -> pure ()
-        Just cs -> send (DeclareDefenders cs.defenders)
+        Just cs -> send $ DeclareDefenders cs.defenders
     DeclareDefenders defs -> do
       modify \gx -> case gx.combat of
         Just cs -> gx {combat = Just (cs {defenders = defs} :: CombatState)}
@@ -1464,7 +1446,7 @@ instance Run Game where
                  in when (cs_total > 0) $
                       case attackerKeys of
                         (aKey : _) ->
-                          send (DealDamageToUnitUncancellable aKey cs_total)
+                          send $ DealDamageToUnitUncancellable aKey cs_total
                         [] -> pure ()
             )
             defenderUnits
@@ -1541,7 +1523,7 @@ instance Run Game where
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
             ]
-          send (UnitEnteredPlay pk cardKey)
+          send $ UnitEnteredPlay pk cardKey
     PutUnitIntoPlayFromDiscard pk cardKey zone -> do
       g <- get
       let player = lookupPlayer pk g
@@ -1586,7 +1568,7 @@ instance Run Game where
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
             ]
-          send (UnitEnteredPlay pk cardKey)
+          send $ UnitEnteredPlay pk cardKey
     InstallModifier target modifier -> do
       modify \g ->
         g
@@ -1626,11 +1608,11 @@ instance Run Game where
               "log.unit.damage_moved"
               [ ("source", T.pack src.cardDef.title)
               , ("target", T.pack dst.cardDef.title)
-              , ("amount", T.pack (show srcDmg))
+              , ("amount", tshow srcDmg)
               ]
             -- Destination might now exceed its HP.
             when (dstDmg + srcDmg >= dst.effectiveMaxHP) $
-              send (DestroyUnit toKey)
+              send $ DestroyUnit toKey
         _ -> pure ()
     PlayLegend pk cardKey -> do
       g <- get
@@ -1669,16 +1651,14 @@ instance Run Game where
                         "log.legend.played"
                         [ ("player", playerParam pk)
                         , ("card", T.pack cardDef.title)
-                        , ("cost", T.pack (show n))
+                        , ("cost", tshow n)
                         ]
-                      send (LegendEnteredPlay pk cardKey)
+                      send $ LegendEnteredPlay pk cardKey
     LegendEnteredPlay pk _key ->
       logIt LogSystem "log.legend.entered_play" [("player", playerParam pk)]
     DealDamageToLegend lkey amount -> do
       g <- get
-      case findLegend lkey g of
-        Nothing -> pure ()
-        Just l -> do
+      whenJust (findLegend lkey g) \l -> do
           let inflated = max 0 amount
               Damage existing = l.damage
               newDmg = Damage (existing + inflated)
@@ -1687,17 +1667,15 @@ instance Run Game where
           logIt LogSystem
             "log.legend.damaged"
             [ ("card", T.pack l.cardDef.title)
-            , ("amount", T.pack (show inflated))
+            , ("amount", tshow inflated)
             ]
           let Damage total = newDmg
               hp = legendPrintedHPFromDef l.cardDef
           when (total >= hp) $
-            send (DestroyLegend lkey)
+            send $ DestroyLegend lkey
     DestroyLegend lkey -> do
       g <- get
-      case findLegend lkey g of
-        Nothing -> pure ()
-        Just l -> do
+      whenJust (findLegend lkey g) \l -> do
           let owner = lookupPlayer l.controller g
               owner' =
                 owner
@@ -1712,7 +1690,7 @@ instance Run Game where
             [ ("player", playerParam l.controller)
             , ("card", T.pack l.cardDef.title)
             ]
-          send (LegendLeftPlay l.controller lkey l.cardDef.code)
+          send $ LegendLeftPlay l.controller lkey l.cardDef.code
     LegendLeftPlay _pk _lkey _code -> pure ()
 
 -- | First-turn penalty: the starting player skips Quest and Battlefield
@@ -1806,64 +1784,52 @@ setPlayer :: PlayerKey -> Player -> Game -> Game
 setPlayer Player1 p g = g {player1 = p}
 setPlayer Player2 p g = g {player2 = p}
 
--- | Pull a unit card matching the given 'CardCode' out of a player's
--- hand. Returns 'Nothing' if no such card exists in hand (or if the
--- matching card isn't a unit). Preserves hand order for the remaining
--- cards.
+-- | A 'Pile' is a getter/setter pair for one of a 'Player'\'s card
+-- collections. Lets 'takeFromPile' work uniformly across hand, deck
+-- and discard.
+data Pile = Pile
+  { read :: Player -> [Card]
+  , write :: [Card] -> Player -> Player
+  }
+
+handPile, deckPile, discardPile :: Pile
+handPile = Pile (.hand) \cs p -> p {hand = cs}
+deckPile = Pile (.deck) \cs p -> p {deck = cs}
+discardPile = Pile (.discard) \cs p -> p {discard = cs}
+
+-- | Pull a card matching the given key from a 'Pile', if its 'def' is
+-- of the requested kind. Returns the unwrapped definition and the
+-- player with the card removed (pile order preserved otherwise).
+takeFromPile
+  :: Pile
+  -> (SomeCardDef -> Maybe (CardDef k))
+  -> UnitKey
+  -> Player
+  -> Maybe (CardDef k, Player)
+takeFromPile pile asKind key p = go [] (pile.read p)
+  where
+    go _ [] = Nothing
+    go acc (c : rest)
+      | c.key == key, Just cd <- asKind c.def =
+          Just (cd, pile.write (reverse acc ++ rest) p)
+      | otherwise = go (c : acc) rest
+
 takeUnitFromHand :: UnitKey -> Player -> Maybe (CardDef Unit, Player)
-takeUnitFromHand k p = go p.hand []
-  where
-    go :: [Card] -> [Card] -> Maybe (CardDef Unit, Player)
-    go [] _ = Nothing
-    go (c : rest) acc = case (c.key == k, c.def) of
-      (True, UnitCardDef cd) ->
-        Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (c : acc)
-
--- 'findUnit' is exported by 'Invasion.Card' for use in card receive
--- bodies; we reuse it here.
-
--- | Pull a Support card matching the given 'UnitKey' out of a player's
--- hand. Mirror of 'takeUnitFromHand'.
--- | Pull a Support card matching the given 'UnitKey' out of a
--- player's deck (used by deck-search effects such as Dwarf Cannon
--- Crew).
-takeSupportFromDeck :: UnitKey -> Player -> Maybe (CardDef Support, Player)
-takeSupportFromDeck k p = go p.deck []
-  where
-    go :: [Card] -> [Card] -> Maybe (CardDef Support, Player)
-    go [] _ = Nothing
-    go (c : rest) acc = case (c.key == k, c.def) of
-      (True, SupportCardDef cd) ->
-        Just (cd, p {deck = reverse acc ++ rest})
-      _ -> go rest (c : acc)
+takeUnitFromHand = takeFromPile handPile asUnit
 
 takeSupportFromHand :: UnitKey -> Player -> Maybe (CardDef Support, Player)
-takeSupportFromHand k p = go p.hand []
-  where
-    go :: [Card] -> [Card] -> Maybe (CardDef Support, Player)
-    go [] _ = Nothing
-    go (c : rest) acc = case (c.key == k, c.def) of
-      (True, SupportCardDef cd) ->
-        Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (c : acc)
+takeSupportFromHand = takeFromPile handPile asSupport
 
--- | Pull a Quest card matching the given 'UnitKey' out of a player's
--- hand.
+takeSupportFromDeck :: UnitKey -> Player -> Maybe (CardDef Support, Player)
+takeSupportFromDeck = takeFromPile deckPile asSupport
+
 takeQuestFromHand :: UnitKey -> Player -> Maybe (CardDef Quest, Player)
-takeQuestFromHand k p = go p.hand []
-  where
-    go :: [Card] -> [Card] -> Maybe (CardDef Quest, Player)
-    go [] _ = Nothing
-    go (c : rest) acc = case (c.key == k, c.def) of
-      (True, QuestCardDef cd) ->
-        Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (c : acc)
+takeQuestFromHand = takeFromPile handPile asQuest
 
 -- | Fire one scheduled effect by translating it into messages.
 firePendingEffect :: PendingEffect -> StateT Game GameT ()
 firePendingEffect = \case
-  PEDealDamageToUnit ukey n -> send (DealDamageToUnit ukey n)
+  PEDealDamageToUnit ukey n -> send $ DealDamageToUnit ukey n
   PESacrificeAttackersThisPhase -> do
     g <- get
     traverse_ (send . DestroyUnit) g.attackersThisPhase
@@ -1964,9 +1930,9 @@ applyDamageToUnitsSplit g = go
           slackAfterCancellable = slack - landingFromCancellable
           uncancellableUsed = min uAvail slackAfterCancellable
       when (cancellableUsed > 0) $
-        send (DealDamageToUnit u.key cancellableUsed)
+        send $ DealDamageToUnit u.key cancellableUsed
       when (uncancellableUsed > 0) $
-        send (DealDamageToUnitUncancellable u.key uncancellableUsed)
+        send $ DealDamageToUnitUncancellable u.key uncancellableUsed
       go (cAvail - cancellableUsed) (uAvail - uncancellableUsed) rest
 
 -- | Read a zone from a 'Capital' by 'ZoneKind'.
@@ -1988,10 +1954,7 @@ setZone kind z p =
 
 -- | Wire-side enum encoding for 'ZoneKind' (mirrors 'playerParam').
 zoneParam :: ZoneKind -> Text
-zoneParam = \case
-  KingdomZone -> "KingdomZone"
-  QuestZone -> "QuestZone"
-  BattlefieldZone -> "BattlefieldZone"
+zoneParam = tshow
 
 -- | Apply any in-play passive damage multipliers to a raw damage
 -- amount. Driven by the per-card 'damageMultiplierWhileInPlay' slice
@@ -2201,8 +2164,8 @@ assignCombatDamage g cs = do
   modify \gx -> gx {combat = Just cs'}
   logIt LogSystem
     "log.combat.assigned"
-    [ ("attacker_damage", T.pack (show (attackerCanc + attackerUncanc)))
-    , ("defender_damage", T.pack (show (defenderCanc + defenderUncanc)))
+    [ ("attacker_damage", tshow (attackerCanc + attackerUncanc))
+    , ("defender_damage", tshow (defenderCanc + defenderUncanc))
     ]
 
 -- | Convert the in-flight 'pendingAssignments' into actual damage
@@ -2225,20 +2188,15 @@ commitPendingCombatDamage = do
           scoutOf u = Scout `elem` u.cardDef.keywords
           attackerScouts = filter scoutOf attackerUnits
           defenderScouts = filter scoutOf defenderUnits
-      traverse_
-        (\_ -> send (DiscardRandomFromHand cs.defendingPlayer))
-        attackerScouts
-      traverse_
-        (\_ -> send (DiscardRandomFromHand cs.attackingPlayer))
-        defenderScouts
+      replicateM_ (length attackerScouts) $ send $ DiscardRandomFromHand cs.defendingPlayer
+      replicateM_ (length defenderScouts) $ send $ DiscardRandomFromHand cs.attackingPlayer
   where
     commitOne pd = case pd.target of
       PDUnit k -> do
-        when (pd.cancellable > 0) (send (DealDamageToUnit k pd.cancellable))
-        when (pd.uncancellable > 0)
-          (send (DealDamageToUnitUncancellable k pd.uncancellable))
+        when (pd.cancellable > 0) $ send $ DealDamageToUnit k pd.cancellable
+        when (pd.uncancellable > 0) $ send $ DealDamageToUnitUncancellable k pd.uncancellable
       PDZone owner z ->
-        send (DealDamageToZone owner z (pd.cancellable + pd.uncancellable))
+        send $ DealDamageToZone owner z (pd.cancellable + pd.uncancellable)
 
 -- | Allocate a (cancellable, uncancellable) damage budget across a
 -- list of recipients (in order), respecting Toughness on each one.
@@ -2279,10 +2237,10 @@ allocateDamage g = go []
 -- without blocking the engine.
 openAutoCombatWindow :: ActionWindowTrigger -> StateT Game GameT ()
 openAutoCombatWindow trigger = do
-  send (OpenActionWindow trigger)
+  send $ OpenActionWindow trigger
   active <- gets (.currentPlayer)
-  send (PassPriority active)
-  send (PassPriority active.next)
+  send $ PassPriority active
+  send $ PassPriority active.next
 
 -- | The six phase-level action windows where 'autoSkipActionWindows'
 -- applies. Combat sub-step windows (After*) are always auto-passed by
@@ -2356,9 +2314,7 @@ dispatchPromptCallback
 dispatchPromptCallback cb result = case (cb, result) of
   (CallbackIronThroneroomPayoff srcKey, PickUnits chosen) -> do
     g <- get
-    case findSupport srcKey g of
-      Nothing -> pure ()
-      Just self -> do
+    whenJust (findSupport srcKey g) \self -> do
         let owner = lookupPlayer self.controller g
             handKeySet = [c.key | c <- owner.hand]
             discardKeySet = [c.key | c <- owner.discard]
@@ -2391,29 +2347,25 @@ dispatchPromptCallback cb result = case (cb, result) of
     g <- get
     case findUnit chosen g of
       Just u | u.controller == pk ->
-        send (DestroyUnit u.key)
+        send $ DestroyUnit u.key
       _ -> pure ()
   (CallbackBloodthirsterSacrifice _ _, PickNone) -> pure ()
   (CallbackSkulltakerPayToAttach skullKey deadCode, PickBool True) -> do
     g <- get
-    case findUnit skullKey g of
-      Nothing -> pure ()
-      Just self -> do
+    whenJust (findUnit skullKey g) \self -> do
         let owner = lookupPlayer self.controller g
             Resources r = owner.resources
         when (r >= 1) $ do
           let owner' = owner {resources = Resources (r - 1)}
           modify (setPlayer self.controller owner')
-          send (AttachExperience self.key deadCode)
+          send $ AttachExperience self.key deadCode
   (CallbackSkulltakerPayToAttach _ _, PickBool False) -> pure ()
   (CallbackHorrorOfTzeentchDiscard horrorKey, PickBool True) -> do
     g <- get
-    case findUnit horrorKey g of
-      Nothing -> pure ()
-      Just self -> do
+    whenJust (findUnit horrorKey g) \self -> do
         let owner = lookupPlayer self.controller g
         when (not (null owner.hand)) $ do
-          send (DiscardRandomFromHand self.controller)
+          send $ DiscardRandomFromHand self.controller
           send
             ( RequestPrompt Prompt
                 { player = self.controller
@@ -2432,7 +2384,7 @@ dispatchPromptCallback cb result = case (cb, result) of
   (CallbackHorrorOfTzeentchTarget _, PickUnits (target : _)) -> do
     g <- get
     case findUnit target g of
-      Just _ -> send (DealDamageToUnit target 2)
+      Just _ -> send $ DealDamageToUnit target 2
       Nothing -> pure ()
   _ -> pure ()
 
@@ -2586,8 +2538,7 @@ effectiveTotalCost g pk cardDef =
         Fixed n -> n
         Variable -> 0
       adjustedPrinted = max 0 (printed + printedCostAdjustment g pk cardDef)
-      loyalty = loyaltySurcharge g pk cardDef
-   in adjustedPrinted + loyalty
+   in adjustedPrinted + loyaltySurcharge g pk cardDef
 
 -- | Legacy entry-point preserved for callers that haven't migrated
 -- yet. Returns the same answer as 'effectiveTotalCost' for units.
@@ -2652,44 +2603,14 @@ auraPowerBonus g u =
 selfScalingPowerBonus :: Game -> UnitDetails -> Int
 selfScalingPowerBonus g u = u.cardDef.extras.selfPowerBonus g u
 
--- | Pull a Unit card matching the given 'UnitKey' out of a player's
--- discard pile. Used by Reckless Attack-style resurrection effects.
 takeUnitFromDiscard :: UnitKey -> Player -> Maybe (CardDef Unit, Player)
-takeUnitFromDiscard k p = go p.discard []
-  where
-    go :: [Card] -> [Card] -> Maybe (CardDef Unit, Player)
-    go [] _ = Nothing
-    go (c : rest) acc = case (c.key == k, c.def) of
-      (True, UnitCardDef cd) ->
-        Just (cd, p {discard = reverse acc ++ rest})
-      _ -> go rest (c : acc)
+takeUnitFromDiscard = takeFromPile discardPile asUnit
 
--- | Pull a Tactic card matching the given 'UnitKey' out of a player's
--- hand.
 takeTacticFromHand :: UnitKey -> Player -> Maybe (CardDef Tactic, Player)
-takeTacticFromHand k p = go p.hand []
-  where
-    go :: [Card] -> [Card] -> Maybe (CardDef Tactic, Player)
-    go [] _ = Nothing
-    go (c : rest) acc = case (c.key == k, c.def) of
-      (True, TacticCardDef cd) ->
-        Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (c : acc)
+takeTacticFromHand = takeFromPile handPile asTactic
 
--- 'findSupport' / 'findQuest' / 'findLegend' are exported from
--- 'Invasion.Card'.
-
--- | Pull a Legend card matching the given 'CardCode' out of a player's
--- hand.
 takeLegendFromHand :: UnitKey -> Player -> Maybe (CardDef Legend, Player)
-takeLegendFromHand k p = go p.hand []
-  where
-    go :: [Card] -> [Card] -> Maybe (CardDef Legend, Player)
-    go [] _ = Nothing
-    go (c : rest) acc = case (c.key == k, c.def) of
-      (True, LegendCardDef cd) ->
-        Just (cd, p {hand = reverse acc ++ rest})
-      _ -> go rest (c : acc)
+takeLegendFromHand = takeFromPile handPile asLegend
 
 -- | Printed HP for a legend card definition. Mirrors
 -- 'unitPrintedHPFromDef'; 'Variable' falls back to 1 for now.
@@ -2699,19 +2620,24 @@ legendPrintedHPFromDef cd = case cd.hitPoints of
   Just Variable -> 1
   Nothing -> 1
 
+-- | Replace the keyed element whose 'key' matches @x@\'s 'key'. No-op
+-- if no such element exists (e.g. concurrent destroy). Works for any
+-- record with a @key :: UnitKey@ field — units, supports, quests,
+-- legends, all use the same identity.
+replaceById :: HasField "key" a UnitKey => a -> [a] -> [a]
+replaceById x = map \v -> if v.key == x.key then x else v
+
+replaceUnit :: UnitDetails -> [UnitDetails] -> [UnitDetails]
+replaceUnit = replaceById
+
 replaceSupport :: SupportDetails -> [SupportDetails] -> [SupportDetails]
-replaceSupport s = map \v -> if v.key == s.key then s else v
+replaceSupport = replaceById
 
 replaceQuest :: QuestDetails -> [QuestDetails] -> [QuestDetails]
-replaceQuest q = map \v -> if v.key == q.key then q else v
+replaceQuest = replaceById
 
 replaceLegend :: LegendDetails -> [LegendDetails] -> [LegendDetails]
-replaceLegend l = map \v -> if v.key == l.key then l else v
-
--- | Replace the unit whose key matches the supplied unit's key. No-op if
--- the unit is no longer present (e.g. concurrent destroy).
-replaceUnit :: UnitDetails -> [UnitDetails] -> [UnitDetails]
-replaceUnit u = map \v -> if v.key == u.key then u else v
+replaceLegend = replaceById
 
 -- | Dispatch a message to a snapshot of in-play units. The snapshot is
 -- usually taken BEFORE 'Run Game.receive' runs, so a unit being
@@ -2794,45 +2720,26 @@ logCap = 500
 -- | Param-value encodings. These deliberately echo the wire-side
 -- constructor names ('Player1', 'KingdomPhase', etc.) so the frontend
 -- can key directly into the matching i18n bundle without an extra
--- mapping layer.
+-- mapping layer. Each is just 'tshow' on an enum whose derived 'Show'
+-- yields the constructor name; the named aliases document intent at
+-- call sites.
 playerParam :: PlayerKey -> Text
-playerParam = \case
-  Player1 -> "Player1"
-  Player2 -> "Player2"
+playerParam = tshow
 
 phaseParam :: Phase -> Text
-phaseParam = \case
-  KingdomPhase -> "KingdomPhase"
-  QuestPhase -> "QuestPhase"
-  CapitalPhase -> "CapitalPhase"
-  BattlefieldPhase -> "BattlefieldPhase"
+phaseParam = tshow
 
 triggerParam :: ActionWindowTrigger -> Text
-triggerParam = \case
-  BeginningOfTurnActionWindow -> "BeginningOfTurnActionWindow"
-  KingdomActionWindow -> "KingdomActionWindow"
-  QuestActionWindow -> "QuestActionWindow"
-  CapitalActionWindow -> "CapitalActionWindow"
-  BattlefieldActionWindow -> "BattlefieldActionWindow"
-  AfterDeclareCombatTarget -> "AfterDeclareCombatTarget"
-  AfterDeclareAttackers -> "AfterDeclareAttackers"
-  AfterDeclareDefenders -> "AfterDeclareDefenders"
-  AfterAssignCombatDamage -> "AfterAssignCombatDamage"
-  AfterApplyCombatDamage -> "AfterApplyCombatDamage"
-  EndOfTurnActionWindow -> "EndOfTurnActionWindow"
+triggerParam = tshow
 
 elimReasonParam :: EliminationReason -> Text
-elimReasonParam = \case
-  DeckedOut -> "DeckedOut"
-  CapitalBurned -> "CapitalBurned"
+elimReasonParam = tshow
 
 winReasonParam :: WinReason -> Text
-winReasonParam = \case
-  OpponentDeckedOut -> "OpponentDeckedOut"
-  OpponentCapitalBurned -> "OpponentCapitalBurned"
+winReasonParam = tshow
 
 turnText :: Turn -> Text
-turnText (Turn n) = T.pack (show n)
+turnText (Turn n) = tshow n
 
 -- | Process the given messages on top of a game value, pumping the
 -- queue until it drains (or the game ends). Returns the resulting
