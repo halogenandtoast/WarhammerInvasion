@@ -8,7 +8,16 @@ FROM haskell:9.10.1 AS builder
 WORKDIR /build
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libgmp-dev zlib1g-dev libpq-dev pkg-config \
+  && apt-get install -y --no-install-recommends \
+       ca-certificates curl gnupg lsb-release \
+       libgmp-dev zlib1g-dev pkg-config \
+  && install -d /usr/share/postgresql-common/pgdg \
+  && curl -fsSLo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+       https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
 # Pull in just the dependency descriptors first so dependency compilation

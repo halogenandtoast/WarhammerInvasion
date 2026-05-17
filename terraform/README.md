@@ -31,20 +31,25 @@ when card art changes.
 
 Cloud-init on first boot:
 
-1. Creates a swap file (Haskell compilation OOMs without it on small droplets).
+1. Creates a swap file (kept around as cheap insurance; the runtime
+   containers themselves are small now that images are built off-host).
 2. Installs `git` and a pinned `dbmate` binary (`var.dbmate_version`).
-3. Clones `var.repo_url` to `/opt/whi`.
+3. Clones `var.repo_url` to `/opt/whi` so the droplet has the migrations
+   tree and the compose file (the app images come from Docker Hub).
 4. Writes `/etc/whi.env` containing `DATABASE_URL` (the managed cluster's
    private URI), `WHI_JWT_SECRET`, and the JWT TTL knobs.
 5. Drops two systemd units:
    - `whi-migrate.service` (oneshot) — runs `dbmate up` against the cluster.
-   - `whi.service` — runs `docker compose up -d --build` *after* the
-     migrate unit succeeds.
+   - `whi.service` — runs `docker compose up -d` *after* the migrate unit
+     succeeds. The compose file references pre-built images on Docker Hub
+     (`halogenandtoast/whi-{backend,frontend}:latest`), so no build happens
+     on the droplet.
 6. Enables `whi.service`, which pulls in the migrate unit by `Requires=`.
 
-The first `docker compose up` is slow — the Haskell builder downloads GHC
-and compiles all dependencies. Expect ~15–25 min before port 80 answers.
-Subsequent boots reuse Docker's layer cache and are fast.
+First boot just pulls the two images from Docker Hub — typically under a
+minute. (Old droplets that still build from source on boot via an outdated
+systemd unit need a one-time `sed -i 's/up -d --build/up -d/'
+/etc/systemd/system/whi.service && systemctl daemon-reload` to match.)
 
 ## Usage
 
@@ -91,15 +96,26 @@ ssh root@<ip> 'cd /opt/whi && docker compose logs -f'
 
 ## Updating the app
 
-The droplet's checkout lives at `/opt/whi`. To deploy a new revision:
+Images are built locally and pushed to Docker Hub
+(`halogenandtoast/whi-backend`, `halogenandtoast/whi-frontend`); the
+droplet just pulls. To deploy a new revision:
 
 ```sh
-../scripts/deploy.sh                 # git pull + docker compose up -d --build
-../scripts/deploy.sh --branch foo    # deploy a different ref
+docker login                                 # one-time, against Docker Hub
+../scripts/deploy.sh                         # build amd64 → push → remote pull
+../scripts/deploy.sh --branch foo            # deploy a different ref
 ```
 
+What the script does:
+1. `docker buildx build --platform linux/amd64 --push` for both images,
+   tagging with the short git SHA *and* `latest`.
+2. SSHes to the droplet, fast-forwards `/opt/whi` (so migrations + compose
+   file are current), runs `dbmate up`, then `docker compose pull` and
+   `docker compose up -d`.
+
 The script reads the droplet IP from `terraform output ipv4_address`; set
-`WHI_HOST` to override.
+`WHI_HOST` to override. Set `WHI_DOCKERHUB_USER` to push under a different
+Docker Hub namespace.
 
 ## Things this does NOT do
 

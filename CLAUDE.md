@@ -53,8 +53,8 @@ cd backend && DATABASE_URL=postgres://whi:whi@localhost:5432/whi?sslmode=disable
               WHI_JWT_SECRET=dev-secret \
               stack exec WarhammerInvasion-exe          # PORT=3000
 
-# All-in-compose (slower iteration, closer to prod):
-docker compose up --build
+# All-in-compose (pulls the published Hub images, no local build):
+docker compose up                          # or `scripts/deploy.sh` to ship
 
 # Frontend (always outside compose for HMR)
 cd frontend && npm install

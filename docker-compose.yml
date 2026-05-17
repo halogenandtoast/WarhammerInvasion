@@ -38,9 +38,7 @@ services:
     restart: "no"
 
   backend:
-    build:
-      context: ./backend
-    image: whi-backend:latest
+    image: "${WHI_DOCKERHUB_USER:-halogenandtoast}/whi-backend:${WHI_TAG:-latest}"
     container_name: whi-backend
     environment:
       PORT: "3000"
@@ -64,9 +62,7 @@ services:
       - "3000"
 
   frontend:
-    build:
-      context: ./frontend
-    image: whi-frontend:latest
+    image: "${WHI_DOCKERHUB_USER:-halogenandtoast}/whi-frontend:${WHI_TAG:-latest}"
     container_name: whi-frontend
     depends_on:
       - backend
