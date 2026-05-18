@@ -287,7 +287,7 @@ countSpectatorsSTM slot = do
   conns <- readTVar slot.connections
   let spectators = [c | c <- Map.elems conns, c.kind == ConnSpectator]
       authedIds = Set.fromList [u.userId | c <- spectators, Just u <- [c.user]]
-      guestCount = length [() | c <- spectators, case c.user of Nothing -> True; _ -> False]
+      guestCount = length [() | c <- spectators, isNothing c.user]
   pure (Set.size authedIds + guestCount)
 
 -- | Attach a fresh WS connection to a game slot. Bumps the slot out of

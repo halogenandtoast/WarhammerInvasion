@@ -677,21 +677,26 @@ deckCardCounts _ = []
 -- Returns a protocol error code on failure so the client can localize it.
 engineDeckFromDb :: Deck -> Either Text Engine.Deck
 engineDeckFromDb d = do
-  race <- case deckCapital d of
-    Just "dwarf" -> Right Dwarf
-    Just "empire" -> Right Empire
-    Just "high_elf" -> Right HighElf
-    Just "chaos" -> Right Chaos
-    Just "orc" -> Right Orc
-    Just "dark_elf" -> Right DarkElf
-    Just _ -> Left "unsupported_capital"
-    Nothing -> Left "missing_capital"
+  capitalSlug <- maybeToEither "missing_capital" $ deckCapital d
+  race <- maybeToEither "unsupported_capital" $ Map.lookup capitalSlug capitalRaces
   let cards =
         [ CardCode (T.unpack code)
         | (code, n) <- deckCardCounts (deckCards d)
         , _ <- replicate n ()
         ]
   Right Engine.Deck {cards, race}
+
+-- | Wire-side capital slug → engine race. The slug is what the frontend
+-- writes into @decks.capital@.
+capitalRaces :: Map.Map Text Race
+capitalRaces = Map.fromList
+  [ ("dwarf", Dwarf)
+  , ("empire", Empire)
+  , ("high_elf", HighElf)
+  , ("chaos", Chaos)
+  , ("orc", Orc)
+  , ("dark_elf", DarkElf)
+  ]
 
 -- ----------------------------------------------------------------------------
 -- Idle sweeper
@@ -700,16 +705,11 @@ idleSweeperLoop :: WsEnv -> IO ()
 idleSweeperLoop env = forever do
   threadDelay (60 * 1_000_000)
   now <- getCurrentTime
-  dead <- atomically do
+  atomically do
     ds <- sweepIdle env.lobby now
     unless (null ds) do
       sm <- summariesSTM env.lobby
       broadcastLobby env.lobby LobbyGamesUpdate {games = sm}
-    pure ds
-  -- Force any straggler connections (none expected, since sweep requires empty)
-  traverse_
-    (\_ -> pure ())
-    dead
 
 -- ----------------------------------------------------------------------------
 -- Random tokens

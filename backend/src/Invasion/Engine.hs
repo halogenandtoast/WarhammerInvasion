@@ -1717,9 +1717,8 @@ combatDamageOf g side u =
 -- Driven by the per-card 'canAttackZone' slice on 'UnitExtras'
 -- (Sworn of Khorne today; default lets every unit attack).
 eligibleAttacker :: Game -> PlayerKey -> ZoneKind -> UnitKey -> Bool
-eligibleAttacker g defender zone ukey = case findUnit ukey g of
-  Nothing -> False
-  Just u -> u.cardDef.extras.canAttackZone g defender zone u
+eligibleAttacker g defender zone ukey =
+  maybe False (\u -> u.cardDef.extras.canAttackZone g defender zone u) (findUnit ukey g)
 
 -- | Split the combat damage contributed by a list of units into a
 -- (cancellable, uncancellable) pair. Damage from units with the
@@ -1899,20 +1898,12 @@ tacticTargetSchema cd = case cd.actions of
 validateTarget :: PlayerKey -> TargetSchema -> ActionTarget -> Game -> Bool
 validateTarget pk schema tgt g = case (schema, tgt) of
   (NoTargetSchema, NoTarget) -> True
-  (AnyUnitTargetSchema, TargetUnit k) -> case findUnit k g of
-    Just _ -> True
-    Nothing -> False
-  (EnemyUnitTargetSchema, TargetUnit k) -> case findUnit k g of
-    Just u -> u.controller /= pk
-    Nothing -> False
-  (FriendlyUnitTargetSchema, TargetUnit k) -> case findUnit k g of
-    Just u -> u.controller == pk
-    Nothing -> False
+  (AnyUnitTargetSchema, TargetUnit k) -> isJust $ findUnit k g
+  (EnemyUnitTargetSchema, TargetUnit k) -> maybe False ((/= pk) . (.controller)) $ findUnit k g
+  (FriendlyUnitTargetSchema, TargetUnit k) -> maybe False ((== pk) . (.controller)) $ findUnit k g
   (AnyZoneTargetSchema, TargetZone _ _) -> True
   (EnemyZoneTargetSchema, TargetZone owner _) -> owner /= pk
-  (SupportTargetSchema, TargetSupport k) -> case findSupport k g of
-    Just _ -> True
-    Nothing -> False
+  (SupportTargetSchema, TargetSupport k) -> isJust $ findSupport k g
   _ -> False
 
 -- | Total power available to the named player in the named zone:

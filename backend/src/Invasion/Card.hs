@@ -47,19 +47,29 @@ instance ToJSON SomeCardDef where
 -- 'takeFromPile' so a single take-from-pile loop can be parameterised
 -- by which card kind it expects to find.
 asUnit :: SomeCardDef -> Maybe (CardDef Unit)
-asUnit = \case UnitCardDef cd -> Just cd; _ -> Nothing
+asUnit = \case
+  UnitCardDef cd -> Just cd
+  _ -> Nothing
 
 asSupport :: SomeCardDef -> Maybe (CardDef Support)
-asSupport = \case SupportCardDef cd -> Just cd; _ -> Nothing
+asSupport = \case
+  SupportCardDef cd -> Just cd
+  _ -> Nothing
 
 asQuest :: SomeCardDef -> Maybe (CardDef Quest)
-asQuest = \case QuestCardDef cd -> Just cd; _ -> Nothing
+asQuest = \case
+  QuestCardDef cd -> Just cd
+  _ -> Nothing
 
 asTactic :: SomeCardDef -> Maybe (CardDef Tactic)
-asTactic = \case TacticCardDef cd -> Just cd; _ -> Nothing
+asTactic = \case
+  TacticCardDef cd -> Just cd
+  _ -> Nothing
 
 asLegend :: SomeCardDef -> Maybe (CardDef Legend)
-asLegend = \case LegendCardDef cd -> Just cd; _ -> Nothing
+asLegend = \case
+  LegendCardDef cd -> Just cd
+  _ -> Nothing
 
 -- | A card instance: a definition paired with the stable 'UnitKey' that
 -- identifies this specific copy across the entire game. The same key is
@@ -831,16 +841,12 @@ controllerBurning g pk =
 -- | True iff the unit is currently declared as an attacker in the
 -- in-flight combat. Returns False outside combat.
 unitIsAttacking :: Game -> UnitDetails -> Bool
-unitIsAttacking g u = case g.combat of
-  Just cs -> u.key `elem` cs.attackers
-  Nothing -> False
+unitIsAttacking g u = maybe False (elem u.key . (.attackers)) g.combat
 
 -- | True iff the unit is currently declared as a defender. Returns False
 -- outside combat.
 unitIsDefending :: Game -> UnitDetails -> Bool
-unitIsDefending g u = case g.combat of
-  Just cs -> u.key `elem` cs.defenders
-  Nothing -> False
+unitIsDefending g u = maybe False (elem u.key . (.defenders)) g.combat
 
 -- | Every in-play support, whether free-standing in 'Game.supports' or
 -- attached to a unit. Used when an effect needs to consult every
