@@ -147,7 +147,10 @@ fi
 
 # --- Tell the droplet to pull + restart ------------------------------------
 echo "deploy.sh: target $SSH_USER@$HOST:$REMOTE_DIR${BRANCH:+ (branch $BRANCH)}"
-ssh -o StrictHostKeyChecking=accept-new "$SSH_USER@$HOST" \
+ssh -o StrictHostKeyChecking=accept-new \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=20 \
+    "$SSH_USER@$HOST" \
   REMOTE_DIR="$REMOTE_DIR" \
   BRANCH="$BRANCH" \
   MODE="$MODE" \
@@ -206,11 +209,17 @@ if [ "${WARN_MINUTES:-0}" -gt 0 ]; then
   echo "deploy.sh[remote]: posting maintenance banner; restart at $until_iso (${WARN_MINUTES}m)"
   trap 'clear_maintenance' EXIT
   post_maintenance "$until_iso"
-  sleep "$((WARN_MINUTES * 60))"
+  for i in $(seq 1 "$WARN_MINUTES"); do
+    sleep 60
+    echo "deploy.sh[remote]: $((WARN_MINUTES - i))m remaining until restart"
+  done
 fi
 
+echo "deploy.sh[remote]: applying migrations"
 dbmate --no-dump-schema up
+echo "deploy.sh[remote]: pulling images"
 docker compose pull
+echo "deploy.sh[remote]: recreating containers"
 docker compose up -d
 docker image prune -f >/dev/null
 docker compose ps
