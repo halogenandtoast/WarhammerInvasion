@@ -51,6 +51,7 @@ services:
       WHI_IDLE_TTL_SECONDS: "${WHI_IDLE_TTL_SECONDS:-300}"
       WHI_DEBUG: "${WHI_DEBUG:-0}"
       WHI_ALLOW_OVERWRITE: "${WHI_ALLOW_OVERWRITE:-0}"
+      WHI_ADMIN_TOKEN: "${WHI_ADMIN_TOKEN:-}"
     depends_on:
       db:
         condition: service_healthy
