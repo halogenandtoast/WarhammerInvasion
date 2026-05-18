@@ -18,6 +18,7 @@ module Invasion.Prelude
   , sample2
   ) where
 
+import Control.Applicative as X ((<|>))
 import Control.Monad as X (forM_, replicateM_, unless, void, when)
 import Control.Monad.IO.Class as X (MonadIO, liftIO)
 import Control.Monad.Random (MonadRandom, getRandomR)

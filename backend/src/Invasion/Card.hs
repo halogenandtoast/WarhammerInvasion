@@ -446,59 +446,45 @@ onResolve handler = onReceive $ Receive \msg owner self -> case msg of
         handler owner self target
   _ -> pure ()
 
+-- | Build a tactic-resolve trigger from a 'resolveX' lookup. The
+-- handler runs only when the lookup produces a target; otherwise the
+-- tactic resolves with no effect. Used by 'onResolveEnemyUnit' /
+-- 'onResolveFriendlyUnit' / etc.
+onResolveResolved
+  :: forall a
+   . (PlayerKey -> ActionTarget -> Game -> Maybe a)
+  -> (forall m. TriggerM m => PlayerKey -> a -> m ())
+  -> CardBuilder Tactic ()
+onResolveResolved lookup' handler = onResolve \_owner self target -> do
+  g <- getGame
+  whenJust (lookup' self.controller target g) $ handler self.controller
+
 -- | "When this tactic resolves, with an enemy unit auto-resolved from
 -- the chosen 'ActionTarget' (falling back to the first in-play enemy).
 -- The handler is skipped silently if no enemy unit exists.
 onResolveEnemyUnit
-  :: ( forall m
-      . TriggerM m
-     => PlayerKey -> UnitDetails -> m ()
-     )
+  :: (forall m. TriggerM m => PlayerKey -> UnitDetails -> m ())
   -> CardBuilder Tactic ()
-onResolveEnemyUnit handler = onResolve \_owner self target -> do
-  g <- getGame
-  case resolveEnemyUnit self.controller target g of
-    Just u -> handler self.controller u
-    Nothing -> pure ()
+onResolveEnemyUnit = onResolveResolved resolveEnemyUnit
 
 -- | "When this tactic resolves, with a friendly unit auto-resolved."
 onResolveFriendlyUnit
-  :: ( forall m
-      . TriggerM m
-     => PlayerKey -> UnitDetails -> m ()
-     )
+  :: (forall m. TriggerM m => PlayerKey -> UnitDetails -> m ())
   -> CardBuilder Tactic ()
-onResolveFriendlyUnit handler = onResolve \_owner self target -> do
-  g <- getGame
-  case resolveFriendlyUnit self.controller target g of
-    Just u -> handler self.controller u
-    Nothing -> pure ()
+onResolveFriendlyUnit = onResolveResolved resolveFriendlyUnit
 
 -- | "When this tactic resolves, with an enemy zone auto-resolved."
 onResolveEnemyZone
-  :: ( forall m
-      . TriggerM m
-     => PlayerKey -> PlayerKey -> ZoneKind -> m ()
-     )
+  :: (forall m. TriggerM m => PlayerKey -> PlayerKey -> ZoneKind -> m ())
   -> CardBuilder Tactic ()
-onResolveEnemyZone handler = onResolve \_owner self target -> do
-  g <- getGame
-  case resolveEnemyZone self.controller target g of
-    Just (owner, z) -> handler self.controller owner z
-    Nothing -> pure ()
+onResolveEnemyZone handler =
+  onResolveResolved resolveEnemyZone \pk (owner, z) -> handler pk owner z
 
 -- | "When this tactic resolves, with an enemy support auto-resolved."
 onResolveEnemySupport
-  :: ( forall m
-      . TriggerM m
-     => PlayerKey -> SupportDetails -> m ()
-     )
+  :: (forall m. TriggerM m => PlayerKey -> SupportDetails -> m ())
   -> CardBuilder Tactic ()
-onResolveEnemySupport handler = onResolve \_owner self target -> do
-  g <- getGame
-  case resolveEnemySupport self.controller target g of
-    Just s -> handler self.controller s
-    Nothing -> pure ()
+onResolveEnemySupport = onResolveResolved resolveEnemySupport
 
 -- | "On combat resolve while this in-play card is one of the
 -- attackers." Used by approximate "when this unit damages a zone /

@@ -741,37 +741,12 @@ instance Run Game where
       -- 'dispatchToInPlayUnits' runs cards' bespoke reactions; Game
       -- itself has nothing more to do.
       pure ()
-    CorruptUnit ukey -> do
-      g <- get
-      case findUnit ukey g of
-        Just u | not u.corrupted -> do
-          let u' = (u {corrupted = True}) :: UnitDetails
-          modify \gx -> gx {units = replaceUnit u' gx.units}
-          logIt LogSystem
-            "log.unit.corrupted"
-            [("card", T.pack u.cardDef.title)]
-        _ -> pure ()
-    CleanseUnit ukey -> do
-      g <- get
-      case findUnit ukey g of
-        Just u | u.corrupted -> do
-          let u' = (u {corrupted = False}) :: UnitDetails
-          modify \gx -> gx {units = replaceUnit u' gx.units}
-          logIt LogSystem
-            "log.unit.cleansed"
-            [("card", T.pack u.cardDef.title)]
-        _ -> pure ()
+    CorruptUnit ukey -> setCorrupted True "log.unit.corrupted" ukey
+    CleanseUnit ukey -> setCorrupted False "log.unit.cleansed" ukey
     RestoreOneCorruptCard pk -> do
       g <- get
-      case
-        [ u
-        | u <- g.units
-        , u.controller == pk
-        , u.corrupted
-        ]
-        of
-          (u : _) -> send $ CleanseUnit u.key
-          [] -> pure ()
+      whenJust (find (\u -> u.controller == pk && u.corrupted) g.units) \u ->
+        send $ CleanseUnit u.key
     PlayAttachment pk cardKey targetKey -> do
       mhost <- gets (findUnit targetKey)
       whenJust mhost \host ->
@@ -1618,6 +1593,17 @@ discardToController
   :: Monad m => PlayerKey -> Card -> StateT Game m ()
 discardToController pk c = modifyPlayer pk \p -> p {discard = c : p.discard}
 
+-- | Flip a unit's 'corrupted' flag and emit the matching log entry.
+-- No-op when the unit is missing or already in the requested state.
+setCorrupted :: Bool -> Text -> UnitKey -> StateT Game GameT ()
+setCorrupted newVal logKey ukey = do
+  munit <- gets (findUnit ukey)
+  whenJust munit \u ->
+    when (u.corrupted /= newVal) do
+      let u' = (u {corrupted = newVal}) :: UnitDetails
+      modify \gx -> gx {units = replaceUnit u' gx.units}
+      logIt LogSystem logKey [("card", T.pack u.cardDef.title)]
+
 -- | The "I can pay for it" preamble shared by the vanilla play handlers
 -- (PlayUnit, PlaySupport, PlayQuest, PlayLegend, and PlayTactic / …
 -- with their own pre-flight checks). Runs the @install@ body with the
@@ -1836,46 +1822,49 @@ data ActionSource
   | LegendSource LegendDetails
 
 -- | Look up an in-play card by 'UnitKey' across units, supports,
--- quests and legends.
+-- quests and legends. First hit wins; the card kinds use disjoint
+-- key spaces in practice so the order only matters for malformed input.
 findActionSource :: UnitKey -> Game -> Maybe ActionSource
 findActionSource k g =
-  case findUnit k g of
-    Just u -> Just (UnitSource u)
-    Nothing -> case findSupport k g of
-      Just s -> Just (SupportSource s)
-      Nothing -> case findQuest k g of
-        Just q -> Just (QuestSource q)
-        Nothing -> case findLegend k g of
-          Just l -> Just (LegendSource l)
-          Nothing -> Nothing
+      (UnitSource <$> findUnit k g)
+  <|> (SupportSource <$> findSupport k g)
+  <|> (QuestSource <$> findQuest k g)
+  <|> (LegendSource <$> findLegend k g)
+
+-- | Run a polymorphic action over the wrapped in-play record, no matter
+-- which kind it is. Lets us write @actionAt@, @actionSourceTitle@, etc.
+-- once instead of casing on every 'ActionSource' constructor.
+withActionSource
+  :: ActionSource
+  -> ( forall a k
+       . ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         , InPlay k ~ a
+         )
+      => a -> r
+     )
+  -> r
+withActionSource src f = case src of
+  UnitSource u -> f u
+  SupportSource s -> f s
+  QuestSource q -> f q
+  LegendSource l -> f l
 
 -- | Static metadata for the action at the given index of a source's
 -- declared 'actions' list.
 actionAt :: ActionSource -> Int -> Maybe (Text, Int, TargetSchema)
-actionAt src i = case src of
-  UnitSource u -> meta <$> safeIndex u.cardDef.actions i
-  SupportSource s -> meta <$> safeIndex s.cardDef.actions i
-  QuestSource q -> meta <$> safeIndex q.cardDef.actions i
-  LegendSource l -> meta <$> safeIndex l.cardDef.actions i
+actionAt src i = withActionSource src \a -> meta <$> safeIndex a.cardDef.actions i
   where
     meta a = (a.actionName, a.actionCost, a.actionTarget)
 
 -- | The card title for log lines.
 actionSourceTitle :: ActionSource -> String
-actionSourceTitle = \case
-  UnitSource u -> u.cardDef.title
-  SupportSource s -> s.cardDef.title
-  QuestSource q -> q.cardDef.title
-  LegendSource l -> l.cardDef.title
+actionSourceTitle src = withActionSource src (.cardDef.title)
 
 -- | Each card's actions are "controlled by" its controller — only that
 -- player can trigger them.
 validateActionSource :: PlayerKey -> ActionSource -> Bool
-validateActionSource pk = \case
-  UnitSource u -> u.controller == pk
-  SupportSource s -> s.controller == pk
-  QuestSource q -> q.controller == pk
-  LegendSource l -> l.controller == pk
+validateActionSource pk src = withActionSource src \a -> a.controller == pk
 
 -- | Fire the chosen action's effect closure. No-op if the index is out
 -- of bounds (should never happen since 'actionAt' already validated).
@@ -1885,23 +1874,10 @@ fireAction
   -> PlayerKey
   -> ActionTarget
   -> StateT Game GameT ()
-fireAction src i pk tgt = case src of
-  UnitSource u -> case safeIndex u.cardDef.actions i of
-    Just a -> case a.actionEffect of
-      ActionEffect f -> lift (f pk u tgt)
-    Nothing -> pure ()
-  SupportSource s -> case safeIndex s.cardDef.actions i of
-    Just a -> case a.actionEffect of
-      ActionEffect f -> lift (f pk s tgt)
-    Nothing -> pure ()
-  QuestSource q -> case safeIndex q.cardDef.actions i of
-    Just a -> case a.actionEffect of
-      ActionEffect f -> lift (f pk q tgt)
-    Nothing -> pure ()
-  LegendSource l -> case safeIndex l.cardDef.actions i of
-    Just a -> case a.actionEffect of
-      ActionEffect f -> lift (f pk l tgt)
-    Nothing -> pure ()
+fireAction src i pk tgt = withActionSource src \self ->
+  whenJust (safeIndex self.cardDef.actions i) \a ->
+    case a.actionEffect of
+      ActionEffect f -> lift $ f pk self tgt
 
 safeIndex :: [a] -> Int -> Maybe a
 safeIndex xs i
@@ -1946,30 +1922,16 @@ validateTarget pk schema tgt g = case (schema, tgt) of
 zonePower :: Game -> PlayerKey -> ZoneKind -> Int
 zonePower g pk zone =
   let Power base = basePower zone
-      unitsHere =
-        [ u
-        | u <- g.units
-        , u.controller == pk
-        , u.zone == zone
-        , not u.corrupted
-        ]
-      supportsHere =
-        [ s
-        | s <- g.supports
-        , s.controller == pk
-        , s.zone == zone
-        ]
-      legendsHere =
-        [ l
-        | l <- g.legends
-        , l.controller == pk
-        , l.zone == zone
-        ]
-      unitPow = sum (map (.effectivePower) unitsHere)
-      supportPow = sum (map (.cardDef.power) supportsHere)
-      legendPow = sum (map (.cardDef.power) legendsHere)
-      auraBonus = zoneAuraBonus g pk zone
-   in base + unitPow + supportPow + legendPow + auraBonus
+      mine
+        :: ( HasField "controller" a PlayerKey
+           , HasField "zone" a ZoneKind
+           )
+        => [a] -> [a]
+      mine = filter \x -> x.controller == pk && x.zone == zone
+      unitPow = sum $ map (.effectivePower) $ filter (not . (.corrupted)) $ mine g.units
+      supportPow = sum $ map (.cardDef.power) $ mine g.supports
+      legendPow = sum $ map (.cardDef.power) $ mine g.legends
+   in base + unitPow + supportPow + legendPow + zoneAuraBonus g pk zone
 
 -- | Extra power a player's zone gets from in-play cards that grant a
 -- zone-wide bonus. Driven by the per-support 'zonePowerBonus' slice
@@ -1992,8 +1954,8 @@ zoneAuraBonus g pk zone =
 -- counterpart that turns each entry into a real DealDamage message.
 assignCombatDamage :: Game -> CombatState -> StateT Game GameT ()
 assignCombatDamage g cs = do
-  let attackerUnits = [u | k <- cs.attackers, Just u <- [findUnit k g]]
-      defenderUnits = [u | k <- cs.defenders, Just u <- [findUnit k g]]
+  let attackerUnits = mapMaybe (`findUnit` g) cs.attackers
+      defenderUnits = mapMaybe (`findUnit` g) cs.defenders
       (attackerCanc, attackerUncanc) =
         splitDamage g cs.attackingPlayer attackerUnits
       (defenderCanc, defenderUncanc) =
@@ -2044,11 +2006,9 @@ commitPendingCombatDamage = do
         Nothing -> gx
       -- Scout: queue post-damage discards now (they fire after the
       -- damage messages flush via the FIFO queue).
-      let attackerUnits = [u | k <- cs.attackers, Just u <- [findUnit k g]]
-          defenderUnits = [u | k <- cs.defenders, Just u <- [findUnit k g]]
-          scoutOf u = Scout `elem` u.cardDef.keywords
-          attackerScouts = filter scoutOf attackerUnits
-          defenderScouts = filter scoutOf defenderUnits
+      let scoutOf u = Scout `elem` u.cardDef.keywords
+          attackerScouts = filter scoutOf $ mapMaybe (`findUnit` g) cs.attackers
+          defenderScouts = filter scoutOf $ mapMaybe (`findUnit` g) cs.defenders
       replicateM_ (length attackerScouts) $ send $ DiscardRandomFromHand cs.defendingPlayer
       replicateM_ (length defenderScouts) $ send $ DiscardRandomFromHand cs.attackingPlayer
   where
@@ -2129,23 +2089,21 @@ isAutoSkippableTrigger = \case
 playerHasActionMove :: PlayerKey -> Game -> Bool
 playerHasActionMove pk g =
   let p = lookupPlayer pk g
-      tacticInHand = any handIsTactic p.hand
-      controlsAction =
-        any (\u -> u.controller == pk && not (null u.cardDef.actions)) g.units
-          || any
-            (\s -> s.controller == pk && not (null s.cardDef.actions))
-            g.supports
-          || any
-            (\q -> q.controller == pk && not (null q.cardDef.actions))
-            g.quests
-          || any
-            (\l -> l.controller == pk && not (null l.cardDef.actions))
-            g.legends
-   in tacticInHand || controlsAction
+   in any handIsTactic p.hand
+        || hasAction g.units
+        || hasAction g.supports
+        || hasAction g.quests
+        || hasAction g.legends
   where
     handIsTactic c = case c.def of
       TacticCardDef _ -> True
       _ -> False
+    hasAction
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Bool
+    hasAction = any \x -> x.controller == pk && not (null x.cardDef.actions)
 
 -- | If the host enabled 'autoSkipActionWindows', the window is one of
 -- the four phase action windows, and the priority holder has no
@@ -2243,10 +2201,8 @@ dispatchPromptCallback cb result = case (cb, result) of
             )
   (CallbackHorrorOfTzeentchDiscard _, PickBool False) -> pure ()
   (CallbackHorrorOfTzeentchTarget _, PickUnits (target : _)) -> do
-    g <- get
-    case findUnit target g of
-      Just _ -> send $ DealDamageToUnit target 2
-      Nothing -> pure ()
+    exists <- gets (isJust . findUnit target)
+    when exists $ send $ DealDamageToUnit target 2
   _ -> pure ()
 
 -- | Fire post-combat "when this unit damages an enemy" effects. Read
@@ -2295,10 +2251,14 @@ isLimitedCard cd = Limited `elem` cd.keywords
 -- copies do not count.
 controlsCopyInPlay :: PlayerKey -> CardCode -> Game -> Bool
 controlsCopyInPlay pk code g =
-  any (\u -> u.controller == pk && u.cardDef.code == code) g.units
-    || any (\s -> s.controller == pk && s.cardDef.code == code) g.supports
-    || any (\q -> q.controller == pk && q.cardDef.code == code) g.quests
-    || any (\l -> l.controller == pk && l.cardDef.code == code) g.legends
+  hit g.units || hit g.supports || hit g.quests || hit g.legends
+  where
+    hit
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Bool
+    hit = any \x -> x.controller == pk && x.cardDef.code == code
 
 -- | Refuse if a unique card already has a copy under the player's
 -- control, or if a Limited card has already been played this turn.
@@ -2332,15 +2292,15 @@ totalToughness g u = sum (map asInt u.cardDef.keywords)
 -- 1 more per instance.
 raceSymbolCount :: Game -> PlayerKey -> Race -> Int
 raceSymbolCount g pk r =
-  capitalSymbol + boardSymbols
+  capitalSymbol + count g.units + count g.supports + count g.quests + count g.legends
   where
-    player = lookupPlayer pk g
-    capitalSymbol = if player.race == r then 1 else 0
-    boardSymbols =
-      length [u | u <- g.units, u.controller == pk, r `elem` u.cardDef.races]
-        + length [s | s <- g.supports, s.controller == pk, r `elem` s.cardDef.races]
-        + length [q | q <- g.quests, q.controller == pk, r `elem` q.cardDef.races]
-        + length [l | l <- g.legends, l.controller == pk, r `elem` l.cardDef.races]
+    capitalSymbol = if (lookupPlayer pk g).race == r then 1 else 0
+    count
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Int
+    count xs = length [x | x <- xs, x.controller == pk, r `elem` x.cardDef.races]
 
 -- | Loyalty surcharge: each loyalty icon costs 1 resource, reduced by
 -- matching race symbols you control (floor at 0). For multi-race
@@ -2496,44 +2456,34 @@ replaceLegend = replaceById
 -- can fire leave-play hooks. The current 'Player' records are sourced
 -- from the post-receive 'Game' so log lines and re-reads of game state
 -- see the latest mutations.
+-- | Fire one in-play card's 'receive' against a message. The card's
+-- own record stands in for the @InPlay k@ argument; the @owner@ player
+-- is looked up from its 'controller' field. Polymorphic over kind so a
+-- single helper serves units / supports / quests / legends.
+fireReceive
+  :: ( HasField "controller" a PlayerKey
+     , HasField "cardDef" a (CardDef k)
+     , InPlay k ~ a
+     )
+  => Game -> Message -> a -> GameT ()
+fireReceive g msg self = case self.cardDef.receive of
+  Receive f -> f msg (lookupPlayer self.controller g) self
+
 dispatchToInPlayUnits :: Message -> [UnitDetails] -> Game -> GameT ()
-dispatchToInPlayUnits msg snapshot g = traverse_ deliver snapshot
-  where
-    deliver u = do
-      let owner = lookupPlayer u.controller g
-      case u.cardDef.receive of
-        Receive f -> f msg owner u
-      -- Also deliver to each attached support so attachment receives
-      -- (Daemonsword, Branded by Khorne, Mark of Chaos, …) fire.
-      traverse_ (deliverAttachment) u.attachments
-    deliverAttachment s =
-      let owner = lookupPlayer s.controller g
-       in case s.cardDef.receive of
-            Receive f -> f msg owner s
+dispatchToInPlayUnits msg snapshot g = for_ snapshot \u -> do
+  fireReceive g msg u
+  -- Also deliver to each attached support so attachment receives
+  -- (Daemonsword, Branded by Khorne, Mark of Chaos, …) fire.
+  traverse_ (fireReceive g msg) u.attachments
 
 dispatchToInPlaySupports :: Message -> [SupportDetails] -> Game -> GameT ()
-dispatchToInPlaySupports msg snapshot g = traverse_ deliver snapshot
-  where
-    deliver s =
-      let owner = lookupPlayer s.controller g
-       in case s.cardDef.receive of
-            Receive f -> f msg owner s
+dispatchToInPlaySupports msg snapshot g = traverse_ (fireReceive g msg) snapshot
 
 dispatchToInPlayQuests :: Message -> [QuestDetails] -> Game -> GameT ()
-dispatchToInPlayQuests msg snapshot g = traverse_ deliver snapshot
-  where
-    deliver q =
-      let owner = lookupPlayer q.controller g
-       in case q.cardDef.receive of
-            Receive f -> f msg owner q
+dispatchToInPlayQuests msg snapshot g = traverse_ (fireReceive g msg) snapshot
 
 dispatchToInPlayLegends :: Message -> [LegendDetails] -> Game -> GameT ()
-dispatchToInPlayLegends msg snapshot g = traverse_ deliver snapshot
-  where
-    deliver l =
-      let owner = lookupPlayer l.controller g
-       in case l.cardDef.receive of
-            Receive f -> f msg owner l
+dispatchToInPlayLegends msg snapshot g = traverse_ (fireReceive g msg) snapshot
 
 -- | Append a single transcript line to the running 'Game.log'. Each
 -- entry carries an i18n key and a map of interpolation params; the
