@@ -171,10 +171,6 @@ set +a
 
 post_maintenance() {
   local until_iso="$1"
-  if [ -z "${WHI_ADMIN_TOKEN:-}" ]; then
-    echo "deploy.sh[remote]: warning — WHI_ADMIN_TOKEN unset; skipping maintenance banner" >&2
-    return 0
-  fi
   curl -fsS -X POST http://localhost:3000/api/admin/maintenance \
     -H "Authorization: Bearer $WHI_ADMIN_TOKEN" \
     -H "Content-Type: application/json" \
@@ -202,6 +198,10 @@ fi
 
 # Full deploy: warn players, sleep, then roll the stack.
 if [ "${WARN_MINUTES:-0}" -gt 0 ]; then
+  if [ -z "${WHI_ADMIN_TOKEN:-}" ]; then
+    echo "deploy.sh[remote]: aborting — WHI_ADMIN_TOKEN is not set in /etc/whi.env, so the maintenance banner cannot be posted. Set the token, or re-run with --warn-minutes 0 to deploy without warning players." >&2
+    exit 1
+  fi
   until_iso="$(date -u -d "+${WARN_MINUTES} minutes" +%Y-%m-%dT%H:%M:%SZ)"
   echo "deploy.sh[remote]: posting maintenance banner; restart at $until_iso (${WARN_MINUTES}m)"
   trap 'clear_maintenance' EXIT
