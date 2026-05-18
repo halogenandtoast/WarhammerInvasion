@@ -13,6 +13,7 @@ import type { Card } from '../types/card'
 import { MAX_COPIES_PER_TITLE } from '../lib/deck'
 import { raceClass } from '../lib/race'
 import { cardImageUrl } from '../lib/assets'
+import { useCardHover } from '../composables/useCardHover'
 
 defineProps<{
   card: Card
@@ -29,6 +30,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
+const hover = useCardHover()
 </script>
 
 <template>
@@ -39,7 +41,11 @@ const { t } = useI18n({ useScope: 'global' })
       { added: count > 0, blocked: !canAdd && count === 0 },
     ]"
   >
-    <div class="img-wrap">
+    <div
+      class="img-wrap"
+      @mouseenter="hover.onEnter(card, $event)"
+      @mouseleave="hover.onLeave(card)"
+    >
       <img
         v-if="cardImageUrl(card)"
         :src="cardImageUrl(card)!"

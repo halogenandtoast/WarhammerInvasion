@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Card, CardStat, CardType, Race } from '../types/card'
 import { ApiError } from '../api/client'
+import { cardHover } from '../stores/cardHover'
 import { deleteDeck, getDeck, updateDeck, type DeckRecord } from '../api/decks'
 import {
   hasFactionCards,
@@ -17,6 +18,7 @@ import { useCardCatalog } from '../composables/useCardCatalog'
 import { navigate } from '../router'
 import CapitalPicker from '../components/CapitalPicker.vue'
 import CardTile from '../components/CardTile.vue'
+import CardOverlay from '../components/CardOverlay.vue'
 import DeckBuilderPanel from '../components/DeckBuilderPanel.vue'
 
 const props = defineProps<{ deckId: string }>()
@@ -59,6 +61,7 @@ onUnmounted(() => {
       void persist()
     }
   }
+  cardHover.clear()
 })
 
 // ----- save ----------------------------------------------------------------
@@ -344,6 +347,8 @@ watch(editingCapital, () => scheduleSave())
             : t('deck_edit.show_deck', { count: summary.stats.total })
         }}
       </button>
+
+      <CardOverlay />
     </template>
   </main>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Card, CardType } from '../types/card'
 import { ApiError } from '../api/client'
@@ -12,15 +12,19 @@ import {
 } from '../lib/deck'
 import { raceClass } from '../lib/race'
 import { cardImageUrl } from '../lib/assets'
+import { cardHover } from '../stores/cardHover'
 import { useCardCatalog } from '../composables/useCardCatalog'
+import { useCardHover } from '../composables/useCardHover'
 import { navigate } from '../router'
 import CapitalChip from '../components/CapitalChip.vue'
+import CardOverlay from '../components/CardOverlay.vue'
 import DeckStatsPanel from '../components/DeckStatsPanel.vue'
 
 const props = defineProps<{ deckId: string }>()
 const { t } = useI18n({ useScope: 'global' })
 
 const catalog = useCardCatalog()
+const hover = useCardHover()
 const deck = ref<DeckRecord | null>(null)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
@@ -36,6 +40,8 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+onUnmounted(() => cardHover.clear())
 
 const summary = computed(() => {
   if (!deck.value) return null
@@ -154,7 +160,11 @@ const validationTone = computed<'ok' | 'warn'>(() => {
                 class="card-tile"
                 :class="raceClass(entry.card.race)"
               >
-                <div class="img-wrap">
+                <div
+                  class="img-wrap"
+                  @mouseenter="hover.onEnter(entry.card, $event)"
+                  @mouseleave="hover.onLeave(entry.card)"
+                >
                   <img
                     v-if="cardImageUrl(entry.card)"
                     :src="cardImageUrl(entry.card)!"
@@ -179,6 +189,8 @@ const validationTone = computed<'ok' | 'warn'>(() => {
         ← {{ t('deck_view.back') }}
       </button>
     </template>
+
+    <CardOverlay />
   </main>
 </template>
 
