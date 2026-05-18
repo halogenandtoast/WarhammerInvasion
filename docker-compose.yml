@@ -59,8 +59,11 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
-    expose:
-      - "3000"
+    # Bound to the loopback interface on the host so the deploy script
+    # can hit /api/admin/maintenance directly. Public traffic still goes
+    # through Caddy on 80/443 in the frontend service.
+    ports:
+      - "127.0.0.1:3000:3000"
 
   frontend:
     image: "${WHI_DOCKERHUB_USER:-halogenandtoast}/whi-frontend:${WHI_TAG:-latest}"
