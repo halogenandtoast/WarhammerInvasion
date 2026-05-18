@@ -117,7 +117,6 @@ function connect(opts: ConnectOpts) {
   // identity (signed-in user with their JWT, or guest spectator). A
   // null token is valid here — the server accepts guests.
   if (!auth.ready.value) return
-  const token = auth.accessToken.value
   _gameId.value = opts.gameId
 
   const params = new URLSearchParams()
@@ -127,11 +126,18 @@ function connect(opts: ConnectOpts) {
   const url = `/ws/games/${opts.gameId}${qs ? `?${qs}` : ''}`
 
   socket = openSocket<GameOut, GameIn>(
-    { url, token },
+    { url, getToken: () => auth.accessToken.value },
     {
       onMessage: handle,
       onStatusChange: (s) => {
         _status.value = s
+      },
+      // Access tokens have a short TTL (~15min); without this, a
+      // dropped socket after expiry would reconnect forever with the
+      // stale token baked into the URL and be rejected as `forbidden`.
+      beforeReconnect: async () => {
+        await auth.refresh()
+        return true
       },
     },
   )

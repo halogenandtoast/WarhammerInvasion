@@ -108,13 +108,20 @@ function connect() {
     reset()
   }
   openedAs = identity
-  const token = auth.accessToken.value
   socket = openSocket<LobbyOut, LobbyIn>(
-    { url: '/ws/lobby', token },
+    { url: '/ws/lobby', getToken: () => auth.accessToken.value },
     {
       onMessage: handle,
       onStatusChange: (s) => {
         _status.value = s
+      },
+      // Refresh the access token before every reconnect — otherwise a
+      // dropped socket after the JWT's 15min TTL would keep retrying
+      // with the stale token. Even if the refresh fails (truly logged
+      // out), we still proceed so the lobby reconnects as a guest.
+      beforeReconnect: async () => {
+        await auth.refresh()
+        return true
       },
     },
   )

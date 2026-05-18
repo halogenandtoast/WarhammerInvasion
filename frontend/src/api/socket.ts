@@ -12,6 +12,11 @@ export interface SocketHandlers<TIn> {
   onOpen?: () => void
   onClose?: (reason: 'going_away' | 'unauth' | 'error') => void
   onStatusChange?: (s: SocketStatus) => void
+  // Called before each reconnect attempt. Lets the caller refresh
+  // credentials (e.g. mint a new access token) before the URL is
+  // rebuilt. Returning false aborts the reconnect — used to give up
+  // when re-auth fails so we don't loop forever with a dead token.
+  beforeReconnect?: () => Promise<boolean>
 }
 
 export interface TypedSocket<TOut> {
@@ -22,7 +27,10 @@ export interface TypedSocket<TOut> {
 
 interface OpenOpts {
   url: string
-  token: string | null
+  // Resolved on every connection attempt so reconnects pick up a
+  // freshly-refreshed token rather than reusing the original (which
+  // may have expired since the socket first opened).
+  getToken: () => string | null
 }
 
 const BACKOFFS_MS = [500, 1000, 2000, 5000, 10000, 30000]
@@ -47,7 +55,8 @@ export function openSocket<TIn, TOut>(
     const u = new URL(opts.url, window.location.href)
     // Force ws/wss scheme matching the page.
     u.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    if (opts.token != null) u.searchParams.set('token', opts.token)
+    const token = opts.getToken()
+    if (token != null) u.searchParams.set('token', token)
     return u.toString()
   }
 
@@ -107,7 +116,24 @@ export function openSocket<TIn, TOut>(
     if (closedByUser) return
     const delay = BACKOFFS_MS[Math.min(attempt, BACKOFFS_MS.length - 1)]
     attempt += 1
-    reconnectTimer = window.setTimeout(open, delay)
+    reconnectTimer = window.setTimeout(async () => {
+      reconnectTimer = null
+      if (closedByUser) return
+      if (handlers.beforeReconnect) {
+        let ok = false
+        try {
+          ok = await handlers.beforeReconnect()
+        } catch {
+          ok = false
+        }
+        if (closedByUser) return
+        if (!ok) {
+          handlers.onClose?.('unauth')
+          return
+        }
+      }
+      open()
+    }, delay)
   }
 
   const close = () => {
