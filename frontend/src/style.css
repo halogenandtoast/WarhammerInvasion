@@ -58,6 +58,64 @@ kbd {
   border-radius: var(--radius-sm);
 }
 
+/* ───────── Buttons ─────────
+ *
+ * `.primary`, `.ghost`, `.danger` are the three button shapes used
+ * throughout the app. Defined globally so each view doesn't need to
+ * re-declare the same chrome; per-component scoped styles can still
+ * override (they win on specificity because Vue's scoped attribute
+ * adds extra selector weight).
+ */
+.primary,
+.ghost {
+  min-height: var(--tap-target);
+  padding: 0 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  cursor: pointer;
+  background: transparent;
+  color: var(--fg);
+}
+
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ghost {
+  border-color: var(--border);
+  color: var(--fg-dim);
+}
+
+.ghost:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
+
+.ghost:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Danger is a ghost variant; pairing `class="ghost danger"` keeps the
+   chrome but swaps the hover hue to the accent warning colour. */
+.danger:hover:not(:disabled) {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
 /* ───────── View Transitions ─────────
  *
  * The game store wraps each engine snapshot update in

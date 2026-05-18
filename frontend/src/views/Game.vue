@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { auth } from '../stores/auth'
 import { game } from '../stores/game'
@@ -18,6 +18,7 @@ import { makeLogFormatter } from '../lib/gameLog'
 import { GAME_ERROR_CODES, mapKnown } from '../lib/errors'
 import { engineRaceSlug } from '../lib/race'
 import { navigate } from '../router'
+import { useGameSocket } from '../composables/useGameSocket'
 
 const props = defineProps<{
   gameId: string
@@ -96,13 +97,9 @@ const activePlayerName = computed(() => {
 
 // ---- lifecycle ----
 
-onMounted(async () => {
-  game.connect({
-    gameId: props.gameId,
-    inviteToken: props.inviteToken,
-    password: props.password,
-  })
+useGameSocket(props)
 
+onMounted(async () => {
   // Guests can't load decks (the API is auth-gated) and can't take a
   // seat anyway, so don't bother fetching. Drop the loading flag so
   // the SeatBody doesn't get stuck on its "Loading decks…" line.
@@ -119,29 +116,6 @@ onMounted(async () => {
     decksLoading.value = false
   }
 })
-
-onBeforeUnmount(() => game.disconnect())
-
-watch(
-  () => props.gameId,
-  (id) => game.connect({ gameId: id, inviteToken: props.inviteToken, password: props.password }),
-)
-
-// Reconnect whenever the auth identity changes. The first firing
-// covers the cold bootstrap (ready flips false→true) so the initial
-// `game.connect` in onMounted bails harmlessly and this watcher opens
-// the real socket once we know whether we're authed or a guest.
-watch(
-  () => [auth.ready.value, auth.accessToken.value] as const,
-  () => {
-    game.disconnect()
-    game.connect({
-      gameId: props.gameId,
-      inviteToken: props.inviteToken,
-      password: props.password,
-    })
-  },
-)
 
 watch(
   () => game.lastError.value?.at,

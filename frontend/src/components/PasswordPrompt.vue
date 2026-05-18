@@ -102,40 +102,4 @@ function submit() {
   gap: 0.45rem;
 }
 
-.ghost {
-  min-height: var(--tap-target);
-  padding: 0 0.85rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.ghost:hover {
-  color: var(--fg);
-  border-color: var(--fg-dim);
-}
-
-.primary {
-  min-height: var(--tap-target);
-  padding: 0 1rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 </style>

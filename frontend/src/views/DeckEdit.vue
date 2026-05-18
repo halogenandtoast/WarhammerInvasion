@@ -5,23 +5,19 @@ import type { Card, CardStat, CardType, Race } from '../types/card'
 import { ApiError } from '../api/client'
 import { deleteDeck, getDeck, updateDeck, type DeckRecord } from '../api/decks'
 import {
-  ALL_CAPITALS,
-  factionOfCapital,
   hasFactionCards,
   isCardAllowedInDeck,
   isCardAllowedInFaction,
   summarize,
   MAX_COPIES_PER_TITLE,
-  MIN_DECK_SIZE,
-  MAX_DECK_SIZE,
+  factionOfCapital,
   type Capital,
 } from '../lib/deck'
-import { raceClass, slugOfCapital } from '../lib/race'
-import { cardImageUrl } from '../lib/assets'
 import { useCardCatalog } from '../composables/useCardCatalog'
 import { navigate } from '../router'
-import CapitalChip from '../components/CapitalChip.vue'
-import DeckStatsPanel from '../components/DeckStatsPanel.vue'
+import CapitalPicker from '../components/CapitalPicker.vue'
+import CardTile from '../components/CardTile.vue'
+import DeckBuilderPanel from '../components/DeckBuilderPanel.vue'
 
 const props = defineProps<{ deckId: string }>()
 const { t } = useI18n({ useScope: 'global' })
@@ -70,9 +66,7 @@ onUnmounted(() => {
 function scheduleSave() {
   saveState.value = 'pending'
   if (saveTimer != null) clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => {
-    void persist()
-  }, 800)
+  saveTimer = window.setTimeout(() => { void persist() }, 800)
 }
 
 async function persist() {
@@ -108,11 +102,8 @@ function remove(card: Card | { id: string }) {
   const current = counts.value[card.id] ?? 0
   if (current <= 0) return
   const next = { ...counts.value }
-  if (current === 1) {
-    delete next[card.id]
-  } else {
-    next[card.id] = current - 1
-  }
+  if (current === 1) delete next[card.id]
+  else next[card.id] = current - 1
   counts.value = next
   scheduleSave()
 }
@@ -120,15 +111,7 @@ function remove(card: Card | { id: string }) {
 function pickCapital(c: Capital) {
   editingCapital.value = c
   isChangingCapital.value = false
-  scheduleSave()
-}
-
-function requestChangeCapital() {
-  isChangingCapital.value = true
-}
-
-function cancelChangeCapital() {
-  isChangingCapital.value = false
+  // The watcher on editingCapital below catches this via scheduleSave().
 }
 
 function renameDeck(event: Event) {
@@ -216,32 +199,16 @@ const canChangeCapital = computed(
   () => !hasFactionCards({ cards: counts.value }, catalog.cardIndex.value),
 )
 
-// ----- UI helpers ----------------------------------------------------------
-
-function capitalTileClass(c: Capital): string {
-  return `race-${slugOfCapital(c)}`
-}
-
 function saveLabel(): string {
   switch (saveState.value) {
-    case 'saving':
-      return t('deck_edit.save.saving')
-    case 'saved':
-      return t('deck_edit.save.saved')
-    case 'pending':
-      return t('deck_edit.save.pending')
-    case 'error':
-      return t('deck_edit.save.error')
-    default:
-      return ''
+    case 'saving': return t('deck_edit.save.saving')
+    case 'saved': return t('deck_edit.save.saved')
+    case 'pending': return t('deck_edit.save.pending')
+    case 'error': return t('deck_edit.save.error')
+    default: return ''
   }
 }
 
-const validationTone = computed<'ok' | 'warn'>(() =>
-  summary.value.issues.some((i) => i.severity === 'error') ? 'warn' : 'ok',
-)
-
-// Persist capital changes through the UI.
 watch(editingCapital, () => scheduleSave())
 </script>
 
@@ -276,37 +243,13 @@ watch(editingCapital, () => scheduleSave())
 
       <p v-if="saveError" class="error">{{ saveError }}</p>
 
-      <section
+      <CapitalPicker
         v-if="editingCapital === null || isChangingCapital"
-        class="capital-gate"
-        :aria-label="t('deck_edit.capital_picker.aria')"
-      >
-        <header class="gate-head">
-          <h2>{{ t('deck_edit.capital_picker.heading') }}</h2>
-          <p>{{ t('deck_edit.capital_picker.lead') }}</p>
-        </header>
-        <ul class="capital-grid" role="list">
-          <li v-for="c in ALL_CAPITALS" :key="c">
-            <button
-              type="button"
-              class="capital-tile"
-              :class="[capitalTileClass(c), { selected: editingCapital === c }]"
-              @click="pickCapital(c)"
-            >
-              <span class="tile-race">{{ t(`decks.capital.${c}`) }}</span>
-              <span class="tile-faction">{{ t(`decks.faction.${factionOfCapital(c)}`) }}</span>
-            </button>
-          </li>
-        </ul>
-        <button
-          v-if="isChangingCapital && editingCapital !== null"
-          class="ghost"
-          type="button"
-          @click="cancelChangeCapital"
-        >
-          {{ t('deck_edit.capital_picker.cancel') }}
-        </button>
-      </section>
+        :current="editingCapital"
+        :changing="isChangingCapital"
+        @pick="pickCapital"
+        @cancel="isChangingCapital = false"
+      />
 
       <div v-else class="layout">
         <!-- Card browser -->
@@ -347,39 +290,15 @@ watch(editingCapital, () => scheduleSave())
               {{ t('deck_edit.in_deck_heading', { count: addedFiltered.length }) }}
             </h3>
             <ul class="grid" role="list">
-              <li
+              <CardTile
                 v-for="card in addedFiltered"
                 :key="`a-${card.id}`"
-                class="tile added"
-                :class="raceClass(card.race)"
-              >
-                <div class="img-wrap">
-                  <img v-if="cardImageUrl(card)" :src="cardImageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
-                  <div v-else class="no-img">{{ t('deck_edit.no_image') }}</div>
-                  <span class="badge">
-                    {{ counts[card.id] }} / {{ MAX_COPIES_PER_TITLE }}
-                  </span>
-                </div>
-                <div class="tile-foot">
-                  <span class="name" :title="card.name">{{ card.name }}</span>
-                  <div class="qty">
-                    <button
-                      class="qty-btn"
-                      type="button"
-                      @click="remove(card)"
-                      :aria-label="t('deck_edit.minus_aria', { name: card.name })"
-                    >−</button>
-                    <span class="qty-num">{{ counts[card.id] ?? 0 }}</span>
-                    <button
-                      class="qty-btn"
-                      type="button"
-                      :disabled="(counts[card.id] ?? 0) >= MAX_COPIES_PER_TITLE"
-                      @click="add(card)"
-                      :aria-label="t('deck_edit.plus_aria', { name: card.name })"
-                    >+</button>
-                  </div>
-                </div>
-              </li>
+                :card="card"
+                :count="counts[card.id] ?? 0"
+                :can-add="isCardAllowedInDeck(card, editingCapital)"
+                @add="add"
+                @remove="remove"
+              />
             </ul>
           </section>
 
@@ -388,94 +307,29 @@ watch(editingCapital, () => scheduleSave())
               {{ t('deck_edit.available_heading', { count: availableFiltered.length }) }}
             </h3>
             <ul class="grid" role="list">
-              <li
+              <CardTile
                 v-for="card in availableFiltered"
                 :key="card.id"
-                class="tile"
-                :class="[raceClass(card.race), { blocked: !isCardAllowedInDeck(card, editingCapital) }]"
-              >
-                <div class="img-wrap">
-                  <img v-if="cardImageUrl(card)" :src="cardImageUrl(card)!" :alt="card.name" loading="lazy" decoding="async" />
-                  <div v-else class="no-img">{{ t('deck_edit.no_image') }}</div>
-                </div>
-                <div class="tile-foot">
-                  <span class="name" :title="card.name">{{ card.name }}</span>
-                  <div class="qty">
-                    <button
-                      class="qty-btn"
-                      type="button"
-                      disabled
-                      :aria-label="t('deck_edit.minus_aria', { name: card.name })"
-                    >−</button>
-                    <span class="qty-num">0</span>
-                    <button
-                      class="qty-btn"
-                      type="button"
-                      :disabled="!isCardAllowedInDeck(card, editingCapital)"
-                      @click="add(card)"
-                      :aria-label="t('deck_edit.plus_aria', { name: card.name })"
-                    >+</button>
-                  </div>
-                </div>
-              </li>
+                :card="card"
+                :count="0"
+                :can-add="isCardAllowedInDeck(card, editingCapital)"
+                @add="add"
+                @remove="remove"
+              />
             </ul>
           </section>
         </section>
 
-        <!-- Deck panel -->
-        <aside class="deck-panel" :class="{ open: showDeckOnMobile }" :aria-label="t('deck_edit.panel_label')">
-          <div class="panel-inner">
-            <header class="panel-head">
-              <CapitalChip :capital="editingCapital" />
-              <span class="count" :class="`tone-${validationTone}`">
-                {{ summary.stats.total }} / {{ MIN_DECK_SIZE }}–{{ MAX_DECK_SIZE }}
-              </span>
-            </header>
-
-            <button
-              v-if="editingCapital !== null"
-              type="button"
-              class="change-capital"
-              :disabled="!canChangeCapital"
-              :title="canChangeCapital ? '' : t('deck_edit.capital_picker.change_blocked')"
-              @click="requestChangeCapital"
-            >
-              {{ t('deck_edit.capital_picker.change') }}
-            </button>
-
-            <ul v-if="summary.issues.length > 0" class="issues">
-              <li
-                v-for="(issue, idx) in summary.issues"
-                :key="idx"
-                :class="`severity-${issue.severity}`"
-              >
-                {{ issue.message }}
-              </li>
-            </ul>
-
-            <DeckStatsPanel :stats="summary.stats" i18n-prefix="deck_edit" />
-
-            <section class="card-list">
-              <h3>{{ t('deck_edit.deck_list') }}</h3>
-              <ul v-if="summary.cards.length > 0" role="list">
-                <li v-for="entry in summary.cards" :key="entry.card.id" class="dl-row">
-                  <span class="dl-count">{{ entry.count }}×</span>
-                  <span class="dl-name" :class="raceClass(entry.card.race)">{{ entry.card.name }}</span>
-                  <span class="dl-cost" v-if="entry.card.cost !== null">{{ entry.card.cost }}</span>
-                  <button class="qty-btn ghost-btn" type="button" @click="remove(entry.card)" :aria-label="t('deck_edit.minus_aria', { name: entry.card.name })">−</button>
-                  <button
-                    class="qty-btn ghost-btn"
-                    type="button"
-                    :disabled="(counts[entry.card.id] ?? 0) >= MAX_COPIES_PER_TITLE"
-                    @click="add(entry.card)"
-                    :aria-label="t('deck_edit.plus_aria', { name: entry.card.name })"
-                  >+</button>
-                </li>
-              </ul>
-              <p v-else class="empty">{{ t('deck_edit.deck_empty') }}</p>
-            </section>
-          </div>
-        </aside>
+        <DeckBuilderPanel
+          :summary="summary"
+          :capital="editingCapital"
+          :can-change-capital="canChangeCapital"
+          :counts="counts"
+          :open="showDeckOnMobile"
+          @change-capital="isChangingCapital = true"
+          @add="add"
+          @remove="remove"
+        />
       </div>
 
       <button
@@ -484,7 +338,11 @@ watch(editingCapital, () => scheduleSave())
         :aria-expanded="showDeckOnMobile"
         @click="showDeckOnMobile = !showDeckOnMobile"
       >
-        {{ showDeckOnMobile ? t('deck_edit.hide_deck') : t('deck_edit.show_deck', { count: summary.stats.total }) }}
+        {{
+          showDeckOnMobile
+            ? t('deck_edit.hide_deck')
+            : t('deck_edit.show_deck', { count: summary.stats.total })
+        }}
       </button>
     </template>
   </main>
@@ -589,27 +447,6 @@ watch(editingCapital, () => scheduleSave())
   gap: 0.5rem;
 }
 
-.ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  padding: 0.4rem 0.85rem;
-  border-radius: var(--radius-md);
-  font-size: 0.88rem;
-  cursor: pointer;
-  min-height: var(--tap-target);
-}
-
-.ghost:hover {
-  color: var(--fg);
-  border-color: var(--fg-dim);
-}
-
-.ghost.danger:hover {
-  color: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
@@ -617,7 +454,6 @@ watch(editingCapital, () => scheduleSave())
   align-items: start;
 }
 
-/* ----- Browser ----- */
 .browser {
   padding: 1rem 1.25rem 4rem;
   min-width: 0;
@@ -720,383 +556,13 @@ watch(editingCapital, () => scheduleSave())
   gap: 0.7rem;
 }
 
-.tile.added {
-  border-color: var(--accent);
-  outline: 1px solid var(--accent-strong);
-  outline-offset: -2px;
-}
-
-.tile {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.45rem;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-.tile.blocked {
-  opacity: 0.45;
-}
-
-.img-wrap {
-  position: relative;
-  aspect-ratio: 5 / 7;
-  background: var(--bg);
-  border-radius: var(--card-radius);
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
-  display: grid;
-  place-items: center;
-}
-
-.img-wrap img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.no-img {
-  font-size: 0.7rem;
-  color: var(--fg-faint);
-  padding: 0.5rem;
-  text-align: center;
-}
-
-.badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  padding: 0.1rem 0.4rem;
-  background: var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-pill);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.tile-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.tile-foot .name {
-  font-size: 0.82rem;
-  color: var(--fg);
-  line-height: 1.2;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.qty {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.3rem;
-}
-
-.qty-btn {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  color: var(--fg);
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-.qty-btn:hover:not(:disabled) {
-  border-color: var(--accent-strong);
-  color: var(--accent-strong);
-}
-
-.qty-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.qty-num {
-  font-variant-numeric: tabular-nums;
-  min-width: 1.2em;
-  text-align: center;
-  color: var(--fg);
-  font-size: 0.9rem;
-}
-
-.tile.race-empire { box-shadow: inset 3px 0 0 var(--race-empire); }
-.tile.race-dwarf { box-shadow: inset 3px 0 0 var(--race-dwarf); }
-.tile.race-high-elf { box-shadow: inset 3px 0 0 var(--race-high-elf); }
-.tile.race-chaos { box-shadow: inset 3px 0 0 var(--race-chaos); }
-.tile.race-orc { box-shadow: inset 3px 0 0 var(--race-orc); }
-.tile.race-dark-elf { box-shadow: inset 3px 0 0 var(--race-dark-elf); }
-.tile.race-neutral { box-shadow: inset 3px 0 0 var(--race-neutral); }
-
-/* ----- Deck panel ----- */
-.deck-panel {
-  background: var(--bg-elev);
-  border-left: 1px solid var(--border);
-  height: calc(100dvh - 60px - 73px);
-  position: sticky;
-  top: 73px;
-  overflow: hidden;
-}
-
-.panel-inner {
-  height: 100%;
-  overflow-y: auto;
-  padding: 1rem 1.1rem 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.95rem;
-}
-
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.change-capital {
-  align-self: flex-start;
-  background: transparent;
-  border: 1px dashed var(--border);
-  color: var(--fg-dim);
-  border-radius: var(--radius-md);
-  padding: 0.35rem 0.7rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-  min-height: var(--tap-target);
-}
-
-.change-capital:hover:not(:disabled) {
-  color: var(--fg);
-  border-color: var(--fg-dim);
-}
-
-.change-capital:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.capital-gate {
-  max-width: 720px;
-  margin: 1.5rem auto;
-  padding: 1.5rem 1.25rem 2rem;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.gate-head h2 {
-  margin: 0 0 0.3rem;
-  font-size: 1.3rem;
-  color: var(--fg);
-}
-
-.gate-head p {
-  margin: 0;
-  color: var(--fg-dim);
-  font-size: 0.92rem;
-}
-
-.capital-grid {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 0.7rem;
-}
-
-.capital-tile {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.25rem;
-  padding: 0.9rem 1rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  color: var(--fg);
-  cursor: pointer;
-  min-height: var(--tap-target);
-  text-align: left;
-  transition:
-    transform var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.capital-tile:hover {
-  transform: translateY(-1px);
-}
-
-.capital-tile.selected {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.capital-tile.race-empire { border-left: 4px solid var(--race-empire); }
-.capital-tile.race-dwarf { border-left: 4px solid var(--race-dwarf); }
-.capital-tile.race-high-elf { border-left: 4px solid var(--race-high-elf); }
-.capital-tile.race-chaos { border-left: 4px solid var(--race-chaos); }
-.capital-tile.race-orc { border-left: 4px solid var(--race-orc); }
-.capital-tile.race-dark-elf { border-left: 4px solid var(--race-dark-elf); }
-
-.tile-race {
-  font-size: 1.05rem;
-  font-weight: 600;
-}
-
-.tile-faction {
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
-}
-
-.count {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  color: var(--fg);
-}
-
-.count.tone-warn {
-  color: var(--accent-strong);
-}
-
-.issues {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.issues li {
-  padding: 0.45rem 0.6rem;
-  background: var(--bg);
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-  color: var(--fg);
-  border-left: 3px solid var(--border);
-}
-
-.issues li.severity-error {
-  border-left-color: var(--accent-strong);
-}
-
-.card-list h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
-}
-
-.card-list ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.dl-row {
-  display: grid;
-  grid-template-columns: 2em 1fr auto 28px 28px;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.25rem 0.3rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-}
-
-.dl-row:hover {
-  background: var(--bg);
-}
-
-.dl-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--fg-dim);
-}
-
-.dl-name {
-  color: var(--fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border-left: 3px solid transparent;
-  padding-left: 0.4rem;
-}
-
-.dl-name.race-empire { border-left-color: var(--race-empire); }
-.dl-name.race-dwarf { border-left-color: var(--race-dwarf); }
-.dl-name.race-high-elf { border-left-color: var(--race-high-elf); }
-.dl-name.race-chaos { border-left-color: var(--race-chaos); }
-.dl-name.race-orc { border-left-color: var(--race-orc); }
-.dl-name.race-dark-elf { border-left-color: var(--race-dark-elf); }
-.dl-name.race-neutral { border-left-color: var(--race-neutral); }
-
-.dl-cost {
-  font-size: 0.78rem;
-  color: var(--fg-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.ghost-btn {
-  width: 26px;
-  height: 26px;
-  font-size: 0.85rem;
-}
-
-.empty {
-  margin: 0;
-  font-size: 0.86rem;
-  color: var(--fg-faint);
-  text-align: center;
-  padding: 0.5rem 0;
-}
-
 .mobile-toggle {
   display: none;
 }
 
-/* Responsive */
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
-  }
-
-  .deck-panel {
-    position: fixed;
-    inset: auto 0 0 0;
-    top: auto;
-    height: 70dvh;
-    transform: translateY(100%);
-    transition: transform var(--transition-base);
-    border-top: 1px solid var(--border);
-    border-left: none;
-    z-index: 20;
-    box-shadow: var(--shadow-drawer);
-  }
-
-  .deck-panel.open {
-    transform: translateY(0);
   }
 
   .mobile-toggle {

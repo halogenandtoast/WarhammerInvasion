@@ -138,24 +138,4 @@ h1 {
   color: var(--fg-faint);
 }
 
-:slotted(.primary) {
-  min-height: var(--tap-target);
-  padding: 0 1rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-md);
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-:slotted(.primary:disabled) {
-  opacity: 0.6;
-  cursor: progress;
-}
-
-:slotted(.primary:hover:not(:disabled)) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
 </style>

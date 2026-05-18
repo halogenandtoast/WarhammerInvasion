@@ -482,41 +482,12 @@ h1 {
   color: var(--fg-faint);
 }
 
-.primary {
-  min-height: var(--tap-target);
-  padding: 0 1rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
+/* Lobby's host-toggle ghost button is compact (32px tall) on
+   pointer:fine; touch users get the full tap target. */
 .ghost {
   min-height: 32px;
   padding: 0 0.75rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  border-radius: var(--radius-md);
-  cursor: pointer;
   font-size: 0.82rem;
-}
-
-.ghost:hover {
-  color: var(--fg);
-  border-color: var(--fg-dim);
 }
 
 @media (pointer: coarse) {

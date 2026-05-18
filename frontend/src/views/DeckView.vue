@@ -295,48 +295,6 @@ h1 {
   gap: 0.5rem;
 }
 
-.primary {
-  min-height: var(--tap-target);
-  padding: 0 1rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.primary:hover {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  padding: 0.4rem 0.85rem;
-  border-radius: var(--radius-md);
-  font-size: 0.88rem;
-  cursor: pointer;
-  min-height: var(--tap-target);
-}
-
-.ghost:hover {
-  color: var(--fg);
-  border-color: var(--fg-dim);
-}
-
-.ghost.danger:hover {
-  color: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.ghost:disabled {
-  opacity: 0.5;
-  cursor: progress;
-}
-
 .hint {
   margin: 0.8rem 1.5rem 0;
   padding: 0.55rem 0.85rem;

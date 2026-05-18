@@ -298,48 +298,6 @@ h1 {
   max-width: 60ch;
 }
 
-.primary {
-  min-height: var(--tap-target);
-  padding: 0 1.1rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-md);
-  font-size: 0.95rem;
-  cursor: pointer;
-}
-
-.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.primary:disabled {
-  opacity: 0.6;
-  cursor: progress;
-}
-
-.ghost {
-  min-height: var(--tap-target);
-  padding: 0 0.85rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.ghost:hover {
-  color: var(--fg);
-  border-color: var(--fg-dim);
-}
-
-.ghost.danger:hover {
-  color: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
 .head-actions {
   display: flex;
   gap: 0.5rem;

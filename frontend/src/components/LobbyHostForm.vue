@@ -210,24 +210,4 @@ function onSubmit() {
   color: var(--fg-faint);
 }
 
-.primary {
-  min-height: var(--tap-target);
-  padding: 0 1rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 </style>

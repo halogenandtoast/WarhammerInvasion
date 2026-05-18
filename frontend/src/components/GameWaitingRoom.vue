@@ -224,29 +224,15 @@ async function copyInvite() {
   flex-wrap: wrap;
   padding: 0.75rem;
 }
-.primary {
-  min-height: var(--tap-target);
-  padding: 0 1.1rem;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--on-accent);
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-.primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
+/* "Big" variant of the global .primary for the prominent Start button. */
 .primary.big {
   font-size: 1rem;
   padding: 0 1.4rem;
   min-height: 48px;
 }
+
+/* The "leave" button in this view is a standalone danger button (not
+   `.ghost.danger`), so it borrows the ghost chrome explicitly. */
 .danger {
   min-height: var(--tap-target);
   padding: 0 1.1rem;
@@ -258,17 +244,13 @@ async function copyInvite() {
   cursor: pointer;
 }
 .danger:hover { color: var(--accent-strong); border-color: var(--accent-strong); }
+
+/* The invite-strip copy button is a compact ghost. */
 .ghost {
   min-height: 32px;
   padding: 0 0.65rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-  border-radius: var(--radius-md);
   font-size: 0.78rem;
-  cursor: pointer;
   align-self: flex-start;
 }
-.ghost:hover { color: var(--fg); border-color: var(--fg-dim); }
 .hint { margin: 0; font-size: 0.78rem; color: var(--fg-faint); }
 </style>
