@@ -143,7 +143,7 @@ const placement = computed<OverlayBox | null>(() => {
   position: fixed;
   z-index: 1000;
   pointer-events: none;
-  border-radius: var(--card-radius);
+  border-radius: 18px;
   overflow: hidden;
   background: rgba(10, 7, 4, 0.85);
   box-shadow:
