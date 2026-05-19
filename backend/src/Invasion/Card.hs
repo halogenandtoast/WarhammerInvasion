@@ -633,6 +633,46 @@ healCapital pk n = push (HealCapital pk n)
 healUnit :: HasQueue Message m => UnitKey -> Int -> m ()
 healUnit k n = push (HealUnit k n)
 
+-- | "Deal N uncancellable damage to a unit." (Mark of Chaos's turn-
+-- start tick, Orc Shaman's self-damage.)
+dealUncancellableDamage :: HasQueue Message m => UnitKey -> Int -> m ()
+dealUncancellableDamage k n = push (DealDamageToUnitUncancellable k n)
+
+-- | "Deal N damage to this unit at end of turn." Used by tactics
+-- that hand out a temporary buff with a delayed bill (Berserk Fury,
+-- Crush 'Em).
+queueEoTDamage :: HasQueue Message m => UnitKey -> Int -> m ()
+queueEoTDamage k n = push (DeferDamageToUnitUntilEoT k n)
+
+-- | "Destroy a quest."
+destroyQuest :: HasQueue Message m => UnitKey -> m ()
+destroyQuest k = push (DestroyQuest k)
+
+-- | "Discard a random card from this player's hand." Modeling the
+-- engine's discard-at-random reaction (Horror of Tzeentch).
+discardRandom :: HasQueue Message m => PlayerKey -> m ()
+discardRandom pk = push (DiscardRandomFromHand pk)
+
+-- | "Cancel up to N damage assigned to a unit." (Defenders of the
+-- Faith.)
+cancelDamageOnUnit :: HasQueue Message m => UnitKey -> Int -> m ()
+cancelDamageOnUnit k n = push (CancelAssignedDamageOnUnit k n)
+
+-- | "Put a unit into play from hand or discard in the named zone.
+-- Origin tells the engine which pile to remove from."
+data PlayUnitOrigin = FromHand | FromDiscard
+
+putUnitIntoPlay
+  :: HasQueue Message m
+  => PlayerKey -> PlayUnitOrigin -> UnitKey -> ZoneKind -> m ()
+putUnitIntoPlay pk origin uk z = push $ case origin of
+  FromHand -> PutUnitIntoPlay pk uk z
+  FromDiscard -> PutUnitIntoPlayFromDiscard pk uk z
+
+-- | "Place or remove N resource tokens on this support card."
+adjustSupportTokens :: HasQueue Message m => UnitKey -> Int -> m ()
+adjustSupportTokens k n = push (AdjustSupportTokens k n)
+
 -- | "Gain N resources." (Burying the Grudge.)
 gainResources :: HasQueue Message m => PlayerKey -> Int -> m ()
 gainResources pk n = push (GainResources pk n)
@@ -1565,6 +1605,72 @@ actionWith name cost extras effect = actionDef ActionDef
   , actionEffect = ActionEffect effect
   }
 
+-- | "Action: ... target enemy unit." Engine-side target prompt:
+-- the player is asked for an enemy unit at activation time, BEFORE
+-- the resource cost is paid (so the action can't be activated when
+-- no valid target exists). The body receives the chosen 'UnitKey'.
+--
+-- > actionEnemyUnit "Shoot" 1 \_u k -> dealDamage k 1
+actionEnemyUnit, actionFriendlyUnit, actionAnyUnit
+  :: Text
+  -> Int
+  -> ( forall m
+      . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
+     => ActionUsage k -> UnitKey -> m ()
+     )
+  -> CardBuilder k ()
+actionEnemyUnit name cost body =
+  actionUnitSchema name cost EnemyUnitTargetSchema body
+-- | "Action: ... target unit you control." See 'actionEnemyUnit'.
+actionFriendlyUnit name cost body =
+  actionUnitSchema name cost FriendlyUnitTargetSchema body
+-- | "Action: ... target unit (any player)." See 'actionEnemyUnit'.
+actionAnyUnit name cost body =
+  actionUnitSchema name cost AnyUnitTargetSchema body
+
+-- | Shared implementation for 'actionEnemyUnit' / 'actionFriendlyUnit'
+-- / 'actionAnyUnit'. Pins the schema, leaves zone gate and extra
+-- costs at defaults.
+actionUnitSchema
+  :: Text -> Int -> TargetSchema
+  -> ( forall m
+      . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
+     => ActionUsage k -> UnitKey -> m ()
+     )
+  -> CardBuilder k ()
+actionUnitSchema name cost schema body = actionDef ActionDef
+  { actionName = name
+  , actionCost = cost
+  , actionTarget = schema
+  , availableInZone = Nothing
+  , actionExtraCosts = []
+  , actionEffect = ActionEffect \u -> case u.target of
+      TargetUnit k -> body u k
+      _ -> pure ()
+  }
+
+-- | "Action: ... target enemy zone." Engine prompts for an opposing
+-- capital zone before activation; body receives the @(owner, zone)@
+-- pair so card bodies can route messages either at the owner or at
+-- the activating player.
+actionEnemyZone
+  :: Text -> Int
+  -> ( forall m
+      . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
+     => ActionUsage k -> (PlayerKey, ZoneKind) -> m ()
+     )
+  -> CardBuilder k ()
+actionEnemyZone name cost body = actionDef ActionDef
+  { actionName = name
+  , actionCost = cost
+  , actionTarget = EnemyZoneTargetSchema
+  , availableInZone = Nothing
+  , actionExtraCosts = []
+  , actionEffect = ActionEffect \u -> case u.target of
+      TargetZone owner z -> body u (owner, z)
+      _ -> pure ()
+  }
+
 -- | "Forced: At the beginning of your turn, place 1 resource token
 -- on this card if a unit is questing here." The whole-line idiom
 -- shared by every token-payoff quest (Defending the Empire, The
@@ -2002,6 +2108,18 @@ withUpTo
 withUpTo pk n t body = do
   candidates <- unitsMatching pk t
   chooseUpTo pk n (map (.key) candidates) body
+
+-- | "Each of your Xs gains N power until end of turn." Buffs every
+-- unit matching 'Target UnitKey' with a 'GainPower' modifier scoped
+-- to end of turn.
+--
+-- > whenResolved \self -> buffEachUntilEoT self.controller ownOrcs 2
+buffEachUntilEoT
+  :: (HasGame m, HasQueue Message m)
+  => PlayerKey -> Target UnitKey -> Int -> m ()
+buffEachUntilEoT pk t n = do
+  mine <- unitsMatching pk t
+  for_ mine \u -> until EndOfTurn $ buffPower u.key n
 
 allCards :: Map CardCode SomeCardDef
 allCards =
@@ -2707,24 +2825,10 @@ wolvesOfTheNorth = questCard "path-of-the-zealot-032" "Wolves of the North" do
   trait QuestTrait
   body
     "Action: During your quest phase, the unit questing on this card can initiate a single attack against a single zone controlled by an opponent."
-  -- Action: the questing unit initiates an out-of-phase attack
-  -- against the chosen enemy zone. The target schema is an enemy
-  -- zone; the questing unit is read off the quest itself.
-  actionDef ActionDef
-    { actionName = "Out-of-phase attack"
-    , actionCost = 0
-    , actionTarget = EnemyZoneTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let pk = u.user; self = u.self; target = u.target in do
-        g <- getGame
-        case (findQuest self.key g, target) of
-          (Just q, TargetZone owner z)
-            | owner /= pk
-            , Just attackerKey <- q.questingUnit ->
-                push $ BeginCombat pk z [attackerKey]
-          _ -> pure ()
-    }
+  actionEnemyZone "Out-of-phase attack" 0 \u (_, z) ->
+    withQuest u.self.key \q ->
+      for_ q.questingUnit \attackerKey ->
+        push $ BeginCombat u.user z [attackerKey]
 
 doombull :: CardDef Unit
 doombull = unitCard "the-chaos-moon-032" "Doombull" do
@@ -2779,7 +2883,7 @@ berserkFury = tacticCard "the-warpstone-chronicles-094" "Berserk Fury" do
   whenResolved \self ->
     withTarget self.controller AnyUnit \k -> do
       until EndOfTurn $ buffPower k 3
-      push $ DeferDamageToUnitUntilEoT k 2
+      queueEoTDamage k 2
 
 daemonsword :: CardDef Support
 daemonsword = supportCard "the-warpstone-chronicles-095" "Daemonsword" do
@@ -2801,9 +2905,7 @@ brandedByKhorne = supportCard "the-eclipse-of-hope-093" "Branded by Khorne" do
   loyalty 2
   trait Attachment
   body "Attach to a target unit. If attached unit is damaged, destroy that unit."
-  -- Watch for any 'DealDamageToUnit' targeting our host. If the host
-  -- ends up with at least 1 damage, destroy it.
-  onHostDamaged \_owner _self hostKey _n -> push $ DestroyUnit hostKey
+  onHostDamaged \_owner _self hostKey _n -> destroyUnit hostKey
 
 markOfChaos :: CardDef Support
 markOfChaos = supportCard "omens-of-ruin-013" "Mark of Chaos" do
@@ -2818,7 +2920,7 @@ markOfChaos = supportCard "omens-of-ruin-013" "Mark of Chaos" do
   -- The +2 power half waits on dynamic modifiers; for now wire the
   -- turn-start damage tick on the host's controller's turn.
   onAttachedHostTurnBegin \_owner _self host ->
-    push $ DealDamageToUnitUncancellable host.key 1
+    dealUncancellableDamage host.key 1
 
 northernWastes :: CardDef Support
 northernWastes = supportCard "the-ruinous-hordes-083" "Northern Wastes" do
@@ -2859,9 +2961,9 @@ ironThroneroom = supportCard "the-inevitable-city-013" "Iron Throneroom" do
     "This card enters play with 4 resource tokens on it. \
     \Action: At the beginning of your turn, remove a resource token from this card. \
     \Then, if there are no resource tokens on this card, put up to 3 {chaos} units into play from your hand or discard pile."
-  onEnterPlay \_owner self -> push $ AdjustSupportTokens self.key 4
+  onEnterPlay \_owner self -> adjustSupportTokens self.key 4
   onMyTurnBegin \_owner self -> when (self.tokens > 0) do
-    push (AdjustSupportTokens self.key (-1))
+    adjustSupportTokens self.key (-1)
     when (self.tokens == 1) do
       let pk = self.controller
       me <- playerOf pk <$> getGame
@@ -2875,9 +2977,9 @@ ironThroneroom = supportCard "the-inevitable-city-013" "Iron Throneroom" do
       chooseFromCards pk 0 3 candidates
         "Choose up to 3 Chaos units from your hand or discard pile to put into play." \chosen ->
           for_ chosen \c ->
-            if c.key `elem` inHandKeys
-              then push $ PutUnitIntoPlay pk c.key KingdomZone
-              else push $ PutUnitIntoPlayFromDiscard pk c.key KingdomZone
+            putUnitIntoPlay pk
+              (if c.key `elem` inHandKeys then FromHand else FromDiscard)
+              c.key KingdomZone
 
 raidingCamps :: CardDef Quest
 raidingCamps = questCard "the-inevitable-city-020" "Raiding Camps" do
@@ -2932,7 +3034,7 @@ recklessAttack = tacticCard "days-of-blood-018" "Reckless Attack" do
     chooseFromCards pk 1 1 (filter isUnitCard me.discard)
       "Choose a unit in your discard pile to put into your battlefield." \chosen ->
         for_ chosen \c -> do
-          push $ PutUnitIntoPlayFromDiscard pk c.key BattlefieldZone
+          putUnitIntoPlay pk FromDiscard c.key BattlefieldZone
           push ScheduleAttackerSacrifice
   where
     isUnitCard c = case c.def of
@@ -2957,7 +3059,7 @@ dominionOfChaos = questCard "the-ruinous-hordes-082" "Dominion of Chaos" do
     withQuest self.key \q -> when (q.tokens >= 3) $
       withUpTo self.controller 3 (unitWhere (not . (.corrupted))) \chosen -> do
         traverse_ corrupt chosen
-        push $ DestroyQuest self.key
+        destroyQuest self.key
 
 -- ============================================================================
 -- Empire (core-026 to core-050)
@@ -3055,16 +3157,7 @@ rieklandMarksmen = unitCard "core-033" "Riekland Marksmen" do
   hitPoints 1
   trait Warrior
   body "Action: Spend 1 resource to deal 1 damage to target unit."
-  actionDef ActionDef
-    { actionName = "Shoot"
-    , actionCost = 1
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let target = u.target in case target of
-        TargetUnit k -> dealDamage k 1
-        _ -> pure ()
-    }
+  actionEnemyUnit "Shoot" 1 \_ k -> dealDamage k 1
 
 thyrusGorman :: CardDef Unit
 thyrusGorman = unitCard "core-034" "Thyrus Gorman" do
@@ -3078,16 +3171,7 @@ thyrusGorman = unitCard "core-034" "Thyrus Gorman" do
   body
     "Limit one Hero per zone.\n\
     \Action: Spend 2 resources to deal 2 damage to target unit."
-  actionDef ActionDef
-    { actionName = "Cast"
-    , actionCost = 2
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let target = u.target in case target of
-        TargetUnit k -> dealDamage k 2
-        _ -> pure ()
-    }
+  actionEnemyUnit "Cast" 2 \_ k -> dealDamage k 2
 
 karlFranz :: CardDef Unit
 karlFranz = unitCard "core-035" "Karl Franz" do
@@ -3120,7 +3204,7 @@ volkmarTheGrim = unitCard "core-036" "Volkmar the Grim" do
   body
     "Limit one Hero per zone.\n\
     \Forced: At the beginning of your turn, heal 2 damage from your capital."
-  onMyTurnBegin \_owner self -> push $ HealCapital self.controller 2
+  onMyTurnBegin \_owner self -> healCapital self.controller 2
 
 mariusLeitdorf :: CardDef Unit
 mariusLeitdorf = unitCard "core-037" "Marius Leitdorf" do
@@ -3234,9 +3318,7 @@ forSigmar = tacticCard "core-046" "For Sigmar!" do
   loyalty 1
   body "Action: Each of your units gains {power} until the end of the turn."
   playableWhen $ hasTarget ownUnit
-  whenResolved \self -> do
-    mine <- unitsMatching self.controller ownUnit
-    for_ mine \u -> until EndOfTurn $ buffPower u.key 1
+  whenResolved \self -> buffEachUntilEoT self.controller ownUnit 1
 
 sigmarsWrath :: CardDef Tactic
 sigmarsWrath = tacticCard "core-047" "Sigmar's Wrath" do
@@ -3277,7 +3359,7 @@ defendersOfTheFaith = tacticCard "core-050" "Defenders of the Faith" do
   playableWhen $ hasTarget ownUnit
   whenResolved \self ->
     withTarget self.controller ownUnit \k ->
-      push $ CancelAssignedDamageOnUnit k 2
+      cancelDamageOnUnit k 2
 
 -- ============================================================================
 -- High Elf (core-051 to core-075)
@@ -3325,16 +3407,7 @@ highElfArchers = unitCard "core-054" "High Elf Archers" do
   hitPoints 1
   trait Warrior
   body "Action: Spend 1 resource to deal 1 damage to target unit."
-  actionDef ActionDef
-    { actionName = "Loose arrow"
-    , actionCost = 1
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let target = u.target in case target of
-        TargetUnit k -> dealDamage k 1
-        _ -> pure ()
-    }
+  actionEnemyUnit "Loose arrow" 1 \_ k -> dealDamage k 1
 
 seaGuardOfLothern :: CardDef Unit
 seaGuardOfLothern = unitCard "core-055" "Sea Guard of Lothern" do
@@ -3500,18 +3573,9 @@ bowOfAvelorn = supportCard "core-068" "Bow of Avelorn" do
   loyalty 2
   traits [Attachment, Weapon]
   body "Attach to a target High Elf unit. Action: Sacrifice this card to deal 2 damage to target unit."
-  actionDef ActionDef
-    { actionName = "Loose arrow (sacrifice)"
-    , actionCost = 0
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let self = u.self; target = u.target in case target of
-        TargetUnit k -> do
-          dealDamage k 2
-          destroySupport self.key
-        _ -> pure ()
-    }
+  actionEnemyUnit "Loose arrow (sacrifice)" 0 \u k -> do
+    dealDamage k 2
+    destroySupport u.self.key
 
 hoethsWisdom :: CardDef Support
 hoethsWisdom = supportCard "core-069" "Hoeth's Wisdom" do
@@ -3691,16 +3755,7 @@ chaosSorcerer = unitCard "core-093" "Chaos Sorcerer" do
   hitPoints 2
   trait Sorcerer
   body "Quest. Action: Spend 2 resources to corrupt target enemy unit."
-  actionDef ActionDef
-    { actionName = "Corrupt"
-    , actionCost = 2
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let target = u.target in case target of
-        TargetUnit k -> corrupt k
-        _ -> pure ()
-    }
+  actionEnemyUnit "Corrupt" 2 \_ -> corrupt
 
 horrorOfTzeentch :: CardDef Unit
 horrorOfTzeentch = unitCard "core-094" "Horror of Tzeentch" do
@@ -3715,7 +3770,7 @@ horrorOfTzeentch = unitCard "core-094" "Horror of Tzeentch" do
     let pk = self.controller
     may pk "Discard a card to deal 2 damage to a target unit?" $
       withTarget pk AnyUnit \k -> do
-        push $ DiscardRandomFromHand pk
+        discardRandom pk
         dealDamage k 2
 
 daemonettesOfSlaanesh :: CardDef Unit
@@ -3948,18 +4003,9 @@ orcShaman = unitCard "core-117" "Orc Shaman" do
   hitPoints 2
   trait Sorcerer
   body "Action: Spend 2 resources to deal 2 damage to a target unit; deal 1 damage to this unit."
-  actionDef ActionDef
-    { actionName = "Sorcery"
-    , actionCost = 2
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let self = u.self; target = u.target in case target of
-        TargetUnit k -> do
-          dealDamage k 2
-          push $ DealDamageToUnitUncancellable self.key 1
-        _ -> pure ()
-    }
+  actionEnemyUnit "Sorcery" 2 \u k -> do
+    dealDamage k 2
+    dealUncancellableDamage u.self.key 1
 
 trolls :: CardDef Unit
 trolls = unitCard "core-118" "Trolls" do
@@ -4079,7 +4125,7 @@ greenskinRush = questCard "core-126" "Greenskin Rush" do
     chooseFromCards u.user 0 1 goblinsInHand
       "Choose a Goblin unit to put into play." \chosen ->
         for_ chosen \c ->
-          push $ PutUnitIntoPlay u.user c.key BattlefieldZone
+          putUnitIntoPlay u.user FromHand c.key BattlefieldZone
   where
     goblinCodes =
       [ CardCode "core-114"  -- Night Goblins
@@ -4098,9 +4144,7 @@ waaagh = tacticCard "core-127" "Waaagh!" do
   loyalty 2
   body "Action: Each of your Orc units gains {power}{power} until the end of the turn."
   playableWhen $ hasTarget ownOrcs
-  whenResolved \self -> do
-    mine <- unitsMatching self.controller ownOrcs
-    for_ mine \u -> until EndOfTurn $ buffPower u.key 2
+  whenResolved \self -> buffEachUntilEoT self.controller ownOrcs 2
   where
     ownOrcs = UnitMatching \pk _ u -> u.controller == pk && u `isRace` Orc
 
@@ -4114,7 +4158,7 @@ crushEm = tacticCard "core-128" "Crush 'Em" do
   whenResolved \self ->
     withTarget self.controller AnyUnit \k -> do
       until EndOfTurn $ buffPower k 3
-      push $ DeferDamageToUnitUntilEoT k 99
+      queueEoTDamage k 99
 
 runEmDown :: CardDef Tactic
 runEmDown = tacticCard "core-129" "Run 'Em Down" do
@@ -4171,16 +4215,7 @@ morathi = unitCard "core-132" "Morathi" do
   body
     "Limit one Hero per zone.\n\
     \Action: Spend 2 resources to corrupt one target unit."
-  actionDef ActionDef
-    { actionName = "Corrupt"
-    , actionCost = 2
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let target = u.target in case target of
-        TargetUnit k -> corrupt k
-        _ -> pure ()
-    }
+  actionEnemyUnit "Corrupt" 2 \_ -> corrupt
 
 croneHellebron :: CardDef Unit
 croneHellebron = unitCard "core-133" "Crone Hellebron" do
@@ -4300,16 +4335,7 @@ darkSorceress = unitCard "core-141" "Dark Sorceress" do
   hitPoints 2
   trait Sorcerer
   body "Action: Spend 2 resources to deal 2 damage to a target unit."
-  actionDef ActionDef
-    { actionName = "Cast"
-    , actionCost = 2
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let target = u.target in case target of
-        TargetUnit k -> dealDamage k 2
-        _ -> pure ()
-    }
+  actionEnemyUnit "Cast" 2 \_ k -> dealDamage k 2
 
 assassinsOfKhaine :: CardDef Unit
 assassinsOfKhaine = unitCard "core-142" "Assassins of Khaine" do
@@ -4333,16 +4359,7 @@ repeaterCrossbowmen = unitCard "core-143" "Repeater Crossbowmen" do
   hitPoints 2
   trait Warrior
   body "Action: Spend 1 resource to deal 1 damage to a target unit."
-  actionDef ActionDef
-    { actionName = "Loose bolts"
-    , actionCost = 1
-    , actionTarget = EnemyUnitTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let target = u.target in case target of
-        TargetUnit k -> dealDamage k 1
-        _ -> pure ()
-    }
+  actionEnemyUnit "Loose bolts" 1 \_ k -> dealDamage k 1
 
 bloodwrackMedusa :: CardDef Unit
 bloodwrackMedusa = unitCard "core-144" "Bloodwrack Medusa" do
@@ -4433,22 +4450,10 @@ witchbrew = supportCard "core-151" "Witchbrew" do
   loyalty 1
   trait Attachment
   body "Attach to a target Dark Elf unit. Action: Sacrifice this card to give attached unit {power}{power}{power} until the end of the turn."
-  actionDef ActionDef
-    { actionName = "Brew (sacrifice)"
-    , actionCost = 0
-    , actionTarget = NoTargetSchema
-    , availableInZone = Nothing
-    , actionExtraCosts = []
-    , actionEffect = ActionEffect \u -> let self = u.self in case self.attachedTo of
-        Just hostKey -> do
-          push
-            ( InstallModifier
-                (UnitRef hostKey)
-                (Modifier (GainPower 3) EndOfTurn)
-            )
-          destroySupport self.key
-        Nothing -> pure ()
-    }
+  action "Brew (sacrifice)" 0 \u ->
+    for_ u.self.attachedTo \hostKey -> do
+      until EndOfTurn $ buffPower hostKey 3
+      destroySupport u.self.key
 
 slaughterAtLustria :: CardDef Quest
 slaughterAtLustria = questCard "core-152" "Slaughter at Lustria" do
@@ -4481,9 +4486,7 @@ murderousProwess = tacticCard "core-154" "Murderous Prowess" do
   loyalty 2
   body "Action: Each of your Dark Elf units gains {power} until the end of the turn."
   playableWhen $ hasTarget ownDarkElves
-  whenResolved \self -> do
-    mine <- unitsMatching self.controller ownDarkElves
-    for_ mine \u -> until EndOfTurn $ buffPower u.key 1
+  whenResolved \self -> buffEachUntilEoT self.controller ownDarkElves 1
   where
     ownDarkElves = UnitMatching \pk _ u -> u.controller == pk && u `isRace` DarkElf
 
