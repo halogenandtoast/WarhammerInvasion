@@ -5,11 +5,14 @@
 module Invasion.Game (module Invasion.Game) where
 
 import Control.Monad.State.Strict
-import Data.Aeson (ToJSON)
+import Data.Aeson (ToJSON, ToJSONKey (..))
+import Data.Aeson.Types (toJSONKeyText)
 import Data.Aeson.TH
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Time (UTCTime)
+import {-# SOURCE #-} Invasion.Card (Card)
 import Invasion.Capital
 import Invasion.Entity (LegendDetails, QuestDetails, SupportDetails, UnitDetails)
 import Invasion.Modifier
@@ -88,7 +91,7 @@ data ActionWindowTrigger
   | AfterApplyCombatDamage
   | EndOfTurnActionWindow
     -- ^ FAQ 2.2 Phase 5. Opened at end of turn before "at the end of
-    -- the turn" triggers resolve and UntilEndOfTurn modifiers expire.
+    -- the turn" triggers resolve and EndOfTurn modifiers expire.
   deriving stock (Show, Eq)
 
 -- | The pass-bookkeeping needed to detect "both pass consecutively."
@@ -145,7 +148,34 @@ data PromptKind
       { description :: Text
       }
     -- ^ Simple boolean choice — for "you may pay X to do Y" gates.
+  | ChooseFromCards
+      { cards :: [Card]
+      , minPick :: Int
+      , maxPick :: Int
+      , description :: Text
+      }
+    -- ^ Pick between min and max cards from an explicit list. The
+    -- engine embeds the actual card data so the prompted player's
+    -- client can render the choices even when the source list (e.g.
+    -- the top of a hidden deck) isn't normally visible.
+  | ChooseTargetOption
+      { options :: [TargetOption]
+      , description :: Text
+      }
+    -- ^ Unified target picker for "X or Y"-style abilities (Dwarf
+    -- Ranger: "deal 1 damage to one target unit or capital"). The
+    -- options list is a heterogeneous mix of units / capital zones /
+    -- … and the player picks exactly one. The response is the
+    -- chosen 'TargetOption'.
   deriving stock Show
+
+-- | A single tagged target option offered to the player by
+-- 'ChooseTargetOption'. The engine maps the chosen option back to
+-- its typed value via the @Target a@ enumeration that produced it.
+data TargetOption
+  = TargetUnitOption UnitKey
+  | TargetZoneOption PlayerKey ZoneKind
+  deriving stock (Show, Eq)
 
 -- | Predicate describing which units a 'ChooseUnits' prompt accepts.
 -- Kept as a tagged value (not a function) so it serializes onto the
@@ -153,6 +183,13 @@ data PromptKind
 data PromptFilter
   = AnyOwnUnit
     -- ^ Any unit the prompted player controls.
+  | AnyUnitInPlay
+    -- ^ Any unit in play, regardless of controller. Used by action
+    -- 'withTarget' AnyUnit picks (Runesmith, …).
+  | UnitsFromList [UnitKey]
+    -- ^ Pick from this explicit list of in-play unit keys. Used when
+    -- the candidate set is computed by the card (e.g. "destroy up to
+    -- two attacking units" — the attackers are 'cs.attackers').
   | OwnUnitsFromHandByRace Race
     -- ^ Cards in the prompted player's hand whose CardDef carries the
     -- named race. Used for Iron Throneroom's summon-from-hand half.
@@ -162,28 +199,18 @@ data PromptFilter
     -- ^ Union of hand and discard, filtered by race.
   deriving stock Show
 
--- | A tag identifying the engine continuation to invoke once the
--- prompt resolves. Each constructor packages the source-card key (or
--- whatever extra context the continuation needs) so the engine can
--- locate the originating card.
+-- | A tag identifying which engine continuation owns this prompt.
+-- All in-tree prompts now use 'CallbackInlinePrompt' (the receive
+-- body resumes via 'askPrompt' returning the answer directly), but
+-- the field is kept for forward-compat with any future re-entrant
+-- callback flows.
 data PromptCallback
-  = CallbackIronThroneroomPayoff UnitKey
-    -- ^ The Iron Throneroom's UnitKey. Result: up to 3 in-hand /
-    -- in-discard CardKeys to summon for free into the kingdom.
-  | CallbackBloodthirsterSacrifice PlayerKey UnitKey
-    -- ^ (Sacrificing player, Bloodthirster's UnitKey). Result: one
-    -- of the sacrificing player's units in the Bloodthirster's
-    -- corresponding zone (or none if no eligible unit exists).
-  | CallbackSkulltakerPayToAttach UnitKey CardCode
-    -- ^ (Skulltaker's key, the departing enemy unit's CardCode).
-    -- Result: PickBool — if True and the controller can afford 1
-    -- resource, debit and attach as an experience.
-  | CallbackHorrorOfTzeentchDiscard UnitKey
-    -- ^ Horror of Tzeentch's UnitKey. Result: PickBool — if True,
-    -- queue the follow-up CallbackHorrorOfTzeentchTarget prompt.
-  | CallbackHorrorOfTzeentchTarget UnitKey
-    -- ^ Same horror, after the player committed to discarding.
-    -- Result: a single chosen enemy unit to take 2 damage.
+  = CallbackInlinePrompt
+    -- ^ Generic marker for prompts whose continuation is inline (via
+    -- 'askPrompt' returning the answer directly to the receive body).
+    -- No engine-side dispatch — the constructor exists only as a wire
+    -- tag on the 'Prompt' record. Used by 'withTarget', 'askYesNo',
+    -- and any other 'askPrompt'-style helper.
   deriving stock Show
 
 -- | A scheduled effect that fires at a specific trigger.
@@ -264,6 +291,52 @@ data LogCategory
     -- ^ Eliminations and the final game-over line.
   deriving stock (Show, Eq)
 
+-- | A time window for tracked events. Cards that reference "this
+-- turn" / "this phase" / "this combat" read from the matching
+-- 'History' bucket; the engine resets each scope at its boundary.
+data Scope = ThisTurn | ThisPhase | ThisCombat
+  deriving stock (Show, Eq, Ord)
+
+-- | Aggregated record of events that happened during a 'Scope'.
+-- Cards consult this to scale effects ("for each unit that entered a
+-- discard pile this turn", "sacrifice all units that attacked this
+-- phase", …).
+data History = History
+  { unitsDiscarded :: Int
+    -- ^ Count of units that entered a discard pile in this scope.
+  , attackersDeclared :: [UnitKey]
+    -- ^ Units that have been declared as attackers in this scope.
+  , damagedUnits :: [UnitKey]
+    -- ^ Units that had non-zero damage land on them in this scope.
+  , damageTaken :: Map UnitKey Int
+    -- ^ Total damage landed on each unit in this scope.
+  , limitedPlayed :: Int
+    -- ^ How many Limited cards have been played in this scope.
+  }
+  deriving stock Show
+
+instance Semigroup History where
+  a <> b = History
+    { unitsDiscarded = a.unitsDiscarded + b.unitsDiscarded
+    , attackersDeclared = a.attackersDeclared <> b.attackersDeclared
+    , damagedUnits = a.damagedUnits <> b.damagedUnits
+    , damageTaken = Map.unionWith (+) a.damageTaken b.damageTaken
+    , limitedPlayed = a.limitedPlayed + b.limitedPlayed
+    }
+
+instance Monoid History where
+  mempty = History
+    { unitsDiscarded = 0
+    , attackersDeclared = []
+    , damagedUnits = []
+    , damageTaken = Map.empty
+    , limitedPlayed = 0
+    }
+
+-- | Initial history map with every 'Scope' present at 'mempty'.
+emptyHistory :: Map Scope History
+emptyHistory = Map.fromList [(s, mempty) | s <- [ThisTurn, ThisPhase, ThisCombat]]
+
 data Game = Game
   { player1 :: Player
   , player2 :: Player
@@ -320,30 +393,16 @@ data Game = Game
     -- ^ 'Just' while a combat is in progress between 'BeginCombat' and
     -- 'EndCombat'. Card receives consult this to know they're in the
     -- combat path.
-  , attackersThisPhase :: [UnitKey]
-    -- ^ Every unit that has attacked this battlefield phase. Reset on
-    -- 'BeginPhase BattlefieldPhase'. Reckless Attack reads this to
-    -- pick its sacrifice targets at end of phase.
   , pendingEndOfPhase :: [(Phase, PendingEffect)]
     -- ^ Effects scheduled to fire on 'EndPhase' for a specific phase.
     -- Entries matching the firing phase are extracted, run, and
     -- discarded.
-  , limitedPlayedThisTurn :: Bool
-    -- ^ One Limited tactic per turn. Set on 'PlayTactic' when the
-    -- card carries the 'Limited' keyword; cleared on 'BeginTurn'.
-  , unitsDiscardedThisTurn :: Int
-    -- ^ Count of units that have entered a discard pile (destroyed,
-    -- sacrificed, etc.) during the current turn. Reset on 'BeginTurn'.
-    -- Read by 'Burying the Grudge' (core-019).
-  , damageTakenThisTurn :: Map UnitKey Int
-    -- ^ Damage successfully landed on each unit this turn. Reset on
-    -- 'BeginTurn'. Read by Daemonettes of Slaanesh and any future
-    -- per-turn cap mechanics.
-  , damagedInCurrentCombat :: [UnitKey]
-    -- ^ Units that had non-zero damage land on them during the
-    -- currently-active combat. Reset on 'BeginCombat'; consulted at
-    -- 'EndCombat' to fire "when this unit damages an enemy" effects
-    -- (Plaguebearers, Beasts of Nurgle).
+  , history :: Map Scope History
+    -- ^ Per-scope event log (counts of units discarded, attackers
+    -- declared, damage taken, etc.). Engine bumps every scope's
+    -- entry when an event happens and resets the relevant scope on
+    -- its boundary ('BeginTurn' / 'BeginPhase' / 'BeginCombat').
+    -- Cards read via 'historyOf' / 'withHistory'.
   , pendingPrompt :: Maybe Prompt
     -- ^ When 'Just', the engine is waiting for the named player to
     -- post a 'ResolvePrompt' carrying their choice. 'gameMain'
@@ -367,6 +426,8 @@ data PromptResult
     -- prompt's filter / bounds before firing the callback.
   | PickBool Bool
     -- ^ Yes/No answer for 'ChooseYesNo'.
+  | PickTargetOption TargetOption
+    -- ^ The chosen tagged option from a 'ChooseTargetOption' prompt.
   | PickNone
     -- ^ Player declined / no eligible target.
   deriving stock Show
@@ -424,15 +485,27 @@ mconcat
       defaultOptions {tagSingleConstructors = True, allNullaryToStringTag = True}
       ''LogCategory
   , deriveToJSON defaultOptions ''LogEntry
+  , deriveJSON defaultOptions ''Scope
+  , deriveToJSON defaultOptions ''History
   , deriveToJSON defaultOptions ''PendingEffect
   , deriveToJSON defaultOptions ''PendingTarget
   , deriveToJSON defaultOptions ''PendingDamage
   , deriveToJSON defaultOptions ''CombatState
   , deriveToJSON defaultOptions ''PromptFilter
+  , deriveJSON defaultOptions ''TargetOption
   , deriveToJSON defaultOptions ''PromptKind
   , deriveToJSON defaultOptions ''PromptCallback
   , deriveToJSON defaultOptions ''Prompt
   , deriveJSON defaultOptions ''PromptResult
-  , deriveToJSON defaultOptions ''Game
+  ]
+
+instance ToJSONKey Scope where
+  toJSONKey = toJSONKeyText \case
+    ThisTurn -> "ThisTurn"
+    ThisPhase -> "ThisPhase"
+    ThisCombat -> "ThisCombat"
+
+mconcat
+  [ deriveToJSON defaultOptions ''Game
   , deriveToJSON defaultOptions ''GameState
   ]

@@ -8,6 +8,7 @@ module Invasion.CardDef (module Invasion.CardDef) where
 import Control.Monad.IO.Class (MonadIO)
 import Data.Aeson
 import Data.Aeson.TH
+import Data.Monoid (Sum (..))
 import Data.Text (Text)
 import Invasion.Player (Player)
 import Invasion.Prelude
@@ -84,6 +85,101 @@ mconcat
 -- 'Invasion.Entity'.
 type family InPlay (k :: CardKind)
 
+-- | What kind of target an action requires. The engine validates the
+-- supplied 'ActionTarget' against this schema before invoking the
+-- action's effect.
+data TargetSchema
+  = NoTargetSchema
+    -- ^ The action takes no target.
+  | AnyUnitTargetSchema
+    -- ^ Any unit currently in play.
+  | EnemyUnitTargetSchema
+    -- ^ A unit controlled by the opponent.
+  | FriendlyUnitTargetSchema
+    -- ^ A unit controlled by the player triggering the action.
+  | AnyZoneTargetSchema
+    -- ^ A zone of any player.
+  | EnemyZoneTargetSchema
+    -- ^ A zone controlled by the opponent.
+  | SupportTargetSchema
+    -- ^ A free-standing support in play.
+  deriving stock (Show, Eq)
+
+-- | The concrete target supplied with a 'TriggerCardAction' message.
+data ActionTarget
+  = NoTarget
+  | TargetUnit UnitKey
+  | TargetZone PlayerKey ZoneKind
+  | TargetSupport UnitKey
+  deriving stock (Show, Eq)
+
+mconcat
+  [ deriveToJSON defaultOptions ''TargetSchema
+  , deriveToJSON defaultOptions ''ActionTarget
+  ]
+
+-- | The bespoke effect a card's action runs once costs have been
+-- paid and the target has been validated. The body receives an
+-- 'ActionUsage' record with the firing player, this in-play card,
+-- the resolved target, and receipts for any extra costs paid.
+newtype ActionEffect k = ActionEffect
+  { unEffect
+      :: forall m
+       . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
+      => ActionUsage k -> m ()
+  }
+
+-- | Non-resource costs an action may impose. The engine validates
+-- every extra cost before firing the action (e.g. "sacrifice a unit"
+-- requires the player to control at least one unit) and prompts for
+-- any choices needed to pay them. Failing the validation means the
+-- action can't be triggered at all — no resources are spent.
+data ExtraCost
+  = SacrificeUnit
+    -- ^ Sacrifice one of your own units. Engine prompts the firing
+    -- player; the picked unit is destroyed before the action's
+    -- effect fires.
+  deriving stock (Show, Eq)
+
+-- | A receipt for one extra cost paid during action triggering. Cards
+-- whose effect depends on which units were sacrificed / cards
+-- discarded inspect 'ActionUsage.payments' to find the receipts.
+data Payment
+  = SacrificedUnit UnitKey
+    -- ^ Key of the unit destroyed to pay a 'SacrificeUnit' cost.
+  deriving stock (Show, Eq)
+
+-- | Everything an action's effect body needs to know when it fires:
+-- who triggered it, the in-play card the action lives on, the
+-- target the player picked (if any), and receipts for any extra
+-- costs paid.
+data ActionUsage k = ActionUsage
+  { user :: PlayerKey
+  , self :: InPlay k
+  , target :: ActionTarget
+  , payments :: [Payment]
+  }
+
+-- | A single Action ability printed on a card. Cards may declare zero
+-- or more actions; the engine enumerates them during action windows.
+-- Field names are prefixed with @action@ so they can't shadow
+-- 'CardDef'\'s own @cost@/@target@ fields under
+-- @DuplicateRecordFields@.
+data ActionDef k = ActionDef
+  { actionName :: Text
+  , actionCost :: Int
+  , actionExtraCosts :: [ExtraCost]
+    -- ^ Non-resource costs (sacrifice, discard, …) the engine must
+    -- validate and pay before firing the effect.
+  , actionTarget :: TargetSchema
+  , actionEffect :: ActionEffect k
+  , availableInZone :: Maybe ZoneKind
+    -- ^ Zone-gate on the action's availability. When 'Just z', the
+    -- action only triggers while the host card sits in zone 'z' —
+    -- mirrors the printed "[Zone]." prefix. 'Nothing' means the
+    -- action is always available.
+  }
+
 -- | Open type family of per-kind extras records. The engine queries
 -- these fields when it would otherwise have to case on a card's
 -- 'code'. A new kind's instance is declared next to its in-play
@@ -128,7 +224,31 @@ data UnitExtras = UnitExtras
   , damageMultiplierWhileInPlay :: Int
     -- ^ Multiplier on every applied damage event while this unit is
     -- in play (Bloodletter: 2). Multipliers stack multiplicatively.
+  , runtimeEffects :: Game -> InPlay Unit -> ActiveEffect
+    -- ^ Per-tick static effects authored via the high-level zone-gate
+    -- builders ('battlefield', 'kingdom', 'quest') in 'Invasion.Card'.
+    -- Returns an 'ActiveEffect' monoid that the engine folds into the
+    -- unit's cached stats alongside 'selfPowerBonus' and aura sources.
   }
+
+-- | Accumulator for the runtime output of an 'EffectM' builder block.
+-- Today carries a power-bonus contribution; future fields can carry
+-- HP bonuses, conditional keywords, etc., without changing the engine
+-- read path.
+data ActiveEffect = ActiveEffect
+  { bonusPower :: Sum Int
+  }
+
+instance Semigroup ActiveEffect where
+  a <> b = ActiveEffect {bonusPower = a.bonusPower <> b.bonusPower}
+
+instance Monoid ActiveEffect where
+  mempty = ActiveEffect (Sum 0)
+
+-- | Sum of the power bonus contributions in an 'ActiveEffect'. The
+-- engine calls this when computing 'effectivePower'.
+activeBonusPower :: ActiveEffect -> Int
+activeBonusPower e = getSum e.bonusPower
 
 -- | Support-specific tunables.
 data SupportExtras = SupportExtras
@@ -205,6 +325,7 @@ instance HasDefaultExtras Unit where
     , corruptsOnCombatDamage = False
     , extraTargetTax = \_ _ _ -> 0
     , damageMultiplierWhileInPlay = 1
+    , runtimeEffects = \_ _ -> mempty
     }
 
 instance HasDefaultExtras Support where
@@ -244,60 +365,6 @@ newtype Receive k = Receive
 noReceive :: Receive k
 noReceive = Receive \_ _ _ -> pure ()
 
--- | What kind of target an action requires. The engine validates the
--- supplied 'ActionTarget' against this schema before invoking the
--- action's effect.
-data TargetSchema
-  = NoTargetSchema
-    -- ^ The action takes no target.
-  | AnyUnitTargetSchema
-    -- ^ Any unit currently in play.
-  | EnemyUnitTargetSchema
-    -- ^ A unit controlled by the opponent.
-  | FriendlyUnitTargetSchema
-    -- ^ A unit controlled by the player triggering the action.
-  | AnyZoneTargetSchema
-    -- ^ A zone of any player.
-  | EnemyZoneTargetSchema
-    -- ^ A zone controlled by the opponent.
-  | SupportTargetSchema
-    -- ^ A free-standing support in play.
-  deriving stock (Show, Eq)
-
--- | The concrete target supplied with a 'TriggerCardAction' message.
-data ActionTarget
-  = NoTarget
-  | TargetUnit UnitKey
-  | TargetZone PlayerKey ZoneKind
-  | TargetSupport UnitKey
-  deriving stock (Show, Eq)
-
-mconcat
-  [ deriveToJSON defaultOptions ''TargetSchema
-  , deriveToJSON defaultOptions ''ActionTarget
-  ]
-
--- | The bespoke effect a card's action runs once cost has been paid and
--- target has been validated. Same capability set as 'Receive'.
-newtype ActionEffect k = ActionEffect
-  { unEffect
-      :: forall m
-       . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
-      => PlayerKey -> InPlay k -> ActionTarget -> m ()
-  }
-
--- | A single Action ability printed on a card. Cards may declare zero
--- or more actions; the engine enumerates them during action windows.
--- Field names are prefixed with @action@ so they can't shadow
--- 'CardDef'\'s own @cost@/@target@ fields under
--- @DuplicateRecordFields@.
-data ActionDef k = ActionDef
-  { actionName :: Text
-  , actionCost :: Int
-  , actionTarget :: TargetSchema
-  , actionEffect :: ActionEffect k
-  }
-
 data CardDef (k :: CardKind) = CardDef
   { code :: CardCode
   , title :: String
@@ -325,6 +392,12 @@ data CardDef (k :: CardKind) = CardDef
     -- top-level 'CardDef' because any kind can be played and any
     -- kind might want a self adjustment in the future. May be
     -- negative; the final cost is clamped non-negative.
+  , canPlay :: Game -> PlayerKey -> Bool
+    -- ^ Per-card playability check beyond the engine's baseline
+    -- (resources, unique, Limited). Used to gate cards whose effect
+    -- only makes sense when valid targets exist (e.g. Stubborn
+    -- Refusal needs a damaged unit with a peer in its zone).
+    -- Default: always 'True'.
   }
 
 -- | Convenience: build the 'CardCodeFilter' describing a card. Used by

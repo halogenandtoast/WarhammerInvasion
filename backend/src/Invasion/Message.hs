@@ -2,7 +2,7 @@
 
 module Invasion.Message (module Invasion.Message) where
 
-import Invasion.CardDef (ActionTarget)
+import Invasion.CardDef (ActionTarget, CardDef)
 import Invasion.Game (ActionWindowTrigger, Prompt, PromptResult)
 import Invasion.Modifier (Modifier, ModifierScope)
 import Invasion.Player (Drawing, EliminationReason)
@@ -13,6 +13,18 @@ import Invasion.Types
 -- card text plugs in by handling, intercepting, or emitting these. New
 -- behavior generally means a new constructor, not inlining work in a
 -- handler.
+-- | Snapshot of a unit that has just left play. Bundles the
+-- information a "when this unit leaves play" trigger needs without
+-- requiring a fresh lookup against game state (the unit is already
+-- gone by the time the trigger fires).
+data DepartedUnit = DepartedUnit
+  { key :: UnitKey
+  , controller :: PlayerKey
+  , zone :: ZoneKind
+  , cardDef :: CardDef Unit
+  }
+  deriving stock Show
+
 data Message where
   -- Setup / lifecycle
   Setup :: Message
@@ -68,7 +80,7 @@ data Message where
   DestroyUnit :: UnitKey -> Message
     -- ^ Remove a unit from play and put its card into the controller's
     -- discard. Triggers 'UnitLeftPlay'.
-  UnitLeftPlay :: PlayerKey -> UnitKey -> ZoneKind -> CardCode -> Message
+  UnitLeftPlay :: DepartedUnit -> Message
     -- ^ Narration / hook point fired after a unit has been removed.
     -- Cards react by inspecting the previous controller and code.
   -- Corruption
@@ -173,7 +185,7 @@ data Message where
     -- @GainPower n@ entries sum.
   ClearScopedModifiers :: ModifierScope -> Message
     -- ^ Drop every modifier matching the given scope (e.g. clear all
-    -- 'UntilEndOfTurn' modifiers at end of turn).
+    -- 'EndOfTurn' modifiers at end of turn).
   ScheduleAttackerSacrifice :: Message
     -- ^ Schedule a 'PESacrificeAttackersThisPhase' end-of-phase
     -- effect for the current battlefield phase. Used by Reckless

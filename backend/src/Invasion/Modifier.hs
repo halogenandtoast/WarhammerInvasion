@@ -8,7 +8,7 @@ import Invasion.Prelude
 newtype ModifierDetails = GainPower Int
   deriving stock (Show, Eq)
 
-data ModifierScope = UntilEndOfTurn | ConstantScope
+data ModifierScope = EndOfTurn | Permanent
   deriving stock (Show, Eq)
 
 data Modifier = Modifier

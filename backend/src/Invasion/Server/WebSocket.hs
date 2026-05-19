@@ -556,6 +556,7 @@ handleGameIn env slot user = \case
                 let engineResult = case result of
                       PromptUnitsWire {unitKeys = ks} -> PickUnits ks
                       PromptBoolWire {yes = b} -> PickBool b
+                      PromptTargetOptionWire {option = o} -> PickTargetOption o
                       PromptNoneWire -> PickNone
                 ok <- postToEngine slot (Engine.EnginePromptAnswer engineResult)
                 unless ok $ sendGameError slot user "game_not_started"

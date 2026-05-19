@@ -30,7 +30,7 @@ import Data.Maybe as X (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, ma
 import Data.Text as X (Text)
 import Data.Text qualified as T
 import GHC.Records as X
-import Prelude as X
+import Prelude as X hiding (until)
 
 -- | @whenJust m k@ runs @k@ on the value inside a 'Just', and is a no-op
 -- on 'Nothing'. The dual of 'when' for optional values.

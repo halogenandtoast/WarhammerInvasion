@@ -4,18 +4,16 @@
 
 module Invasion.Engine (module Invasion.Engine, module Invasion.Message) where
 
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Random
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as Map
-import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Time (getCurrentTime)
 import Data.Traversable
 import Invasion.Capital
 import Invasion.Card
 import Invasion.CardDef
-import Invasion.Entity (LegendDetails (..), QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..), unitPrintedHP)
+import Invasion.Entity (LegendDetails (..), QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Game
 import Invasion.Message
 import Invasion.Modifier
@@ -23,7 +21,6 @@ import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
 import Control.Concurrent.STM
-import Data.Maybe (fromMaybe, isJust)
 import Queue
 import System.Random.Shuffle
 
@@ -346,10 +343,7 @@ instance Run Game where
         g
           { currentPlayer = k
           , turn = g.turn + Turn 1
-          , limitedPlayedThisTurn = False
-          , unitsDiscardedThisTurn = 0
-          , damageTakenThisTurn = mempty
-          , damagedInCurrentCombat = []
+          , history = Map.insert ThisTurn mempty g.history
           }
       t <- gets (.turn)
       logIt LogTurn
@@ -363,14 +357,14 @@ instance Run Game where
       send $ BeginPhase KingdomPhase
     EndTurn k -> do
       -- Phase 5 (FAQ 2.2): action window first, then "at end of turn"
-      -- triggered effects fire, then UntilEndOfTurn modifiers expire.
+      -- triggered effects fire, then EndOfTurn modifiers expire.
       send $ OpenActionWindow EndOfTurnActionWindow
       -- Fire scheduled end-of-turn effects after the window closes.
       pending <- gets (.pendingEndOfTurn)
       modify \g -> g {pendingEndOfTurn = []}
       traverse_ firePendingEffect pending
-      -- Drop UntilEndOfTurn modifiers.
-      send $ ClearScopedModifiers UntilEndOfTurn
+      -- Drop EndOfTurn modifiers.
+      send $ ClearScopedModifiers EndOfTurn
       modify \g -> g {phase = Nothing}
       logIt LogTurn "log.turn.ends" [("player", playerParam k)]
       send $ BeginTurn k.next
@@ -379,10 +373,7 @@ instance Run Game where
       modify \gx ->
         gx
           { phase = Just phase
-          , attackersThisPhase =
-              if phase == BattlefieldPhase
-                then []
-                else gx.attackersThisPhase
+          , history = Map.insert ThisPhase mempty gx.history
           }
       if shouldSkipFirstTurnPhase phase g
         then do
@@ -574,6 +565,8 @@ instance Run Game where
                             , experiences = []
                             , effectivePower = cardDef.power
                             , effectiveMaxHP = unitPrintedHPFromDef cardDef
+                            , attacking = False
+                            , defending = False
                             }
                         q' = (q {questingUnit = Just cardKey}) :: QuestDetails
                     modify \gx ->
@@ -621,7 +614,9 @@ instance Run Game where
           let inflated = applyDamageMultipliers g (max 0 amount)
               toughness = totalToughness g u
               afterToughness = max 0 (inflated - toughness)
-              already = Map.findWithDefault 0 ukey g.damageTakenThisTurn
+              already =
+                Map.findWithDefault 0 ukey
+                  (historyOfScope ThisTurn g).damageTaken
               capped = applyPerTurnCap u already afterToughness
               landing = capped
               cancelled = inflated - landing
@@ -635,16 +630,14 @@ instance Run Game where
             let Damage existing = u.damage
                 newDmg = Damage (existing + landing)
                 u' = u {damage = newDmg} :: UnitDetails
-            modify \gx ->
-              gx
-                { units = replaceUnit u' gx.units
-                , damageTakenThisTurn =
-                    Map.insertWith (+) ukey landing gx.damageTakenThisTurn
-                , damagedInCurrentCombat =
-                    if isJust gx.combat && ukey `notElem` gx.damagedInCurrentCombat
-                      then ukey : gx.damagedInCurrentCombat
-                      else gx.damagedInCurrentCombat
-                }
+            modify \gx -> gx {units = replaceUnit u' gx.units}
+            recordEvent \h -> h
+              { damageTaken = Map.insertWith (+) ukey landing h.damageTaken
+              , damagedUnits =
+                  if ukey `elem` h.damagedUnits
+                    then h.damagedUnits
+                    else ukey : h.damagedUnits
+              }
             logIt LogSystem
               "log.unit.damaged"
               [ ("card", T.pack u.cardDef.title)
@@ -659,22 +652,22 @@ instance Run Game where
           -- Uncancellable damage still respects per-turn caps
           -- (Daemonettes) — the cap is independent of cancellation.
           let inflated = applyDamageMultipliers g (max 0 amount)
-              already = Map.findWithDefault 0 ukey g.damageTakenThisTurn
+              already =
+                Map.findWithDefault 0 ukey
+                  (historyOfScope ThisTurn g).damageTaken
               landing = applyPerTurnCap u already inflated
           when (landing > 0) $ do
             let Damage existing = u.damage
                 newDmg = Damage (existing + landing)
                 u' = u {damage = newDmg} :: UnitDetails
-            modify \gx ->
-              gx
-                { units = replaceUnit u' gx.units
-                , damageTakenThisTurn =
-                    Map.insertWith (+) ukey landing gx.damageTakenThisTurn
-                , damagedInCurrentCombat =
-                    if isJust gx.combat && ukey `notElem` gx.damagedInCurrentCombat
-                      then ukey : gx.damagedInCurrentCombat
-                      else gx.damagedInCurrentCombat
-                }
+            modify \gx -> gx {units = replaceUnit u' gx.units}
+            recordEvent \h -> h
+              { damageTaken = Map.insertWith (+) ukey landing h.damageTaken
+              , damagedUnits =
+                  if ukey `elem` h.damagedUnits
+                    then h.damagedUnits
+                    else ukey : h.damagedUnits
+              }
             logIt LogSystem
               "log.unit.damaged"
               [ ("card", T.pack u.cardDef.title)
@@ -708,17 +701,21 @@ instance Run Game where
           discardToController u.controller $ mkCard u.key (UnitCardDef u.cardDef)
           for_ u.attachments \a ->
             discardToController a.controller $ mkCard a.key (SupportCardDef a.cardDef)
-          modify \gx -> gx
-            { units = removeById ukey gx.units
-            , unitsDiscardedThisTurn = gx.unitsDiscardedThisTurn + 1
-            }
+          modify \gx -> gx {units = removeById ukey gx.units}
+          recordEvent \h -> h {unitsDiscarded = h.unitsDiscarded + 1}
           logIt LogSystem
             "log.unit.destroyed"
             [ ("player", playerParam u.controller)
             , ("card", T.pack u.cardDef.title)
             ]
-          send $ UnitLeftPlay u.controller ukey u.zone u.cardDef.code
-    UnitLeftPlay _pk ukey _zone _code -> do
+          send $ UnitLeftPlay DepartedUnit
+            { key = ukey
+            , controller = u.controller
+            , zone = u.zone
+            , cardDef = u.cardDef
+            }
+    UnitLeftPlay du -> do
+      let ukey = du.key
       -- If the departed unit was questing on a quest, clear the slot
       -- and dump accumulated resource tokens.
       g <- get
@@ -932,19 +929,24 @@ instance Run Game where
             let player = lookupPlayer pk g
                 tax = extraTargetTax pk target g
                 totalCost = baseCost + tax
+                extras = actionExtraCostsAt src idx
             when (validateActionSource pk src) $
-              when (player.resources >= Resources totalCost) $
-                when (validateTarget pk schema target g) $ do
-                  let paid = player {resources = player.resources - Resources totalCost}
-                  modify (setPlayer pk paid)
-                  logIt LogPlayerAction
-                    "log.action.triggered"
-                    [ ("player", playerParam pk)
-                    , ("card", T.pack (actionSourceTitle src))
-                    , ("action", name)
-                    , ("cost", tshow totalCost)
-                    ]
-                  fireAction src idx pk target
+              when (actionAvailableHere src idx) $
+                when (player.resources >= Resources totalCost) $
+                  when (validateTarget pk schema target g) $
+                    when (canPayExtras pk extras g) $ do
+                      let paid = player {resources = player.resources - Resources totalCost}
+                      modify (setPlayer pk paid)
+                      logIt LogPlayerAction
+                        "log.action.triggered"
+                        [ ("player", playerParam pk)
+                        , ("card", T.pack (actionSourceTitle src))
+                        , ("action", name)
+                        , ("cost", tshow totalCost)
+                        ]
+                      mpayments <- payExtras pk extras
+                      whenJust mpayments \payments ->
+                        fireAction src idx pk target payments
     DeferDamageToUnitUntilEoT ukey n -> do
       modify \g ->
         g {pendingEndOfTurn = PEDealDamageToUnit ukey n : g.pendingEndOfTurn}
@@ -1221,9 +1223,9 @@ instance Run Game where
           modify \gx ->
             (setPlayer attacker attackerAfterRune gx)
               { combat = Just combatState
-              , attackersThisPhase = eligible <> gx.attackersThisPhase
-              , damagedInCurrentCombat = []
+              , history = Map.insert ThisCombat mempty gx.history
               }
+          recordEvent \h -> h {attackersDeclared = eligible <> h.attackersDeclared}
           logIt LogPlayerAction
             "log.combat.begins"
             [ ("attacker", playerParam attacker)
@@ -1313,11 +1315,7 @@ instance Run Game where
       case g.combat of
         Just cs -> firePerSourceCombatEffects g cs
         Nothing -> pure ()
-      modify \gx ->
-        gx
-          { combat = Nothing
-          , damagedInCurrentCombat = []
-          }
+      modify \gx -> gx {combat = Nothing}
       logIt LogSystem "log.combat.ends" []
     PutUnitIntoPlay pk cardKey zone -> do
       -- Skip cost; same wiring as 'PlayUnit' but no resource debit and
@@ -1342,10 +1340,11 @@ instance Run Game where
           , combat = case gx.combat of
               Just cs | cs.attackingPlayer == pk -> Just $ joinAsAttacker cs
               other -> other
-          , attackersThisPhase = case gx.combat of
-              Just cs | cs.attackingPlayer == pk -> cardKey : gx.attackersThisPhase
-              _ -> gx.attackersThisPhase
           }
+        g' <- get
+        whenJust g'.combat \cs ->
+          when (cs.attackingPlayer == pk) $
+            recordEvent \h -> h {attackersDeclared = cardKey : h.attackersDeclared}
         logIt LogSystem "log.unit.summoned_from_discard"
           [("player", playerParam pk), ("card", T.pack cardDef.title)]
         send $ UnitEnteredPlay pk cardKey
@@ -1507,12 +1506,8 @@ newGame deck1 deck2 opts = do
       , nextUnitKey = nextKey
       , pendingEndOfTurn = []
       , combat = Nothing
-      , attackersThisPhase = []
       , pendingEndOfPhase = []
-      , limitedPlayedThisTurn = False
-      , unitsDiscardedThisTurn = 0
-      , damageTakenThisTurn = mempty
-      , damagedInCurrentCombat = []
+      , history = emptyHistory
       , autoSkipActionWindows = opts.autoSkipActionWindows
       }
 
@@ -1567,6 +1562,8 @@ freshUnit key controller zone cardDef = UnitDetails
   , experiences = []
   , effectivePower = cardDef.power
   , effectiveMaxHP = unitPrintedHPFromDef cardDef
+  , attacking = False
+  , defending = False
   }
 
 -- | Construct the @InPlay Support@ wrapper for a fresh support. Pass
@@ -1679,7 +1676,7 @@ firePendingEffect = \case
   PEDealDamageToUnit ukey n -> send $ DealDamageToUnit ukey n
   PESacrificeAttackersThisPhase -> do
     g <- get
-    traverse_ (send . DestroyUnit) g.attackersThisPhase
+    traverse_ (send . DestroyUnit) (historyOfScope ThisPhase g).attackersDeclared
 
 -- | The damage a single unit contributes in combat. Adds card-specific
 -- bonuses (Lord of Khorne self-burning, Rift of Battle, …) on top of
@@ -1849,12 +1846,75 @@ withActionSource src f = case src of
   QuestSource q -> f q
   LegendSource l -> f l
 
--- | Static metadata for the action at the given index of a source's
--- declared 'actions' list.
+-- | Metadata for the action at the given index on a source. Looks up
+-- the static action list printed on the card; runtime-evaluated
+-- availability ('availableInZone') is enforced by the caller before
+-- firing.
 actionAt :: ActionSource -> Int -> Maybe (Text, Int, TargetSchema)
-actionAt src i = withActionSource src \a -> meta <$> safeIndex a.cardDef.actions i
+actionAt src i = withActionSource src \a ->
+  meta <$> safeIndex a.cardDef.actions i
   where
     meta a = (a.actionName, a.actionCost, a.actionTarget)
+
+-- | Resolve the 'availableInZone' gate on the action at the given
+-- index. Returns 'True' iff the action either has no zone gate or its
+-- host card is currently in the gated zone. Non-Unit sources have no
+-- zone (yet) and pass through.
+actionAvailableHere :: ActionSource -> Int -> Bool
+actionAvailableHere src i = withActionSource src \a ->
+  case safeIndex a.cardDef.actions i of
+    Nothing -> False
+    Just def -> case def.availableInZone of
+      Nothing -> True
+      Just z -> case src of
+        UnitSource u -> u.zone == z
+        _ -> True
+
+-- | Non-resource costs the action at the given index imposes. Empty
+-- list when the action has no extra costs or the index is invalid.
+actionExtraCostsAt :: ActionSource -> Int -> [ExtraCost]
+actionExtraCostsAt src i = withActionSource src \a ->
+  maybe [] (.actionExtraCosts) (safeIndex a.cardDef.actions i)
+
+-- | Validate that every non-resource cost can be paid by 'pk' given
+-- the current game state. For 'SacrificeUnit' this means the player
+-- controls at least one unit.
+canPayExtras :: PlayerKey -> [ExtraCost] -> Game -> Bool
+canPayExtras pk extras g = all (canPayExtra pk g) extras
+
+canPayExtra :: PlayerKey -> Game -> ExtraCost -> Bool
+canPayExtra pk g SacrificeUnit =
+  any (\u -> u.controller == pk) g.units
+
+-- | Pay every non-resource cost, prompting the player for choices
+-- where needed. Returns the list of 'Payment' receipts on success,
+-- or 'Nothing' if any payment fails (e.g. the player declined a
+-- sacrifice prompt). The caller skips firing the effect on failure.
+payExtras
+  :: PlayerKey -> [ExtraCost] -> StateT Game GameT (Maybe [Payment])
+payExtras pk = go []
+  where
+    go acc [] = pure (Just (reverse acc))
+    go acc (SacrificeUnit : rest) = do
+      answer <- askPrompt Prompt
+        { player = pk
+        , kind = ChooseUnits
+            { filterSpec = AnyOwnUnit
+            , minPick = 1
+            , maxPick = 1
+            , description = "Sacrifice a unit (cost)."
+            }
+        , callback = CallbackInlinePrompt
+        }
+      case answer of
+        PickUnits (chosen : _) -> do
+          g <- get
+          case findUnit chosen g of
+            Just u | u.controller == pk -> do
+              send (DestroyUnit u.key)
+              go (SacrificedUnit u.key : acc) rest
+            _ -> pure Nothing
+        _ -> pure Nothing
 
 -- | The card title for log lines.
 actionSourceTitle :: ActionSource -> String
@@ -1866,17 +1926,21 @@ validateActionSource :: PlayerKey -> ActionSource -> Bool
 validateActionSource pk src = withActionSource src \a -> a.controller == pk
 
 -- | Fire the chosen action's effect closure. No-op if the index is out
--- of bounds (should never happen since 'actionAt' already validated).
+-- of bounds. The zone-availability check ('availableInZone') is the
+-- caller's responsibility — 'TriggerCardAction' enforces it via
+-- 'actionAvailableHere'.
 fireAction
   :: ActionSource
   -> Int
   -> PlayerKey
   -> ActionTarget
+  -> [Payment]
   -> StateT Game GameT ()
-fireAction src i pk tgt = withActionSource src \self ->
+fireAction src i pk tgt payments = withActionSource src \self ->
   whenJust (safeIndex self.cardDef.actions i) \a ->
     case a.actionEffect of
-      ActionEffect f -> lift $ f pk self tgt
+      ActionEffect f ->
+        lift $ f ActionUsage {user = pk, self, target = tgt, payments}
 
 safeIndex :: [a] -> Int -> Maybe a
 safeIndex xs i
@@ -2112,89 +2176,16 @@ maybeAutoPassPriority trigger pk = do
     )
     (send (PassPriority pk))
 
--- | Translate a resolved prompt into engine messages. Each callback
--- knows the structure of its expected result (units to summon, unit
--- to sacrifice, etc.) and is responsible for validating that the
--- chosen targets pass the prompt's filter / count gates before
--- firing the follow-up effect.
+-- | Translate a resolved prompt into engine messages. Today all
+-- prompts are 'CallbackInlinePrompt' — the receive body that issued
+-- the prompt resumes inline via 'askPrompt' returning the answer, so
+-- there's nothing to dispatch here. Kept as the seam for future
+-- callback-style flows (e.g. cross-card chained prompts).
 dispatchPromptCallback
   :: PromptCallback
   -> PromptResult
   -> StateT Game GameT ()
-dispatchPromptCallback cb result = case (cb, result) of
-  (CallbackIronThroneroomPayoff srcKey, PickUnits chosen) -> do
-    g <- get
-    whenJust (findSupport srcKey g) \self -> do
-        let owner = lookupPlayer self.controller g
-            handKeySet = [c.key | c <- owner.hand]
-            discardKeySet = [c.key | c <- owner.discard]
-            picks = take 3 chosen
-            chaosUnitInList list k =
-              case [c | c <- list, c.key == k] of
-                (c : _) -> case c.def of
-                  UnitCardDef cd -> Chaos `elem` cd.races
-                  _ -> False
-                [] -> False
-            fromHand =
-              [ k
-              | k <- picks
-              , k `elem` handKeySet
-              , chaosUnitInList owner.hand k
-              ]
-            fromDiscard =
-              [ k
-              | k <- picks
-              , k `elem` discardKeySet
-              , chaosUnitInList owner.discard k
-              ]
-        traverse_
-          (\k -> send (PutUnitIntoPlay self.controller k KingdomZone))
-          fromHand
-        traverse_
-          (\k -> send (PutUnitIntoPlayFromDiscard self.controller k KingdomZone))
-          fromDiscard
-  (CallbackBloodthirsterSacrifice pk _, PickUnits (chosen : _)) -> do
-    g <- get
-    case findUnit chosen g of
-      Just u | u.controller == pk ->
-        send $ DestroyUnit u.key
-      _ -> pure ()
-  (CallbackBloodthirsterSacrifice _ _, PickNone) -> pure ()
-  (CallbackSkulltakerPayToAttach skullKey deadCode, PickBool True) -> do
-    g <- get
-    whenJust (findUnit skullKey g) \self -> do
-        let owner = lookupPlayer self.controller g
-            Resources r = owner.resources
-        when (r >= 1) $ do
-          let owner' = owner {resources = Resources (r - 1)}
-          modify (setPlayer self.controller owner')
-          send $ AttachExperience self.key deadCode
-  (CallbackSkulltakerPayToAttach _ _, PickBool False) -> pure ()
-  (CallbackHorrorOfTzeentchDiscard horrorKey, PickBool True) -> do
-    g <- get
-    whenJust (findUnit horrorKey g) \self -> do
-        let owner = lookupPlayer self.controller g
-        when (not (null owner.hand)) $ do
-          send $ DiscardRandomFromHand self.controller
-          send
-            ( RequestPrompt Prompt
-                { player = self.controller
-                , kind =
-                    ChooseUnits
-                      { filterSpec = AnyOwnUnit
-                      , minPick = 1
-                      , maxPick = 1
-                      , description =
-                          "Choose a target unit to take 2 damage."
-                      }
-                , callback = CallbackHorrorOfTzeentchTarget horrorKey
-                }
-            )
-  (CallbackHorrorOfTzeentchDiscard _, PickBool False) -> pure ()
-  (CallbackHorrorOfTzeentchTarget _, PickUnits (target : _)) -> do
-    exists <- gets (isJust . findUnit target)
-    when exists $ send $ DealDamageToUnit target 2
-  _ -> pure ()
+dispatchPromptCallback _cb _result = pure ()
 
 -- | Fire post-combat "when this unit damages an enemy" effects. Read
 -- 'damagedInCurrentCombat' to know which units actually took damage,
@@ -2207,7 +2198,7 @@ firePerSourceCombatEffects g cs = do
   where
     damagedEnemiesOf side =
       [ k
-      | k <- g.damagedInCurrentCombat
+      | k <- (historyOfScope ThisCombat g).damagedUnits
       , Just u <- [findUnit k g]
       , u.controller /= side
       , not u.corrupted
@@ -2252,17 +2243,20 @@ controlsCopyInPlay pk code g =
     hit = any \x -> x.controller == pk && x.cardDef.code == code
 
 -- | Refuse if a unique card already has a copy under the player's
--- control, or if a Limited card has already been played this turn.
+-- control, if a Limited card has already been played this turn, or if
+-- the card's per-card 'canPlay' predicate refuses (e.g. Stubborn
+-- Refusal requires a damaged unit and a peer in its zone).
 canPlayCard :: PlayerKey -> CardDef k -> Game -> Bool
 canPlayCard pk cd g =
   (not cd.unique || not (controlsCopyInPlay pk cd.code g))
-    && (not (isLimitedCard cd) || not g.limitedPlayedThisTurn)
+    && (not (isLimitedCard cd) || (historyOfScope ThisTurn g).limitedPlayed == 0)
+    && cd.canPlay g pk
 
--- | Set the limited-played-this-turn flag if appropriate.
+-- | Bump the Limited-played counter for the current turn if appropriate.
 markPlayedLimited :: CardDef k -> StateT Game GameT ()
 markPlayedLimited cd =
   when (isLimitedCard cd) $
-    modify \gx -> gx {limitedPlayedThisTurn = True}
+    recordEvent \h -> h {limitedPlayed = h.limitedPlayed + 1}
 
 -- | Sum of all Toughness contributions on a unit. Fixed values come
 -- straight from the keyword; 'Toughness Variable' (Ironbreakers of
@@ -2356,14 +2350,22 @@ unitPrintedHPFromDef cd = case cd.hitPoints of
   Nothing -> 1
 
 -- | Recompute cached effective stats for every in-play unit. Called
--- after each engine step so 'effectivePower' and 'effectiveMaxHP'
--- always reflect current attachments, experiences, scoped modifiers,
--- and zone state.
+-- after each engine step so 'effectivePower', 'effectiveMaxHP', and
+-- combat-role flags ('attacking' / 'defending') always reflect
+-- current attachments, experiences, scoped modifiers, zone state,
+-- and the in-flight combat.
 recomputeUnitStats :: Game -> Game
 recomputeUnitStats g = g {units = map update g.units}
   where
+    combatAttackers = maybe [] (.attackers) g.combat
+    combatDefenders = maybe [] (.defenders) g.combat
     update u =
-      u {effectivePower = computePower u, effectiveMaxHP = computeMaxHP u}
+      u
+        { effectivePower = computePower u
+        , effectiveMaxHP = computeMaxHP u
+        , attacking = u.key `elem` combatAttackers
+        , defending = u.key `elem` combatDefenders
+        }
         :: UnitDetails
     computePower u =
       u.cardDef.power
@@ -2371,6 +2373,7 @@ recomputeUnitStats g = g {units = map update g.units}
         + modifierPowerBonus u
         + auraPowerBonus g u
         + selfScalingPowerBonus g u
+        + runtimeEffectsPowerBonus g u
     computeMaxHP u =
       unitPrintedHPFromDef u.cardDef
         + sum (map (attachmentHPBonus u) u.attachments)
@@ -2404,6 +2407,25 @@ auraPowerBonus g u =
 -- 'experiencePowerBonus' for cards that scale with experience tokens).
 selfScalingPowerBonus :: Game -> UnitDetails -> Int
 selfScalingPowerBonus g u = u.cardDef.extras.selfPowerBonus g u
+
+-- | Pure read of a 'Scope's 'History' bucket. Missing buckets fall
+-- back to 'mempty' so card bodies can treat all scopes uniformly.
+historyOfScope :: Scope -> Game -> History
+historyOfScope s g = Map.findWithDefault mempty s g.history
+
+-- | Apply a transformation to every 'Scope's 'History' bucket. Used
+-- by the engine when an event happens — every scope advances in
+-- lockstep, and individual scopes are then truncated by 'BeginTurn'
+-- / 'BeginPhase' / 'BeginCombat' resets.
+recordEvent :: (History -> History) -> StateT Game GameT ()
+recordEvent f = modify \g -> g {history = Map.map f g.history}
+
+-- | Power bonus produced by 'runtimeEffects' — the per-tick builder
+-- output authored via the 'battlefield' / 'kingdom' / 'quest' high-level
+-- DSL. Folded into 'effectivePower' alongside the legacy
+-- 'selfScalingPowerBonus' slot.
+runtimeEffectsPowerBonus :: Game -> UnitDetails -> Int
+runtimeEffectsPowerBonus g u = activeBonusPower (u.cardDef.extras.runtimeEffects g u)
 
 takeUnitFromDiscard :: UnitKey -> Player -> Maybe (CardDef Unit, Player)
 takeUnitFromDiscard = takeFromPile discardPile asUnit

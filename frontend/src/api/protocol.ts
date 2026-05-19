@@ -320,9 +320,27 @@ export type PromptKind =
       description: string
     }
   | { tag: 'ChooseYesNo'; description: string }
+  | {
+      tag: 'ChooseFromCards'
+      cards: EngineCardDef[]
+      minPick: number
+      maxPick: number
+      description: string
+    }
+  | {
+      tag: 'ChooseTargetOption'
+      options: TargetOption[]
+      description: string
+    }
+
+export type TargetOption =
+  | { tag: 'TargetUnitOption'; contents: number }
+  | { tag: 'TargetZoneOption'; contents: [PlayerKey, ZoneKind] }
 
 export type PromptFilter =
   | { tag: 'AnyOwnUnit' }
+  | { tag: 'AnyUnitInPlay' }
+  | { tag: 'UnitsFromList'; contents: number[] }
   | { tag: 'OwnUnitsFromHandByRace'; contents: Race }
   | { tag: 'OwnUnitsFromDiscardByRace'; contents: Race }
   | { tag: 'OwnUnitsFromHandOrDiscardByRace'; contents: Race }
@@ -330,6 +348,7 @@ export type PromptFilter =
 export type PromptResultWire =
   | { tag: 'PromptUnitsWire'; unitKeys: number[] }
   | { tag: 'PromptBoolWire'; yes: boolean }
+  | { tag: 'PromptTargetOptionWire'; option: TargetOption }
   | { tag: 'PromptNoneWire' }
 
 // Derived helpers — keep alongside the wire types so they stay in sync.

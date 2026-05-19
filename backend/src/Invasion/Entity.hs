@@ -71,6 +71,13 @@ data UnitDetails = UnitDetails
   , effectiveMaxHP :: Int
     -- ^ Cached current max HP. Damage destruction is checked against
     -- this, not the printed 'hitPoints'.
+  , attacking :: Bool
+    -- ^ True iff this unit is currently declared as an attacker in
+    -- the in-flight combat. Cached so card-side predicates can read
+    -- @unit.attacking@ without threading game state.
+  , defending :: Bool
+    -- ^ True iff this unit is currently declared as a defender in
+    -- the in-flight combat.
   }
   deriving stock Show
 
@@ -185,6 +192,8 @@ instance ToJSON UnitDetails where
       , "experiences" .= d.experiences
       , "effectivePower" .= d.effectivePower
       , "effectiveMaxHP" .= d.effectiveMaxHP
+      , "attacking" .= d.attacking
+      , "defending" .= d.defending
       ]
 
 instance ToJSON SupportDetails where
