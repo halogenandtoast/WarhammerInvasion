@@ -27,6 +27,16 @@ library
       Invasion.Auth.Password
       Invasion.Capital
       Invasion.Card
+      Invasion.Card.Builder
+      Invasion.Card.Defs.Chaos
+      Invasion.Card.Defs.DarkElf
+      Invasion.Card.Defs.Dwarf
+      Invasion.Card.Defs.Empire
+      Invasion.Card.Defs.HighElf
+      Invasion.Card.Defs.Orc
+      Invasion.Card.Effects
+      Invasion.Card.Triggers
+      Invasion.Card.Types
       Invasion.CardDef
       Invasion.DB
       Invasion.Engine

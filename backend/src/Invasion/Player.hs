@@ -7,7 +7,7 @@ import Data.Aeson.TH
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Invasion.Capital
-import {-# SOURCE #-} Invasion.Card (Card)
+import {-# SOURCE #-} Invasion.Card.Types (Card)
 import Invasion.Prelude
 import Invasion.Types
 

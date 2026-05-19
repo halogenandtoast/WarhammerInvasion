@@ -12,7 +12,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import {-# SOURCE #-} Invasion.Card (Card)
+import {-# SOURCE #-} Invasion.Card.Types (Card)
 import Invasion.Capital
 import Invasion.Entity (LegendDetails, QuestDetails, SupportDetails, UnitDetails)
 import Invasion.Modifier
