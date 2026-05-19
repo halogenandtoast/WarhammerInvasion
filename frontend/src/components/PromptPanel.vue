@@ -72,6 +72,14 @@ const options = computed<PickOption[]>(() => {
   switch (filter.tag) {
     case 'AnyOwnUnit':
       return fromUnits(props.engine.units)
+    case 'AnyUnitInPlay':
+      return props.engine.units.map((u) => ({ key: u.key, label: u.cardDef.title }))
+    case 'UnitsFromList': {
+      const allowed = new Set(filter.contents)
+      return props.engine.units
+        .filter((u) => allowed.has(u.key))
+        .map((u) => ({ key: u.key, label: u.cardDef.title }))
+    }
     case 'OwnUnitsFromHandByRace':
       return fromCardList(m.hand, filter.contents)
     case 'OwnUnitsFromDiscardByRace':
