@@ -220,6 +220,14 @@ function resolvePromptTargetOption(option: TargetOption) {
   })
 }
 
+function declareAttack(attackZone: ZoneKind, attackerKeys: number[]) {
+  socket?.send({ tag: 'GameDeclareAttack', attackZone, attackerKeys })
+}
+
+function playDevelopment(cardKey: number, developmentZone: ZoneKind) {
+  socket?.send({ tag: 'GamePlayDevelopment', cardKey, developmentZone })
+}
+
 export const game = {
   status: computed(() => _status.value),
   gameId: computed(() => _gameId.value),
@@ -245,5 +253,7 @@ export const game = {
   resolvePromptNone,
   resolvePromptAmount,
   resolvePromptTargetOption,
+  declareAttack,
+  playDevelopment,
   leaveGame,
 }

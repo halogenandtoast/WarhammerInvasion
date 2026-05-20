@@ -341,6 +341,7 @@ onMyZoneAttacked handler = onReceive $ Receive \msg owner self -> case msg of
               { attackingPlayer = attacker
               , defendingPlayer = self.controller
               , targetZone = zone
+              , targetLegend = Nothing
               , attackers = attackers
               , defenders = []
               , attackerPowerPenalty = 0

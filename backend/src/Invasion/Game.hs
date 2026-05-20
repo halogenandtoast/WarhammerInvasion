@@ -241,6 +241,12 @@ data CombatState = CombatState
   { attackingPlayer :: PlayerKey
   , defendingPlayer :: PlayerKey
   , targetZone :: ZoneKind
+  , targetLegend :: Maybe UnitKey
+    -- ^ When 'Just', the attacker is targeting the defender's legend
+    -- through the named zone (rather than the capital section
+    -- itself). Damage spillover lands on the legend (capped at its
+    -- HP) and never reaches the zone. When 'Nothing', overflow
+    -- assigns to the capital section as usual.
   , attackers :: [UnitKey]
   , defenders :: [UnitKey]
   , attackerPowerPenalty :: Int
@@ -269,6 +275,7 @@ data PendingDamage = PendingDamage
 data PendingTarget
   = PDUnit UnitKey
   | PDZone PlayerKey ZoneKind
+  | PDLegend UnitKey
   deriving stock (Show, Eq)
 
 -- | A single line in the game-event transcript. The engine appends
@@ -468,6 +475,10 @@ data Game = Game
     -- Decremented and consumed on the next 'TriggerCardAction'
     -- firing for that player. Written by Bright Wizard Apprentice;
     -- reset at end of turn.
+  , developmentPlayedThisTurn :: Bool
+    -- ^ True after the active player plays a face-down development
+    -- this turn. Enforces the once-per-turn development rule. Reset
+    -- to False at 'BeginTurn'.
   }
   deriving stock Show
 

@@ -247,6 +247,23 @@ data GameIn
     GameResolvePrompt
       { result :: PromptResultWire
       }
+  | -- | Declare an attack against the opponent. The server only
+    -- forwards this to the engine when the sender holds priority in
+    -- the BattlefieldActionWindow during their own battlefield phase
+    -- and no combat is already in flight. Engine still applies its
+    -- own per-card attacker eligibility check after that.
+    GameDeclareAttack
+      { attackZone :: ZoneKind
+      , attackerKeys :: [UnitKey]
+      }
+  | -- | The active player plays a hand card face-down as their
+    -- once-per-turn development. Engine refuses outside the
+    -- CapitalActionWindow or after a development has already been
+    -- played this turn.
+    GamePlayDevelopment
+      { cardKey :: UnitKey
+      , developmentZone :: ZoneKind
+      }
   | -- | Drop this user from the seat, broadcast to the other seat.
     GameLeave
   deriving stock (Show, Generic)

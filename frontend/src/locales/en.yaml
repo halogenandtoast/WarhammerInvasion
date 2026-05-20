@@ -919,6 +919,8 @@ game:
       play_tactic: Play tactic
       play_legend: Play legend
       cancel: Cancel
+      development_hint: "Or play this card face-down as your turn's development:"
+      development_to: "Develop {zone}"
     unplayable:
       heading: Can't play this yet
       dismiss: OK
@@ -933,6 +935,26 @@ game:
         NoValidTarget: No valid target for this card is in play.
     quest:
       controlled_by: "{name}'s"
+    combat:
+      declare_heading: Battlefield phase
+      declare_button: Declare attack
+      pick_zone: Pick the opponent's zone to attack.
+      pick_attackers: "Pick your attackers against the {zone}."
+      no_attackers: No eligible units in your battlefield.
+      confirm: "Attack with {n}"
+      status_heading: Combat
+      step_label: "Step {n}/{total}: {label}"
+      step:
+        target: declare target
+        attackers: declare attackers
+        defenders: declare defenders
+        assign: assign damage
+        apply: apply damage
+      attacks_zone: "attacks {defender}'s {zone}."
+      attacks_legend: "attacks {defender}'s legend {legend} through the {zone}."
+      attackers_label: Attackers
+      defenders_label: Defenders
+      undefended: Undefended.
 
 cards:
   page_title: Card Database
@@ -1066,6 +1088,7 @@ log:
   zone:
     damaged: "{player}'s {zone} zone takes {amount} damage."
     burned: "{player}'s {zone} zone burns!"
+    development_played: "{player} plays a face-down development into their {zone}."
   hand:
     discarded_all: "{player} discards their hand ({count} cards)."
   discard:
@@ -1080,9 +1103,14 @@ log:
   combat:
     begins: "{attacker} attacks the {zone}."
     resolved: "Combat resolves: attackers {attacker_damage}, defenders {defender_damage}."
+    assigned: "Damage assigned — attackers {attacker_damage}, defenders {defender_damage}."
     ends: "Combat ends."
     aborted: "{attacker}'s attack aborted (no eligible attackers)."
+    cancelled: "Combat cancelled."
     redirected: "{attacker}'s attack is redirected to {zone}."
+    rune_paid: "Rune of Fortitude tax paid: {amount} resources."
+    rune_penalty: "Rune of Fortitude unpaid: attackers take −{amount} power."
+    targets_legend: "{attacker} targets the opponent's legend through the attacked zone."
   # ZoneKind enum lookup
   zone_name:
     KingdomZone: Kingdom

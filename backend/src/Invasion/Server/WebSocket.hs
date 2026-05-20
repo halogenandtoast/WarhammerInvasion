@@ -46,9 +46,11 @@ import Invasion.CardDef qualified as CardDef
 import Invasion.DB (DbPool, runDB)
 import Invasion.Engine
   ( Message
-      ( BeginGame
+      ( BeginCombat
+      , BeginGame
       , PassPriority
       , PlayAttachment
+      , PlayDevelopment
       , PlayLegend
       , PlayQuest
       , PlaySupport
@@ -60,7 +62,13 @@ import Invasion.Engine
   , newGame
   )
 import Invasion.Engine qualified as Engine
-import Invasion.Game (Game (..), Prompt (..), PromptResult (..))
+import Invasion.Game
+  ( ActionWindow (..)
+  , ActionWindowTrigger (BattlefieldActionWindow)
+  , Game (..)
+  , Prompt (..)
+  , PromptResult (..)
+  )
 import Invasion.Model
 import Invasion.Player (Player (..))
 import Invasion.Prelude
@@ -69,6 +77,7 @@ import Invasion.Server.Protocol
 import Invasion.Server.Protocol qualified as Proto
 import Invasion.Types
   ( CardCode (..)
+  , Phase (BattlefieldPhase)
   , PlayerKey (..)
   , Race (..)
   , UnitKey
@@ -596,6 +605,27 @@ handleGameIn env slot user = \case
                       PromptNoneWire -> PickNone
                 ok <- postToEngine slot (Engine.EnginePromptAnswer engineResult)
                 unless ok $ sendGameError slot user "game_not_started"
+  GamePlayDevelopment {cardKey = ck, developmentZone = zk} ->
+    withSeatedPlayer slot user \pk ->
+      postEngineMsg slot user (PlayDevelopment pk ck zk)
+  GameDeclareAttack {attackZone = tz, attackerKeys = ks} ->
+    withSeatedPlayer slot user \pk -> do
+      mGame <- readTVarIO slot.engine
+      case mGame of
+        Nothing -> sendGameError slot user "game_not_started"
+        Just g
+          | g.phase /= Just BattlefieldPhase ->
+              sendGameError slot user "not_battlefield_phase"
+          | g.currentPlayer /= pk ->
+              sendGameError slot user "not_your_turn"
+          | isJust g.combat ->
+              sendGameError slot user "combat_in_progress"
+          | maybe True (\aw -> aw.trigger /= BattlefieldActionWindow) g.actionWindow ->
+              sendGameError slot user "wrong_action_window"
+          | null ks ->
+              sendGameError slot user "no_attackers"
+          | otherwise ->
+              postEngineMsg slot user (BeginCombat pk tz ks)
   GameLeave -> do
     sts <- readTVarIO slot.status
     -- A "leave" while playing ends the game — but only if the leaver

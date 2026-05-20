@@ -250,6 +250,26 @@ function playWithoutTarget() {
   closePopover()
 }
 
+function playAsDevelopment(z: ZoneKind) {
+  const card = openPlay.value?.card
+  if (!card) return
+  game.playDevelopment(card.key, z)
+  closePopover()
+}
+
+// Whether the seated player can play a face-down development right
+// now: their CapitalActionWindow with priority, and they haven't yet
+// burnt their once-per-turn slot.
+const canPlayDevelopment = computed<boolean>(() => {
+  const e = props.engine
+  if (!e || e.developmentPlayedThisTurn) return false
+  if (mySeatKey.value !== e.currentPlayer) return false
+  const aw = e.actionWindow
+  if (!aw || aw.trigger !== 'CapitalActionWindow') return false
+  // Priority must currently rest with us.
+  return aw.awaiting.contents === mySeatKey.value
+})
+
 // For the attachment picker: all in-play units in the game (Branded by
 // Khorne can attach to the opponent), grouped by side.
 const attachmentTargets = computed(() => {
@@ -406,6 +426,25 @@ const popoverStyle = computed<Record<string, string>>(() => {
             <div class="play-popover-actions">
               <button class="play-popover-btn primary" type="button" @click="playWithoutTarget">
                 {{ confirmLabel(openPlay.card.kind) }}
+              </button>
+            </div>
+          </template>
+
+          <!-- "Play as development" affordance: only the active player
+               during their Capital window, and only once per turn. Any
+               card kind may be turned face-down. Shown after the normal
+               play options as a secondary action. -->
+          <template v-if="!openPlay.issue && canPlayDevelopment">
+            <p class="play-popover-hint">{{ t('game.play.action.development_hint') }}</p>
+            <div class="play-popover-actions">
+              <button
+                v-for="z in (['KingdomZone', 'QuestZone', 'BattlefieldZone'] as ZoneKind[])"
+                :key="`dev-${z}`"
+                class="play-popover-btn"
+                type="button"
+                @click="playAsDevelopment(z)"
+              >
+                {{ t('game.play.action.development_to', { zone: zoneLabel(z) }) }}
               </button>
             </div>
           </template>

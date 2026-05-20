@@ -21,6 +21,7 @@ import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
 import Control.Concurrent.STM
+import Data.IORef
 import Queue
 import System.Random.Shuffle
 
@@ -49,17 +50,31 @@ data Env = Env
     -- ^ 'Nothing' for one-shot 'applyMessage' calls (tests, debug).
     -- 'Just' once a 'GameWorker' is attached; receive bodies that
     -- call 'askPrompt' will then actually publish + block.
+  , scriptedAnswers :: Maybe (IORef [PromptResult])
+    -- ^ Test-only: a queue of canned 'PromptResult' answers consumed
+    -- in order by 'askPrompt' instead of going through the worker
+    -- mailbox or the 'autoResolve' fallback. When 'Nothing' or the
+    -- list is empty the normal path applies.
   }
 
 newEnv :: Game -> IO Env
 newEnv g = do
   q <- newQueue
-  pure $ Env q g Nothing
+  pure $ Env q g Nothing Nothing
 
 newEnvWithCtx :: Game -> EngineCtx -> IO Env
 newEnvWithCtx g c = do
   q <- newQueue
-  pure $ Env q g (Just c)
+  pure $ Env q g (Just c) Nothing
+
+-- | Build an 'Env' that satisfies 'askPrompt' from a fixed list of
+-- canned answers. Used by tests to drive the prompt-based combat flow
+-- deterministically without spinning up a worker.
+newEnvWithAnswers :: Game -> [PromptResult] -> IO Env
+newEnvWithAnswers g answers = do
+  q <- newQueue
+  ref <- newIORef answers
+  pure $ Env q g Nothing (Just ref)
 
 newtype GameT a = GameT (StateT Env IO a)
   deriving newtype (Functor, Applicative, Monad, MonadIO, MonadRandom, MonadState Env)
@@ -82,22 +97,33 @@ instance HasPromptIO m => HasPromptIO (StateT s m) where
 instance HasPromptIO GameT where
   askPrompt p = do
     env <- get
-    case env.ctx of
-      Nothing ->
-        -- Test / debug path: no worker is wired, so just decline.
-        -- Receive bodies see PickNone / PickBool False (depending on
-        -- prompt kind) and proceed as if the player skipped.
-        pure (autoResolve p)
-      Just c -> do
-        -- Stash the prompt on the in-memory state, sync to the
-        -- published TVar (so clients see it), then STM-retry-block
-        -- waiting for an answer in the mailbox.
-        modify \g -> g {game = g.game {pendingPrompt = Just p}}
-        publishCurrent c
-        answer <- liftIO (waitForPromptAnswer c.mailbox)
-        modify \g -> g {game = g.game {pendingPrompt = Nothing}}
-        publishCurrent c
-        pure answer
+    case env.scriptedAnswers of
+      Just ref -> do
+        -- Test path: consume the next canned answer; if exhausted,
+        -- fall back to the same auto-decline the no-context path
+        -- uses so older tests keep working.
+        liftIO (atomicModifyIORef' ref popAnswer) >>= \case
+          Just a -> pure a
+          Nothing -> pure (autoResolve p)
+      Nothing -> case env.ctx of
+        Nothing ->
+          -- Test / debug path: no worker is wired, so just decline.
+          -- Receive bodies see PickNone / PickBool False (depending on
+          -- prompt kind) and proceed as if the player skipped.
+          pure (autoResolve p)
+        Just c -> do
+          -- Stash the prompt on the in-memory state, sync to the
+          -- published TVar (so clients see it), then STM-retry-block
+          -- waiting for an answer in the mailbox.
+          modify \g -> g {game = g.game {pendingPrompt = Just p}}
+          publishCurrent c
+          answer <- liftIO (waitForPromptAnswer c.mailbox)
+          modify \g -> g {game = g.game {pendingPrompt = Nothing}}
+          publishCurrent c
+          pure answer
+    where
+      popAnswer [] = ([], Nothing)
+      popAnswer (a : rest) = (rest, Just a)
 
 -- | Default answer when no mailbox is attached. Most prompts in the
 -- core set treat skip / decline as a no-op for the source card, which
@@ -464,30 +490,28 @@ instance Run Game where
           , unitsRedirectedThisTurn = mempty
           , lastResolvedTactic = Nothing
           , pendingActionCancel = mempty
+          , developmentPlayedThisTurn = False
           }
       t <- gets (.turn)
       logIt LogTurn
         "log.turn.begins"
         [("turn", turnText t), ("player", playerParam k)]
       -- Phase 0 (FAQ 2.2): all "at the beginning of the turn" triggered
-      -- effects fire on BeginTurn itself via card receive hooks, then
-      -- this action window lets either player respond before the
-      -- Kingdom phase begins.
+      -- effects fire on BeginTurn itself via card receive hooks; the
+      -- action window then lets either player respond before the
+      -- Kingdom phase begins. The Kingdom phase is only kicked off
+      -- when this window CLOSES — see 'CloseActionWindow'. Queueing
+      -- BeginPhase here directly would interleave kingdom upkeep with
+      -- the still-open begin-of-turn window.
       send $ OpenActionWindow BeginningOfTurnActionWindow
-      send $ BeginPhase KingdomPhase
     EndTurn k -> do
-      -- Phase 5 (FAQ 2.2): action window first, then "at end of turn"
-      -- triggered effects fire, then EndOfTurn modifiers expire.
-      send $ OpenActionWindow EndOfTurnActionWindow
-      -- Fire scheduled end-of-turn effects after the window closes.
-      pending <- gets (.pendingEndOfTurn)
-      modify \g -> g {pendingEndOfTurn = []}
-      traverse_ firePendingEffect pending
-      -- Drop EndOfTurn modifiers.
-      send $ ClearScopedModifiers EndOfTurn
-      modify \g -> g {phase = Nothing}
+      -- Phase 5: open the end-of-turn window; only AFTER it closes do
+      -- the queued end-of-turn effects fire, modifiers expire, and
+      -- the turn flips. Handled in 'CloseActionWindow' so the
+      -- ordering matches the rulebook (window → effects →
+      -- modifiers-expire → next turn).
       logIt LogTurn "log.turn.ends" [("player", playerParam k)]
-      send $ BeginTurn k.next
+      send $ OpenActionWindow EndOfTurnActionWindow
     BeginPhase phase -> do
       g <- get
       modify \gx ->
@@ -577,7 +601,9 @@ instance Run Game where
               [] -> Nothing
           }
       logIt LogSystem "log.window.close" []
-      -- Combat sub-step windows advance to the next sub-step; the
+      -- Combat sub-step windows advance to the next sub-step;
+      -- begin-of-turn opens the Kingdom phase, end-of-turn drains
+      -- pending effects and flips the turn; otherwise the
       -- top-of-stack phase window ends its phase.
       case trigger of
         Just AfterDeclareCombatTarget -> send AdvanceCombatToAttackers
@@ -585,6 +611,21 @@ instance Run Game where
         Just AfterDeclareDefenders -> send AdvanceCombatToAssign
         Just AfterAssignCombatDamage -> send AdvanceCombatToApply
         Just AfterApplyCombatDamage -> send EndCombat
+        Just BeginningOfTurnActionWindow -> send (BeginPhase KingdomPhase)
+        Just EndOfTurnActionWindow -> do
+          -- After the end-of-turn window resolves: fire scheduled
+          -- "at end of turn" effects, expire EndOfTurn-scoped
+          -- modifiers, clear the phase, and hand off to the next
+          -- player. Order matters: per the rulebook the window
+          -- comes first, then the triggers, then the modifier
+          -- cleanup.
+          pending <- gets (.pendingEndOfTurn)
+          modify \gx -> gx {pendingEndOfTurn = []}
+          traverse_ firePendingEffect pending
+          send $ ClearScopedModifiers EndOfTurn
+          current <- gets (.currentPlayer)
+          modify \gx -> gx {phase = Nothing}
+          send $ BeginTurn current.next
         _ -> case g.phase of
           Just p -> send $ EndPhase p
           Nothing -> pure ()
@@ -893,9 +934,33 @@ instance Run Game where
         setCorrupted True "log.unit.corrupted" ukey
     CleanseUnit ukey -> setCorrupted False "log.unit.cleansed" ukey
     RestoreOneCorruptCard pk -> do
+      -- Kingdom phase, step 2: the active player MAY restore one of
+      -- their corrupt cards. Prompt them to pick (or skip) instead
+      -- of auto-restoring the first one we find.
       g <- get
-      whenJust (find (\u -> u.controller == pk && u.corrupted) g.units) \u ->
-        send $ CleanseUnit u.key
+      let corrupt =
+            [ u.key
+            | u <- g.units
+            , u.controller == pk
+            , u.corrupted
+            ]
+      case corrupt of
+        [] -> pure ()
+        candidates -> do
+          ans <- askPrompt Prompt
+            { player = pk
+            , kind = ChooseUnits
+                { filterSpec = UnitsFromList candidates
+                , minPick = 0
+                , maxPick = 1
+                , description = "Restore one corrupt card (or skip)."
+                }
+            , callback = CallbackInlinePrompt
+            }
+          case ans of
+            PickUnits (chosen : _) | chosen `elem` candidates ->
+              send $ CleanseUnit chosen
+            _ -> pure ()
     PlayAttachment pk cardKey targetKey -> do
       mhost <- gets (findUnit targetKey)
       whenJust mhost \host ->
@@ -1020,6 +1085,10 @@ instance Run Game where
       case takeTacticFromHand cardKey player of
         Nothing -> pure ()
         Just (cardDef, playerWithoutCard)
+          | not (canPlayTactic pk g) ->
+              -- Tactics only fire when the player has priority in an
+              -- open action window.
+              pure ()
           | not (canPlayCard pk cardDef g) ->
               -- Limited already played this turn (tactics never trip
               -- the uniqueness check because they don't persist).
@@ -1279,6 +1348,33 @@ instance Run Game where
           -- Decking-out check: AddDevelopment can empty the deck too.
           when (null restDeck) $
             send $ Eliminate pk DeckedOut
+    PlayDevelopment pk cardKey zone -> do
+      g <- get
+      let player = lookupPlayer pk g
+          alreadyPlayed = g.developmentPlayedThisTurn
+      -- Gate: Capital phase + active player + own priority + not
+      -- already played a development this turn. Find the card in
+      -- hand (any kind is legal — the card goes face-down).
+      when (canPlayNonTactic pk g && not alreadyPlayed) $
+        case find (\c -> c.key == cardKey) player.hand of
+          Nothing -> pure ()
+          Just card -> do
+            let newHand = filter (\c -> c.key /= cardKey) player.hand
+                zoneL = getZone zone player
+                Developments d = zoneL.developments
+                zoneL' = (zoneL {developments = Developments (d + 1)}) :: Zone
+                existing = Map.findWithDefault [] zone player.developmentCards
+                player' =
+                  (setZone zone zoneL' player)
+                    { hand = newHand
+                    , developmentCards =
+                        Map.insert zone (card : existing) player.developmentCards
+                    }
+            modify \gx ->
+              (setPlayer pk player' gx) {developmentPlayedThisTurn = True}
+            logIt LogPlayerAction
+              "log.zone.development_played"
+              [("player", playerParam pk), ("zone", zoneParam zone)]
     DealDamageToEachEnemyUnitInZone pk zone raw -> do
       let amount = max 0 raw
       when (amount > 0) $ do
@@ -1385,24 +1481,14 @@ instance Run Game where
             "log.combat.aborted"
             [("attacker", playerParam attacker)]
         else do
-          -- Auto-pick defenders: every enemy unit currently in the
-          -- corresponding zone. Real combat would prompt the defender.
-          let autoDefenders =
-                [ u.key
-                | u <- g.units
-                , u.controller == defender
-                , u.zone == zone
-                , not u.corrupted
-                , not (hasModifier g.modifiers u.key CannotDefend)
-                ]
-              -- Rune-of-Fortitude family: each support whose
-              -- 'runeOfFortitudeTax' slice is set, sitting in the
-              -- defender's same zone, imposes the 1-per-attacker tax.
-              -- All-or-nothing approximation: if the attacker can
-              -- afford the full tax, pay it and the penalty stays at
-              -- 0; otherwise leave resources intact and impose -1
-              -- per attacker for this combat.
-              runeHere =
+          -- Rune-of-Fortitude family: each support whose
+          -- 'runeOfFortitudeTax' slice is set, sitting in the
+          -- defender's same zone, imposes the 1-per-attacker tax.
+          -- All-or-nothing approximation: if the attacker can
+          -- afford the full tax, pay it and the penalty stays at
+          -- 0; otherwise leave resources intact and impose -1
+          -- per attacker for this combat.
+          let runeHere =
                 any
                   ( \s ->
                       s.controller == defender
@@ -1423,13 +1509,17 @@ instance Run Game where
                 if paidRune
                   then attackerPlayer {resources = Resources (attackerRes - runeCost)}
                   else attackerPlayer
+              -- Defenders are filled in during step 3
+              -- (AdvanceCombatToDefenders) after the defender resolves
+              -- the choose-defenders prompt; leave the list empty here.
               combatState =
                 CombatState
                   { attackingPlayer = attacker
                   , defendingPlayer = defender
                   , targetZone = zone
+                  , targetLegend = Nothing
                   , attackers = eligible
-                  , defenders = autoDefenders
+                  , defenders = []
                   , attackerPowerPenalty = penalty
                   , pendingAssignments = []
                   }
@@ -1452,26 +1542,78 @@ instance Run Game where
             logIt LogSystem
               "log.combat.rune_penalty"
               [("amount", tshow penalty)]
-          -- Step 1 done (target + attackers committed). Open the
-          -- AfterDeclareCombatTarget window on top of the current
-          -- BattlefieldActionWindow; auto-pass for now since the
-          -- protocol doesn't surface combat decision points yet.
+          -- Defending-legend sub-decision: if the opponent controls a
+          -- legend, the attacker may target the legend through this
+          -- zone instead of the capital section. Overflow damage then
+          -- lands on the legend and is capped at its HP (no zone
+          -- spillover, no defender spillover).
+          gAfter <- get
+          case legendOf defender gAfter of
+            Just leg -> do
+              ans <- askPrompt Prompt
+                { player = attacker
+                , kind = ChooseYesNo
+                    { description =
+                        "Target opponent's legend ("
+                          <> T.pack leg.cardDef.title
+                          <> ") through the "
+                          <> zoneParam zone
+                          <> " instead of the capital section?"
+                    }
+                , callback = CallbackInlinePrompt
+                }
+              case ans of
+                PickBool True -> do
+                  modify \gx -> case gx.combat of
+                    Just cs ->
+                      gx {combat = Just (cs {targetLegend = Just leg.key} :: CombatState)}
+                    Nothing -> gx
+                  logIt LogSystem
+                    "log.combat.targets_legend"
+                    [("attacker", playerParam attacker)]
+                _ -> pure ()
+            Nothing -> pure ()
           openAutoCombatWindow AfterDeclareCombatTarget
     AdvanceCombatToAttackers ->
       openAutoCombatWindow AfterDeclareAttackers
     AdvanceCombatToDefenders -> do
+      -- Step 3: defender chooses which of their units defend the
+      -- attacked zone. Prompt the defending player to pick a subset of
+      -- the legal candidates (own units in the target zone that aren't
+      -- corrupt or blocked by CannotDefend).
       g <- get
       case g.combat of
         Nothing -> pure ()
-        Just cs -> send $ DeclareDefenders cs.defenders
+        Just cs -> do
+          let candidates = eligibleDefenderCandidates g cs.defendingPlayer cs.targetZone
+          defs <-
+            if null candidates
+              then pure []
+              else do
+                ans <- askPrompt Prompt
+                  { player = cs.defendingPlayer
+                  , kind = ChooseUnits
+                      { filterSpec = UnitsFromList candidates
+                      , minPick = 0
+                      , maxPick = length candidates
+                      , description = "Choose defenders."
+                      }
+                  , callback = CallbackInlinePrompt
+                  }
+                let allowed = filter (`elem` candidates)
+                pure $ case ans of
+                  PickUnits picks -> allowed picks
+                  _ -> []
+          send $ DeclareDefenders defs
     DeclareDefenders defs -> do
       modify \gx -> case gx.combat of
         Just cs -> gx {combat = Just (cs {defenders = defs} :: CombatState)}
         Nothing -> gx
       -- Fire Counterstrike: each defending unit with Counterstrike N
       -- immediately deals N uncancellable damage to one attacker of
-      -- the defender's choice (auto-pick the first attacker still in
-      -- play). Triggers in step 3, before regular damage assigns.
+      -- the defender's choice. Triggers in step 3, before regular
+      -- damage assigns. With multiple attackers still in play we
+      -- prompt the defender to pick the target.
       g <- get
       case g.combat of
         Just cs -> do
@@ -1480,28 +1622,66 @@ instance Run Game where
                 | k <- defs
                 , Just u <- [findUnit k g]
                 ]
-              attackerKeys = cs.attackers
           traverse_
-            ( \def ->
+            ( \def -> do
                 let cs_total = sum [n | Counterstrike n <- def.cardDef.keywords]
-                 in when (cs_total > 0) $
-                      case attackerKeys of
-                        (aKey : _) ->
-                          send $ DealDamageToUnitUncancellable aKey cs_total
-                        [] -> pure ()
+                when (cs_total > 0) $ do
+                  g' <- get
+                  let alive = filter (\k -> isJust (findUnit k g')) cs.attackers
+                  case alive of
+                    [] -> pure ()
+                    [single] -> send $ DealDamageToUnitUncancellable single cs_total
+                    many -> do
+                      ans <- askPrompt Prompt
+                        { player = cs.defendingPlayer
+                        , kind = ChooseUnits
+                            { filterSpec = UnitsFromList many
+                            , minPick = 1
+                            , maxPick = 1
+                            , description =
+                                "Counterstrike: choose an attacker to take "
+                                  <> tshow cs_total
+                                  <> " damage."
+                            }
+                        , callback = CallbackInlinePrompt
+                        }
+                      case ans of
+                        PickUnits (target : _)
+                          | target `elem` many ->
+                              send $ DealDamageToUnitUncancellable target cs_total
+                        _ ->
+                          -- Player declined / illegal pick: default to
+                          -- the first surviving attacker so the
+                          -- Counterstrike still resolves.
+                          send $ DealDamageToUnitUncancellable (head many) cs_total
             )
             defenderUnits
         Nothing -> pure ()
       openAutoCombatWindow AfterDeclareDefenders
     AdvanceCombatToAssign -> do
-      -- Step 4: assignment. Compute per-defender allocations and
-      -- queue DealDamageToUnit messages. The damage-cancel window
-      -- (Defenders of the Faith, Master Rune of Valaya) opens
-      -- afterwards.
+      -- Step 4: assignment. Prompt each side for the order in which
+      -- their damage gets allocated, then queue the assignments. The
+      -- damage-cancel window (Defenders of the Faith, Master Rune of
+      -- Valaya) opens afterwards.
       g <- get
       case g.combat of
         Nothing -> pure ()
-        Just cs -> assignCombatDamage g cs
+        Just cs -> do
+          defenderAssignmentOrder <-
+            promptAssignmentOrder
+              cs.attackingPlayer
+              "Order defenders to receive your damage (first to last)."
+              cs.defenders
+          attackerAssignmentOrder <-
+            promptAssignmentOrder
+              cs.defendingPlayer
+              "Order attackers to receive defender damage (first to last)."
+              cs.attackers
+          g' <- get
+          case g'.combat of
+            Just cs' ->
+              assignCombatDamage g' cs' defenderAssignmentOrder attackerAssignmentOrder
+            Nothing -> pure ()
       openAutoCombatWindow AfterAssignCombatDamage
     AdvanceCombatToApply -> do
       -- Step 5: commit the staged damage and open the post-apply
@@ -1513,12 +1693,13 @@ instance Run Game where
       -- Legacy entry-point: the staged 5-step flow does this work
       -- via AdvanceCombatToAssign + CloseActionWindow advances.
       -- Calling ResolveCombat directly runs assign + commit + ends
-      -- without opening the response windows.
+      -- without opening the response windows. The assignment order
+      -- follows whatever was stored on the combat state.
       g <- get
       case g.combat of
         Nothing -> pure ()
         Just cs -> do
-          assignCombatDamage g cs
+          assignCombatDamage g cs cs.defenders cs.attackers
           commitPendingCombatDamage
           send EndCombat
     EndCombat -> do
@@ -1530,6 +1711,21 @@ instance Run Game where
         Nothing -> pure ()
       modify \gx -> gx {combat = Nothing}
       logIt LogSystem "log.combat.ends" []
+    FireScoutDiscards attacker defender attackerKeys defenderKeys -> do
+      -- Post-damage: count surviving Scouts on each side and queue a
+      -- single 'DiscardRandomFromHand' against the opposing player
+      -- for each. Reading 'g.units' at receive-time (rather than at
+      -- enqueue-time in 'commitPendingCombatDamage') is what makes
+      -- "surviving" correct — dead Scouts have already been removed
+      -- from 'g.units' by the time this fires.
+      g <- get
+      let scoutOf u = Scout `elem` u.cardDef.keywords
+          attackerScouts = filter scoutOf $ mapMaybe (`findUnit` g) attackerKeys
+          defenderScouts = filter scoutOf $ mapMaybe (`findUnit` g) defenderKeys
+      replicateM_ (length attackerScouts) $
+        send $ DiscardRandomFromHand defender
+      replicateM_ (length defenderScouts) $
+        send $ DiscardRandomFromHand attacker
     PutUnitIntoPlay pk cardKey zone -> do
       -- Skip cost; same wiring as 'PlayUnit' but no resource debit and
       -- no Variable-cost gate.
@@ -1971,6 +2167,7 @@ newGame deck1 deck2 opts = do
       , unitsRedirectedThisTurn = mempty
       , lastResolvedTactic = Nothing
       , pendingActionCancel = mempty
+      , developmentPlayedThisTurn = False
       }
 
 -- | Host-chosen options that shape engine behavior without altering
@@ -2103,18 +2300,42 @@ withPaidPlay
   -> StateT Game GameT ()
 withPaidPlay pk extract costFn install = do
   g <- get
-  let player = lookupPlayer pk g
-  whenJust (extract player) \(cardDef, playerWithoutCard) ->
-    when (canPlayCard pk cardDef g) case cardDef.cost of
-      Variable -> pure ()
-      Fixed _ -> do
-        let n = costFn g cardDef
-        when (player.resources >= Resources n) do
-          markPlayedLimited cardDef
-          let paidPlayer = playerWithoutCard
-                { resources = player.resources - Resources n
-                }
-          install cardDef paidPlayer n
+  -- Hard rule: unit / support / quest / attachment / legend plays
+  -- are gated to the active player's CapitalActionWindow. Without
+  -- this check the engine would accept the message any time, even
+  -- though the frontend's playability hint correctly hides it.
+  when (canPlayNonTactic pk g) do
+    let player = lookupPlayer pk g
+    whenJust (extract player) \(cardDef, playerWithoutCard) ->
+      when (canPlayCard pk cardDef g) case cardDef.cost of
+        Variable -> pure ()
+        Fixed _ -> do
+          let n = costFn g cardDef
+          when (player.resources >= Resources n) do
+            markPlayedLimited cardDef
+            let paidPlayer = playerWithoutCard
+                  { resources = player.resources - Resources n
+                  }
+            install cardDef paidPlayer n
+
+-- | The active player may play units / supports / quests / legends
+-- only during their own 'CapitalActionWindow', and only while they
+-- hold priority. Tactics use 'canPlayTactic' below.
+canPlayNonTactic :: PlayerKey -> Game -> Bool
+canPlayNonTactic pk g
+  | g.currentPlayer /= pk = False
+  | otherwise = case g.actionWindow of
+      Nothing -> False
+      Just aw ->
+        priorityHolder aw.awaiting == pk
+          && aw.trigger == CapitalActionWindow
+
+-- | Tactics are playable in any action window where the player holds
+-- priority — no phase restriction.
+canPlayTactic :: PlayerKey -> Game -> Bool
+canPlayTactic pk g = case g.actionWindow of
+  Nothing -> False
+  Just aw -> priorityHolder aw.awaiting == pk
 
 -- | A 'Pile' is a getter/setter pair for one of a 'Player'\'s card
 -- collections. Lets 'takeFromPile' work uniformly across hand, deck
@@ -2208,6 +2429,62 @@ eligibleAttacker g defender zone ukey = case findUnit ukey g of
   Just u ->
     not (hasModifier g.modifiers ukey CannotAttack)
       && u.cardDef.extras.canAttackZone g defender zone u
+
+-- | Units the named player may legally declare as defenders of the
+-- given zone right now. Excludes corrupt units and anything carrying
+-- a 'CannotDefend' modifier.
+eligibleDefenderCandidates :: Game -> PlayerKey -> ZoneKind -> [UnitKey]
+eligibleDefenderCandidates g defender zone =
+  [ u.key
+  | u <- g.units
+  , u.controller == defender
+  , u.zone == zone
+  , not u.corrupted
+  , not (hasModifier g.modifiers u.key CannotDefend)
+  ]
+
+-- | Prompt the named player for a damage-assignment order over the
+-- supplied keys. Returns the chosen permutation, falling back to the
+-- input order on a degenerate / declined / illegal answer. Skips the
+-- prompt when there's nothing to choose (0 or 1 recipients).
+promptAssignmentOrder
+  :: PlayerKey
+  -> Text
+  -> [UnitKey]
+  -> StateT Game GameT [UnitKey]
+promptAssignmentOrder pk desc = \case
+  [] -> pure []
+  [single] -> pure [single]
+  many -> do
+    let n = length many
+    ans <- askPrompt Prompt
+      { player = pk
+      , kind = ChooseUnits
+          { filterSpec = UnitsFromList many
+          , minPick = n
+          , maxPick = n
+          , description = desc
+          }
+      , callback = CallbackInlinePrompt
+      }
+    pure $ case ans of
+      PickUnits picks
+        | length picks == n && all (`elem` many) picks && allUnique picks ->
+            picks
+      _ -> many
+  where
+    allUnique xs = length xs == length (nubKeys xs)
+    nubKeys = foldr (\x acc -> if x `elem` acc then acc else x : acc) []
+
+-- | Reorder 'reference' keys by a player-supplied order, dropping any
+-- key in the order that doesn't appear in the reference list (defensive
+-- against stale client input) and appending any reference keys the
+-- player didn't include (so the allocator still sees every recipient).
+orderedRecipients :: Game -> [UnitKey] -> [UnitKey] -> [UnitDetails]
+orderedRecipients g order reference =
+  let refSet = filter (`elem` reference) order
+      tail' = filter (`notElem` refSet) reference
+   in mapMaybe (`findUnit` g) (refSet <> tail')
 
 -- | True iff the named unit currently carries the given atomic
 -- modifier in 'Game.modifiers'.
@@ -2505,33 +2782,76 @@ zoneAuraBonus g pk zone =
 -- of the Faith, Master Rune of Valaya) can mutate it during the
 -- AfterAssignCombatDamage window. 'commitPendingCombatDamage' is the
 -- counterpart that turns each entry into a real DealDamage message.
-assignCombatDamage :: Game -> CombatState -> StateT Game GameT ()
-assignCombatDamage g cs = do
+--
+-- The two ordering arguments come from per-side player prompts:
+--   * @defenderOrder@ — attacker's chosen order of defenders
+--   * @attackerOrder@ — defender's chosen order of attackers
+-- An empty / partial order falls back to the side's own combat list.
+assignCombatDamage
+  :: Game
+  -> CombatState
+  -> [UnitKey]
+  -- ^ defender-receiving order (attacker-chosen)
+  -> [UnitKey]
+  -- ^ attacker-receiving order (defender-chosen)
+  -> StateT Game GameT ()
+assignCombatDamage g cs defenderOrder attackerOrder = do
   let attackerUnits = mapMaybe (`findUnit` g) cs.attackers
       defenderUnits = mapMaybe (`findUnit` g) cs.defenders
+      defenderRecipients =
+        orderedRecipients g defenderOrder cs.defenders
+      attackerRecipients =
+        orderedRecipients g attackerOrder cs.attackers
+      defendingLegend = case cs.targetLegend of
+        Just _ -> legendOf cs.defendingPlayer g
+        Nothing -> Nothing
+      defendingLegendPow = maybe 0 (.cardDef.power) defendingLegend
       (attackerCanc, attackerUncanc) =
         splitDamage g cs.attackingPlayer attackerUnits
-      (defenderCanc, defenderUncanc) =
+      (defenderUnitCanc, defenderUncanc) =
         splitDamage g cs.defendingPlayer defenderUnits
+      -- When attacking the legend, the legend itself contributes its
+      -- power to the defender's damage budget (the rulebook is
+      -- explicit about this). Treat it as cancellable defender
+      -- damage; no Toughness applies to it (legends don't have
+      -- Toughness).
+      defenderCanc = defenderUnitCanc + defendingLegendPow
       defenderAssignments =
-        allocateDamage g attackerCanc attackerUncanc defenderUnits
+        allocateDamage g attackerCanc attackerUncanc defenderRecipients
       attackerAssignments =
-        allocateDamage g defenderCanc defenderUncanc attackerUnits
+        allocateDamage g defenderCanc defenderUncanc attackerRecipients
       (defenderUnitAssignments, defenderSpillover) = defenderAssignments
       (attackerUnitAssignments, _attackerSpillover) = attackerAssignments
-      zoneEntry =
-        let leftover = defenderSpillover
-         in if leftover > 0
-              then
-                [ PendingDamage
-                    { target = PDZone cs.defendingPlayer cs.targetZone
-                    , cancellable = leftover
-                    , uncancellable = 0
-                    }
-                ]
-              else []
+      -- Spillover routing: legend-targeted attacks land overflow on
+      -- the legend (capped at remaining HP, any excess discarded);
+      -- zone-targeted attacks spill into the capital section.
+      spilloverEntry = case (cs.targetLegend, defendingLegend) of
+        (Just _, Just leg) ->
+          let Damage existing = leg.damage
+              hp = legendPrintedHPFromDef leg.cardDef
+              slack = max 0 (hp - existing)
+              landing = min defenderSpillover slack
+           in if landing > 0
+                then
+                  [ PendingDamage
+                      { target = PDLegend leg.key
+                      , cancellable = landing
+                      , uncancellable = 0
+                      }
+                  ]
+                else []
+        _ ->
+          if defenderSpillover > 0
+            then
+              [ PendingDamage
+                  { target = PDZone cs.defendingPlayer cs.targetZone
+                  , cancellable = defenderSpillover
+                  , uncancellable = 0
+                  }
+              ]
+            else []
       pendings =
-        zoneEntry
+        spilloverEntry
           <> map toPending defenderUnitAssignments
           <> map toPending attackerUnitAssignments
       toPending (ukey, canc, uncanc) =
@@ -2557,13 +2877,15 @@ commitPendingCombatDamage = do
       modify \gx -> case gx.combat of
         Just c -> gx {combat = Just (c {pendingAssignments = []} :: CombatState)}
         Nothing -> gx
-      -- Scout: queue post-damage discards now (they fire after the
-      -- damage messages flush via the FIFO queue).
-      let scoutOf u = Scout `elem` u.cardDef.keywords
-          attackerScouts = filter scoutOf $ mapMaybe (`findUnit` g) cs.attackers
-          defenderScouts = filter scoutOf $ mapMaybe (`findUnit` g) cs.defenders
-      replicateM_ (length attackerScouts) $ send $ DiscardRandomFromHand cs.defendingPlayer
-      replicateM_ (length defenderScouts) $ send $ DiscardRandomFromHand cs.attackingPlayer
+      -- Scout fires "after combat damage" — but only for SURVIVING
+      -- Scouts. Queue a deferred sweep so the survivor check runs
+      -- against post-apply state rather than the pre-damage list.
+      send $
+        FireScoutDiscards
+          cs.attackingPlayer
+          cs.defendingPlayer
+          cs.attackers
+          cs.defenders
   where
     commitOne pd = case pd.target of
       PDUnit k -> do
@@ -2571,6 +2893,8 @@ commitPendingCombatDamage = do
         when (pd.uncancellable > 0) $ send $ DealDamageToUnitUncancellable k pd.uncancellable
       PDZone owner z ->
         send $ DealDamageToZone owner z (pd.cancellable + pd.uncancellable)
+      PDLegend lkey ->
+        send $ DealDamageToLegend lkey (pd.cancellable + pd.uncancellable)
 
 -- | Allocate a (cancellable, uncancellable) damage budget across a
 -- list of recipients (in order), respecting Toughness on each one.
@@ -2604,21 +2928,21 @@ allocateDamage g = go []
             (uAvail - uncancellableUsed)
             rest
 
--- | Open a combat sub-step window and immediately enqueue the two
--- passes that close it. Real client interaction (Defenders of the
--- Faith etc.) will eventually replace the auto-pass with a real
--- prompt window; for now we maintain rules-correct structure
--- without blocking the engine.
+-- | Open a combat sub-step window. The 'OpenActionWindow' handler
+-- runs 'maybeAutoPassPriority' for the active player; same goes for
+-- the inactive player after the first 'PassPriority' fires. So a
+-- window where neither player has anything playable closes itself
+-- with no explicit input; one where either player can react (e.g.
+-- Defenders of the Faith in hand during 'AfterAssignCombatDamage')
+-- pauses for that player.
 openAutoCombatWindow :: ActionWindowTrigger -> StateT Game GameT ()
-openAutoCombatWindow trigger = do
-  send $ OpenActionWindow trigger
-  active <- gets (.currentPlayer)
-  send $ PassPriority active
-  send $ PassPriority active.next
+openAutoCombatWindow trigger = send (OpenActionWindow trigger)
 
--- | The six phase-level action windows where 'autoSkipActionWindows'
--- applies. Combat sub-step windows (After*) are always auto-passed by
--- 'openAutoCombatWindow' and don't go through this path.
+-- | Phase-level action windows opt into auto-pass via the host's
+-- 'autoSkipActionWindows' setting. Combat sub-step windows have their
+-- own always-on auto-pass path via 'isCombatSubStepWindow', so they
+-- can stay listed here for completeness without depending on the
+-- host's choice.
 isAutoSkippableTrigger :: ActionWindowTrigger -> Bool
 isAutoSkippableTrigger = \case
   BeginningOfTurnActionWindow -> True
@@ -2626,12 +2950,26 @@ isAutoSkippableTrigger = \case
   QuestActionWindow -> True
   CapitalActionWindow -> True
   BattlefieldActionWindow -> True
-  AfterDeclareCombatTarget -> False
-  AfterDeclareAttackers -> False
-  AfterDeclareDefenders -> False
-  AfterAssignCombatDamage -> False
-  AfterApplyCombatDamage -> False
+  AfterDeclareCombatTarget -> True
+  AfterDeclareAttackers -> True
+  AfterDeclareDefenders -> True
+  AfterAssignCombatDamage -> True
+  AfterApplyCombatDamage -> True
   EndOfTurnActionWindow -> True
+
+-- | Combat sub-step windows where the engine auto-passes a player
+-- with no available move regardless of the host's
+-- 'autoSkipActionWindows' setting. Without this, combat would require
+-- 10 manual passes per phase in non-auto-skip games even when neither
+-- player has a relevant tactic / action.
+isCombatSubStepWindow :: ActionWindowTrigger -> Bool
+isCombatSubStepWindow = \case
+  AfterDeclareCombatTarget -> True
+  AfterDeclareAttackers -> True
+  AfterDeclareDefenders -> True
+  AfterAssignCombatDamage -> True
+  AfterApplyCombatDamage -> True
+  _ -> False
 
 -- | A player has "something to do" in an action window if they hold a
 -- Tactic card in hand or control an in-play card that prints any
@@ -2658,20 +2996,20 @@ playerHasActionMove pk g =
       => [a] -> Bool
     hasAction = any \x -> x.controller == pk && not (null x.cardDef.actions)
 
--- | If the host enabled 'autoSkipActionWindows', the window is one of
--- the four phase action windows, and the priority holder has no
--- playable move, enqueue a 'PassPriority' for them. Combat sub-step
--- windows skip this path so they don't double-pass on top of the
--- explicit passes 'openAutoCombatWindow' already enqueues.
+-- | Enqueue a 'PassPriority' for the named player when they have
+-- nothing playable in this window. Phase-level windows opt in via
+-- the host's 'autoSkipActionWindows' setting; combat sub-step
+-- windows ('isCombatSubStepWindow') always auto-pass when the player
+-- has no available move, so the engine doesn't make either side
+-- click through five empty windows per attack.
 maybeAutoPassPriority
   :: ActionWindowTrigger -> PlayerKey -> StateT Game GameT ()
 maybeAutoPassPriority trigger pk = do
   g <- get
+  let hostOptedIn = g.autoSkipActionWindows && isAutoSkippableTrigger trigger
+      combatAuto = isCombatSubStepWindow trigger
   when
-    ( g.autoSkipActionWindows
-        && isAutoSkippableTrigger trigger
-        && not (playerHasActionMove pk g)
-    )
+    ((hostOptedIn || combatAuto) && not (playerHasActionMove pk g))
     (send (PassPriority pk))
 
 -- | Translate a resolved prompt into engine messages. Today all
@@ -3168,6 +3506,15 @@ applyMessages g msgs = do
 -- | Convenience: apply a single message.
 applyMessage :: Game -> Message -> IO Game
 applyMessage g m = applyMessages g [m]
+
+-- | Test variant: apply messages while feeding 'askPrompt' a fixed
+-- script of answers (in order). Once the script is exhausted the
+-- engine falls back to 'autoResolve' (same as the no-context path),
+-- so a too-short script behaves like declining the remaining prompts.
+applyMessagesWithAnswers :: Game -> [PromptResult] -> [Message] -> IO Game
+applyMessagesWithAnswers g answers msgs = do
+  env <- newEnvWithAnswers g answers
+  runGame (traverse_ send msgs >> gameMain) env
 
 -- | Deal hands and pick a first player. The returned game is paused in
 -- 'GameSetup' — to actually begin turn 1, follow with

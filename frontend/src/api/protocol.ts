@@ -326,7 +326,43 @@ export interface EngineGame {
   // The engine pauses while this is set. The seated player named in
   // `prompt.player` is expected to reply with GameResolvePrompt.
   pendingPrompt: EnginePrompt | null
+  // In-flight combat (null outside the Battlefield phase or between
+  // attacks). The frontend reads this so the player can see who's
+  // attacking what during the prompt-driven combat ladder.
+  combat: EngineCombatState | null
+  // True after the active player has played their once-per-turn
+  // development. Resets at BeginTurn. UI uses this to disable the
+  // "Play as development" affordance after the player has spent it.
+  developmentPlayedThisTurn: boolean
 }
+
+// Mirror of Invasion.Game.CombatState. Fields not surfaced by the UI
+// (pendingAssignments, attackerPowerPenalty) are still on the wire so
+// debug tooling can read them.
+export interface EngineCombatState {
+  attackingPlayer: PlayerKey
+  defendingPlayer: PlayerKey
+  targetZone: ZoneKind
+  // When set, the attacker is targeting the opposing legend through
+  // the named zone (rather than the capital section). Excess damage
+  // burns out instead of touching the zone.
+  targetLegend: number | null
+  attackers: number[]
+  defenders: number[]
+  attackerPowerPenalty: number
+  pendingAssignments: EnginePendingDamage[]
+}
+
+export interface EnginePendingDamage {
+  target: EnginePendingTarget
+  cancellable: number
+  uncancellable: number
+}
+
+export type EnginePendingTarget =
+  | { tag: 'PDUnit'; contents: number }
+  | { tag: 'PDZone'; contents: [PlayerKey, ZoneKind] }
+  | { tag: 'PDLegend'; contents: number }
 
 // Wire-side mirror of Invasion.Game.Prompt.
 export interface EnginePrompt {
@@ -468,6 +504,26 @@ export type GameIn =
       target: number | null
     }
   | { tag: 'GameResolvePrompt'; result: PromptResultWire }
+  | {
+      // Declare an attack against the opponent. Server accepts this
+      // only when the sender holds priority in the
+      // BattlefieldActionWindow during their own battlefield phase
+      // and no combat is already in flight. The engine then runs the
+      // 5-step combat ladder, prompting both players for the
+      // sub-step decisions (defenders, Counterstrike target,
+      // damage-assignment order) over the existing prompt channel.
+      tag: 'GameDeclareAttack'
+      attackZone: ZoneKind
+      attackerKeys: number[]
+    }
+  | {
+      // Active player's once-per-turn face-down development. Engine
+      // refuses outside CapitalActionWindow or after the player has
+      // already played one this turn.
+      tag: 'GamePlayDevelopment'
+      cardKey: number
+      developmentZone: ZoneKind
+    }
   | { tag: 'GameLeave' }
 
 export type GameOut =

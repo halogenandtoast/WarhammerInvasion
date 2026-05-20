@@ -295,6 +295,12 @@ data Message where
   AddDevelopment :: PlayerKey -> ZoneKind -> Message
     -- ^ Place a facedown development in the named zone. Bypasses the
     -- once-per-turn limit (used by Dwarf Masons, Wake the Mountain).
+  PlayDevelopment :: PlayerKey -> UnitKey -> ZoneKind -> Message
+    -- ^ The active player's once-per-turn development play. Takes the
+    -- named card from hand, places it facedown in the chosen zone,
+    -- and trips the per-turn development gate so a second
+    -- 'PlayDevelopment' this turn no-ops. Restricted to the player's
+    -- own CapitalActionWindow.
   -- Bulk / AoE damage
   DealDamageToEachEnemyUnitInZone :: PlayerKey -> ZoneKind -> Int -> Message
     -- ^ N damage to every enemy unit currently sitting in the named
@@ -357,6 +363,13 @@ data Message where
     -- ^ Legacy entry-point preserved for tests / debug. Equivalent
     -- to firing AdvanceCombatToAssign + AdvanceCombatToApply
     -- back-to-back, skipping the intermediate action windows.
+  FireScoutDiscards :: PlayerKey -> PlayerKey -> [UnitKey] -> [UnitKey] -> Message
+    -- ^ Post-damage Scout sweep, deferred so that 'surviving Scout'
+    -- is evaluated against the post-apply game state. Args:
+    -- @attacker@, @defender@, original attacker keys, original
+    -- defender keys. For each side, every key still in play whose
+    -- 'CardDef' carries 'Scout' forces one random discard from the
+    -- opposing player's hand.
   EndCombat :: Message
     -- ^ Combat ends; clear 'Game.combat'.
 

@@ -8,6 +8,8 @@ import { ApiError } from '../api/client'
 import type { ChatLine, LogEntry, PlayerKey, Race } from '../api/protocol'
 import PlayView from './PlayView.vue'
 import PromptPanel from '../components/PromptPanel.vue'
+import CombatDeclarationPanel from '../components/CombatDeclarationPanel.vue'
+import CombatStatusBanner from '../components/CombatStatusBanner.vue'
 import MaintenanceBanner from '../components/MaintenanceBanner.vue'
 import ChatInput from '../components/ChatInput.vue'
 import GameTopBar from '../components/GameTopBar.vue'
@@ -250,6 +252,17 @@ function pass() { game.passPriority() }
 
       <!-- Side rail: prompt panel (when present) + merged log/chat. -->
       <aside class="side-panel">
+        <CombatStatusBanner
+          v-if="engine && engine.combat && view"
+          :engine="engine"
+          :seat="mySeatKey"
+          :seats="view.seats"
+        />
+        <CombatDeclarationPanel
+          v-if="engine && !engine.pendingPrompt"
+          :engine="engine"
+          :seat="mySeatKey"
+        />
         <PromptPanel
           v-if="engine && engine.pendingPrompt"
           :engine="engine"

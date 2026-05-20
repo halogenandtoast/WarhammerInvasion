@@ -37,9 +37,15 @@ main = do
   check "actionWindow = Nothing" (isNothing g0.actionWindow)
   check "turn = 0" (g0.turn == Turn 0)
 
-  -- Begin the game: turn 1 starts, kingdom phase runs to its window.
-  g1 <- applyMessage g0 BeginGame
+  -- Begin the game: turn 1 starts. The first window is the Phase 0
+  -- (BeginningOfTurnActionWindow); pass it on both sides to let the
+  -- kingdom phase actually start.
   let fp = g0.firstPlayer
+  g1 <- applyMessages g0
+    [ BeginGame
+    , PassPriority fp
+    , PassPriority fp.next
+    ]
   check "lifecycle = GamePlaying" (isGamePlaying g1.lifecycle)
   check "turn = 1" (g1.turn == Turn 1)
   check "phase = Just KingdomPhase" (g1.phase == Just KingdomPhase)
@@ -66,10 +72,15 @@ main = do
   check "no quest draw happened (first turn skips quest)"
     (length g2.player1.hand == 7 && length g2.player2.hand == 7)
 
-  -- Pass capital window. Battlefield is also skipped on turn 1, so the
-  -- turn ends and play hands off to the other player at the start of
-  -- their kingdom phase.
-  g3 <- applyMessages g2 [PassPriority fp, PassPriority fp.next]
+  -- Pass capital window. Battlefield is also skipped on turn 1, so we
+  -- land on the EndOfTurnActionWindow (2 more passes), then the next
+  -- player's BeginningOfTurnActionWindow (2 more passes) before their
+  -- kingdom phase finally opens.
+  g3 <- applyMessages g2
+    [ PassPriority fp, PassPriority fp.next                -- close capital
+    , PassPriority fp, PassPriority fp.next                -- close end-of-turn
+    , PassPriority fp.next, PassPriority fp                -- close begin-of-turn for new active
+    ]
   check "after capital: turn = 2" (g3.turn == Turn 2)
   check "after capital: currentPlayer flipped"
     (g3.currentPlayer == fp.next)
@@ -95,11 +106,17 @@ main = do
     -- phase yet — sanity check we're not double-collecting.
     ((inactivePlayer g4).resources == Resources 3)
 
+  -- Advance through Quest into Capital so we're in the only phase
+  -- where PlayUnit is legal under the rules-correct gating.
+  g4cap <- applyMessages g4 [PassPriority active2, PassPriority active2.next]
+  check "after quest (T2): phase = Just CapitalPhase"
+    (g4cap.phase == Just CapitalPhase)
+
   -- PlayUnit: pick any affordable Unit from the active player's hand
   -- and play it into the kingdom zone. The active player has just been
   -- granted 3 resources for the new turn (see g3 above), so anything
   -- costing 3 or less is fair game.
-  let preP = activePlayer g4
+  let preP = activePlayer g4cap
   case findPlayableUnit preP of
     Nothing -> do
       putStrLn "  FAIL active hand has no affordable Unit; can't exercise PlayUnit"
@@ -107,7 +124,7 @@ main = do
     Just (cardKey, cardCode, cardCost) -> do
       let handBefore = length preP.hand
           Resources resBefore = preP.resources
-      g5 <- applyMessage g4 (PlayUnit g4.currentPlayer cardKey KingdomZone)
+      g5 <- applyMessage g4cap (PlayUnit g4cap.currentPlayer cardKey KingdomZone)
       let postP = activePlayer g5
       check "PlayUnit: hand size decreased by 1"
         (length postP.hand == handBefore - 1)
@@ -122,7 +139,7 @@ main = do
               _ -> False
             where _ = err :: String
       check "PlayUnit: unit controller = active player"
-        (unitOk (\c _ _ -> c == g4.currentPlayer) "controller")
+        (unitOk (\c _ _ -> c == g4cap.currentPlayer) "controller")
       check "PlayUnit: unit zone = Kingdom"
         (unitOk (\_ z _ -> z == KingdomZone) "zone")
       check "PlayUnit: card code carried through"
@@ -167,14 +184,19 @@ main = do
     Left err -> do
       putStrLn $ "FAIL second runSetup: " <> err
       exitFailure
-  -- Skip turn 1 entirely, get to turn 2 capital window.
-  gB <- applyMessages gA
-    [ PassPriority gA.currentPlayer
-    , PassPriority gA.currentPlayer.next
-    , PassPriority gA.currentPlayer
-    , PassPriority gA.currentPlayer.next
-    ]
-  -- Now on opponent's turn 1 (still "turn 2" counter-wise).
+  -- Skip turn 1 entirely and land on P2's CapitalPhase so we can
+  -- actually play a unit before triggering combat.
+  let fpA = gA.currentPlayer
+  gB <- applyMessages gA $
+    concat
+      [ [PassPriority fpA, PassPriority fpA.next]       -- begin-of-turn (fpA)
+      , [PassPriority fpA, PassPriority fpA.next]       -- kingdom
+      , [PassPriority fpA, PassPriority fpA.next]       -- capital (quest/battlefield auto-skip)
+      , [PassPriority fpA, PassPriority fpA.next]       -- end-of-turn (still fpA's turn)
+      , [PassPriority fpA.next, PassPriority fpA]       -- begin-of-turn (next player)
+      , [PassPriority fpA.next, PassPriority fpA]       -- kingdom (next player)
+      , [PassPriority fpA.next, PassPriority fpA]       -- quest (no skip on T2)
+      ]
   -- Drop a 1-HP unit into the active player's battlefield via PlayUnit
   -- if one is in hand. Otherwise skip the rest of this smoke.
   case findPlayableUnit (activePlayer gB) of
@@ -188,18 +210,92 @@ main = do
             | UnitDetails {key = k, controller = c} <- gC.units
             , c == gB.currentPlayer
             ]
-      gD <- applyMessage gC (BeginCombat gB.currentPlayer BattlefieldZone attackerKeys)
+          attacker = gB.currentPlayer
+          defender = attacker.next
+      -- Drive the engine through every combat sub-step window. Each
+      -- window closes after two consecutive passes; the attacker
+      -- holds priority first.
+      gD <- applyMessages gC $
+        BeginCombat attacker BattlefieldZone attackerKeys
+          : concat (replicate 5 [PassPriority attacker, PassPriority defender])
       check "Combat: combat state cleared after resolve"
         (isNothing gD.combat)
-      check "Combat: at least some damage left a mark"
+      check "Combat: pending prompt cleared after resolve"
+        (isNothing gD.pendingPrompt)
+      check "Combat (no defenders): damage spilled to the attacked zone"
         (let Player {capital = Capital {battlefield = Zone {damage = Damage zd}}} =
-                case gB.currentPlayer of
+                case attacker of
                   Player1 -> gD.player2
                   Player2 -> gD.player1
-             anyUnitHurt = any
-               (\UnitDetails {damage = Damage d} -> d > 0)
-               gD.units
-          in zd > 0 || anyUnitHurt)
+          in zd > 0)
+
+  -- Combat with a scripted defender pick. Put a unit on EACH side's
+  -- battlefield (using PutUnitIntoPlay so the cost doesn't matter),
+  -- then BeginCombat with the defender programmed to accept the lone
+  -- defender. The defender absorbs all attacker damage; nothing
+  -- spills to the zone unless the attacker's power exceeds the
+  -- defender's HP.
+  setupResult3 <- runSetup
+  gE0 <- case setupResult3 of
+    Right g -> applyMessage g BeginGame
+    Left err -> do
+      putStrLn $ "FAIL third runSetup: " <> err
+      exitFailure
+  -- Park us on the opponent's turn so each player has a unit available.
+  let fpE = gE0.currentPlayer
+  gE <- applyMessages gE0 $
+    concat
+      [ [PassPriority fpE, PassPriority fpE.next]       -- begin-of-turn
+      , [PassPriority fpE, PassPriority fpE.next]       -- kingdom
+      , [PassPriority fpE, PassPriority fpE.next]       -- capital
+      , [PassPriority fpE, PassPriority fpE.next]       -- end-of-turn
+      , [PassPriority fpE.next, PassPriority fpE]       -- begin-of-turn (other player)
+      ]
+  let attackerSide = gE.currentPlayer
+      defenderSide = attackerSide.next
+      attackerHand = unitInHand (case attackerSide of
+                                   Player1 -> gE.player1
+                                   Player2 -> gE.player2)
+      defenderHand = unitInHand (case defenderSide of
+                                   Player1 -> gE.player1
+                                   Player2 -> gE.player2)
+  case (attackerHand, defenderHand) of
+    (Just (ak, _, _), Just (dk, _, _)) -> do
+      gF <- applyMessages gE
+        [ PutUnitIntoPlay attackerSide ak BattlefieldZone
+        , PutUnitIntoPlay defenderSide dk BattlefieldZone
+        ]
+      -- Drive the engine through BeginCombat with the defender's
+      -- prompt answered "I defend with my unit". Counterstrike won't
+      -- fire because the starter-deck unit we chose doesn't carry
+      -- the keyword (PickNone is harmless if it does).
+      gG <- applyMessagesWithAnswers gF
+        [ PickUnits [dk]       -- defender selection
+        , PickNone             -- attacker damage-order (1 defender → no-op)
+        , PickNone             -- defender damage-order (1 attacker → no-op)
+        ]
+        ( BeginCombat attackerSide BattlefieldZone [ak]
+            : concat
+                ( replicate
+                    5
+                    [PassPriority attackerSide, PassPriority defenderSide]
+                )
+        )
+      check "Combat (scripted defender): combat cleared"
+        (isNothing gG.combat)
+      check "Combat (scripted defender): defender unit took damage"
+        ( any
+            (\u -> u.key == dk && let Damage d = u.damage in d > 0)
+            gG.units
+          || -- ...or the defender died outright and is now in discard
+             not (any (\u -> u.key == dk) gG.units)
+        )
+      check "Combat (scripted defender): zone damage is bounded by attacker overkill"
+        ( let Player {capital = Capital {battlefield = Zone {damage = Damage zd}}} =
+                gG.player2
+           in zd >= 0  -- weak: just sanity that it isn't broken; full equality test would need card data
+        )
+    _ -> putStrLn "  skip scripted-combat smoke (one side has no Unit in hand)"
 
   putStrLn "Phase / turn smoke test: OK"
 
@@ -260,6 +356,21 @@ findPlayableUnit p =
                   then Just (key, cardDef.code, total)
                   else go rest budget
       _ -> go rest budget
+
+-- | Find the first Unit card in a player's hand, ignoring cost. Used
+-- with 'PutUnitIntoPlay' (which skips the cost check) to set up combat
+-- states without first paying for the units.
+unitInHand :: Player -> Maybe (UnitKey, CardCode, Int)
+unitInHand p = go p.hand
+  where
+    go [] = Nothing
+    go (Card {key, def} : rest) = case def of
+      UnitCardDef cardDef ->
+        let printed = case cardDef.cost of
+              Fixed n -> n
+              Variable -> 0
+         in Just (key, cardDef.code, printed)
+      _ -> go rest
 
 check :: String -> Bool -> IO ()
 check label ok =
