@@ -21,7 +21,7 @@ data Number = Fixed Int | Variable
   deriving stock (Show, Eq)
 
 data CardKind = Unit | Support | Quest | Tactic | Legend | DraftFormat
-  deriving stock Show
+  deriving stock (Eq, Show)
 
 -- | Identifies which of a capital's three zones something belongs to.
 -- Used both to tag a 'Zone' (its identity) and to record where a unit
@@ -62,11 +62,12 @@ mconcat
   , deriveJSON defaultOptions ''PlayerKey
   , deriveToJSON defaultOptions ''Number
   , deriveToJSON defaultOptions ''CardKind
-  , -- Race is a single-constructor type today (just 'Dwarf'). The Aeson
-    -- default unwraps single-constructor nullaries into '[]', which is
-    -- useless for the frontend's capital-image lookup. Force tagging so
-    -- it always serializes as the constructor name as a string.
-    deriveToJSON
+  , -- 'Race' serializes as the bare constructor name (e.g. @"Dwarf"@).
+    -- 'tagSingleConstructors' is a holdover from when this was a single
+    -- constructor; with the full six-race set it's harmless. We need
+    -- 'FromJSON' too because the lobby ships 'GameSelectStarter' frames
+    -- carrying a 'Race' picked by the seated player.
+    deriveJSON
       defaultOptions {tagSingleConstructors = True, allNullaryToStringTag = True}
       ''Race
   , deriveToJSON defaultOptions ''Phase
@@ -76,3 +77,4 @@ mconcat
 instance ToJSONKey (Ref k)
 instance ToJSONKey ZoneKind
 instance ToJSONKey UnitKey
+instance ToJSONKey PlayerKey

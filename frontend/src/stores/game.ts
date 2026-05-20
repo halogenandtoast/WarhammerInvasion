@@ -11,6 +11,8 @@ import type {
   GameOut,
   GameView,
   MaintenanceState,
+  Race,
+  TargetOption,
   UserInfo,
   ZoneKind,
 } from '../api/protocol'
@@ -159,6 +161,10 @@ function selectDeck(deckId: string) {
   socket?.send({ tag: 'GameSelectDeck', deckId })
 }
 
+function selectStarter(race: Race) {
+  socket?.send({ tag: 'GameSelectStarter', race })
+}
+
 function clearDeck() {
   socket?.send({ tag: 'GameClearDeck' })
 }
@@ -200,6 +206,20 @@ function resolvePromptNone() {
   })
 }
 
+function resolvePromptAmount(amount: number) {
+  socket?.send({
+    tag: 'GameResolvePrompt',
+    result: { tag: 'PromptAmountWire', amount },
+  })
+}
+
+function resolvePromptTargetOption(option: TargetOption) {
+  socket?.send({
+    tag: 'GameResolvePrompt',
+    result: { tag: 'PromptTargetOptionWire', option },
+  })
+}
+
 export const game = {
   status: computed(() => _status.value),
   gameId: computed(() => _gameId.value),
@@ -215,6 +235,7 @@ export const game = {
   disconnect,
   sendChat,
   selectDeck,
+  selectStarter,
   clearDeck,
   startGame,
   passPriority,
@@ -222,5 +243,7 @@ export const game = {
   resolvePromptUnits,
   resolvePromptBool,
   resolvePromptNone,
+  resolvePromptAmount,
+  resolvePromptTargetOption,
   leaveGame,
 }

@@ -736,6 +736,8 @@ lobby:
       spectators_help: Anyone with access can watch even when both seats are taken.
       auto_skip_label: Auto-skip empty action windows
       auto_skip_help: When neither player has a tactic in hand or an action ability to trigger, pass priority automatically. Speeds play up at the cost of a small information tell.
+      starter_decks_label: Use starter decks
+      starter_decks_help: Each player picks a race; the server seats the pre-built 40-card starter for it. Great for a quick game without building or loading a custom deck.
       submit: Create game
       submitting: Creating…
     card:
@@ -804,6 +806,9 @@ game:
     deck_picker_placeholder: Choose a deck…
     deck_clear: Clear deck
     deck_no_decks: You don't have any decks yet. Build one first.
+    starter_pending: Pick a starter race
+    starter_picker_label: Choose a starter race
+    starter_picker_placeholder: Choose a race…
     deck_too_small: "Deck only has {size} cards — needs at least 50."
     deck_summary:
       size: "{count} cards"
@@ -914,6 +919,18 @@ game:
       play_tactic: Play tactic
       play_legend: Play legend
       cancel: Cancel
+    unplayable:
+      heading: Can't play this yet
+      dismiss: OK
+      reason:
+        InsufficientResources: "Costs {needed} resources; you have {have}."
+        UniqueAlreadyInPlay: You already control a copy of this unique card.
+        LimitedAlreadyPlayed: You've already played a Limited card this turn.
+        LegendAlreadyInPlay: Your legend is already in play.
+        NotYourTurn: It isn't your turn.
+        NotInActionWindow: No action window is open for you to act in.
+        WrongActionWindow: This card can only be played during your capital phase.
+        NoValidTarget: No valid target for this card is in play.
     quest:
       controlled_by: "{name}'s"
 
@@ -1000,12 +1017,15 @@ log:
     eliminated: "{player} is eliminated ({reason})."
   deck:
     shuffled: "{player} shuffles their deck."
+    milled: "{player} mills {count} cards."
   draw:
     opening: "{player} draws their opening hand (7 cards)."
     card: "{player} draws a card."
   resources:
     returned: "{player} returns unspent resources to the pool."
     collected: "{player} collects {count} resources."
+    gained: "{player} gains {amount} resources."
+    spent: "{player} spends {amount} resources."
   unit:
     played: "{player} plays {card} ({cost} resources)."
     entered_play: "{player} brings a unit into play."
@@ -1018,6 +1038,8 @@ log:
     summoned_free: "{player} brings {card} into play (free)."
     summoned_from_discard: "{player} resurrects {card} from the discard pile."
     damage_moved: "{source}'s damage ({amount}) is moved onto {target}."
+    moved: "{player} moves {card} to {zone}."
+    returned: "{player} returns {card} to hand."
   attachment:
     played: "{player} attaches {card} to {target} ({cost} resources)."
   support:
@@ -1044,11 +1066,23 @@ log:
   zone:
     damaged: "{player}'s {zone} zone takes {amount} damage."
     burned: "{player}'s {zone} zone burns!"
+  hand:
+    discarded_all: "{player} discards their hand ({count} cards)."
+  discard:
+    recycled: "{player} shuffles {count} cards from discard into deck."
+  development:
+    moved: "{player} moves a development from {from} to {to}."
+    destroyed: "{player}'s development in {zone} is destroyed."
+  capital:
+    indirect: "{player} takes {amount} indirect damage on {zone}."
+    shielded: "{player}'s capital shield cancels {amount} damage on {zone}."
+    shield_scheduled: "{player}'s capital is shielded from the next damage."
   combat:
     begins: "{attacker} attacks the {zone}."
     resolved: "Combat resolves: attackers {attacker_damage}, defenders {defender_damage}."
     ends: "Combat ends."
     aborted: "{attacker}'s attack aborted (no eligible attackers)."
+    redirected: "{attacker}'s attack is redirected to {zone}."
   # ZoneKind enum lookup
   zone_name:
     KingdomZone: Kingdom

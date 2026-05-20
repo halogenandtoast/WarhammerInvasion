@@ -94,7 +94,6 @@ onUnmounted(uninstallRouter)
     <nav class="topnav" :aria-label="t('app.nav.primary_label')">
       <div class="topnav-inner">
         <a class="brand" href="#/" @click="navClick($event, '#/')">
-          <span class="brand-mark" aria-hidden="true">⚔</span>
           <span class="brand-text">{{ t('app.brand') }}</span>
         </a>
         <ul class="nav-links">
@@ -159,7 +158,6 @@ onUnmounted(uninstallRouter)
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
   color: var(--fg);
   font-weight: 600;
   font-size: 0.95rem;
@@ -168,12 +166,6 @@ onUnmounted(uninstallRouter)
 .brand:hover {
   text-decoration: none;
   color: var(--accent-strong);
-}
-
-.brand-mark {
-  font-size: 1.05rem;
-  color: var(--accent-strong);
-  line-height: 1;
 }
 
 .nav-links {

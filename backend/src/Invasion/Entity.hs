@@ -141,6 +141,11 @@ data QuestDetails = QuestDetails
 data TacticContext = TacticContext
   { controller :: PlayerKey
   , cardDef :: CardDef Tactic
+  , xValue :: Int
+    -- ^ The 'X' the player chose at play time for variable-cost
+    -- tactics. 0 for fixed-cost tactics. The engine has already
+    -- debited @xValue@ resources by the time the effect body
+    -- runs, so the body just reads this to decide how much to do.
   }
   deriving stock Show
 

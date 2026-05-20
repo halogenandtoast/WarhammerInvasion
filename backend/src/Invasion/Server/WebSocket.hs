@@ -192,7 +192,14 @@ handleLobbyIn env user = \case
         atomically do
           pushLobbyChat env.lobby line
           broadcastLobby env.lobby LobbyChatNew {line}
-  LobbyCreateGame {name = gname, visibility, password, allowSpectators = mAllow, autoSkipActionWindows = mAutoSkip} -> do
+  LobbyCreateGame
+    { name = gname
+    , visibility
+    , password
+    , allowSpectators = mAllow
+    , autoSkipActionWindows = mAutoSkip
+    , useStarterDecks = mStarters
+    } -> do
     let trimmedName = T.strip gname
     inMaint <- atomically $ isJust <$> readMaintenanceSTM env.lobby
     case validateGameName trimmedName of
@@ -211,8 +218,9 @@ handleLobbyIn env user = \case
                   Public -> True
                   Private -> False
               autoSkip = fromMaybe False mAutoSkip
+              starters = fromMaybe False mStarters
           slot <- atomically do
-            slot <- createGame env.lobby gid trimmedName user visibility password allowSpec autoSkip token
+            slot <- createGame env.lobby gid trimmedName user visibility password allowSpec autoSkip starters token
             sm <- summariesSTM env.lobby
             broadcastLobby env.lobby LobbyGamesUpdate {games = sm}
             pure slot
@@ -388,7 +396,12 @@ startEngineWorker slot initial = do
   pubState <- newTVarIO initial
   let hook = do
         g <- readTVar pubState
-        writeTVar slot.engine (Just g)
+        -- 'attachHandPlayability' is a view-only annotation: it walks
+        -- the just-published 'Game' and stamps each hand card with the
+        -- reason it isn't playable right now. We do it here (not inside
+        -- the engine) so the engine's own state never reads from the
+        -- annotated copy.
+        writeTVar slot.engine (Just (Engine.attachHandPlayability g))
         conns <- readTVar slot.connections
         traverse_ (publishForConn slot) (Map.elems conns)
       ctx =
@@ -444,13 +457,39 @@ handleGameIn env slot user = \case
         atomically do
           pushGameChat slot line
           broadcastGame slot GameChatNew {line}
-  GameSelectDeck {deckId = did} -> do
-    mDeck <- runDB env.dbPool (P.get (DeckKey did))
-    case mDeck of
-      Nothing -> sendGameError slot user "deck_not_found"
-      Just deck | deckUserId deck /= UserKey user.userId ->
-        sendGameError slot user "deck_not_owned"
-      Just deck -> do
+  GameSelectDeck {deckId = did}
+    | slot.useStarterDecks -> sendGameError slot user "starter_mode"
+    | otherwise -> do
+        mDeck <- runDB env.dbPool (P.get (DeckKey did))
+        case mDeck of
+          Nothing -> sendGameError slot user "deck_not_found"
+          Just deck | deckUserId deck /= UserKey user.userId ->
+            sendGameError slot user "deck_not_owned"
+          Just deck -> do
+            sts <- readTVarIO slot.status
+            if sts /= StatusWaiting
+              then sendGameError slot user "game_started"
+              else do
+                seatKey <- atomically do
+                  sm <- readTVar slot.seats
+                  pure $ findSeatFor user sm
+                case seatKey of
+                  Nothing -> sendGameError slot user "not_seated"
+                  Just k -> do
+                    let dv = DeckView
+                          { deckId = Just did
+                          , starterRace = Nothing
+                          , name = deckName deck
+                          , capital = deckCapital deck
+                          , size = countCards (deckCards deck)
+                          }
+                    atomically do
+                      setSeatDeck slot k dv
+                      v <- gameViewSTM slot (Just user)
+                      broadcastGameWithView slot v
+  GameSelectStarter {race}
+    | not slot.useStarterDecks -> sendGameError slot user "starter_mode_off"
+    | otherwise -> do
         sts <- readTVarIO slot.status
         if sts /= StatusWaiting
           then sendGameError slot user "game_started"
@@ -461,11 +500,13 @@ handleGameIn env slot user = \case
             case seatKey of
               Nothing -> sendGameError slot user "not_seated"
               Just k -> do
-                let dv = DeckView
-                      { deckId = did
-                      , name = deckName deck
-                      , capital = deckCapital deck
-                      , size = countCards (deckCards deck)
+                let deck = Engine.starterDeckFor race
+                    dv = DeckView
+                      { deckId = Nothing
+                      , starterRace = Just race
+                      , name = raceStarterName race
+                      , capital = Just (raceCapitalSlug race)
+                      , size = length deck.cards
                       }
                 atomically do
                   setSeatDeck slot k dv
@@ -495,33 +536,27 @@ handleGameIn env slot user = \case
                      <*> (Map.lookup "Player2" sm >>= (.deck)) of
               Nothing -> sendGameError slot user "not_ready"
               Just (dv1, dv2) -> do
-                  md1 <- runDB env.dbPool (P.get (DeckKey dv1.deckId))
-                  md2 <- runDB env.dbPool (P.get (DeckKey dv2.deckId))
-                  case (md1, md2) of
-                    (Nothing, _) -> sendGameError slot user "deck_not_found"
-                    (_, Nothing) -> sendGameError slot user "deck_not_found"
-                    (Just d1, Just d2) ->
-                      case (engineDeckFromDb d1, engineDeckFromDb d2) of
-                        (Left e, _) -> sendGameError slot user e
-                        (_, Left e) -> sendGameError slot user e
-                        (Right ed1, Right ed2) -> do
-                          let opts =
-                                Engine.GameOptions
-                                  { autoSkipActionWindows = slot.autoSkipActionWindows
-                                  }
-                          case newGame ed1 ed2 opts of
-                            Left err -> sendGameError slot user (T.pack err)
-                            Right g0 -> do
-                              -- Spin up the per-game engine worker. It
-                              -- owns the engine state from here on; the
-                              -- WebSocket handlers post to its mailbox
-                              -- via 'postToEngine'. Setup + BeginGame
-                              -- are seeded by 'startEngineWorker'.
-                              startEngineWorker slot g0
-                              atomically do
-                                trySetStatus slot StatusPlaying
-                                summaries <- summariesSTM env.lobby
-                                broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
+                  eDecks <- resolveDecks env slot dv1 dv2
+                  case eDecks of
+                    Left code -> sendGameError slot user code
+                    Right (ed1, ed2) -> do
+                      let opts =
+                            Engine.GameOptions
+                              { autoSkipActionWindows = slot.autoSkipActionWindows
+                              }
+                      case newGame ed1 ed2 opts of
+                        Left err -> sendGameError slot user (T.pack err)
+                        Right g0 -> do
+                          -- Spin up the per-game engine worker. It
+                          -- owns the engine state from here on; the
+                          -- WebSocket handlers post to its mailbox
+                          -- via 'postToEngine'. Setup + BeginGame
+                          -- are seeded by 'startEngineWorker'.
+                          startEngineWorker slot g0
+                          atomically do
+                            trySetStatus slot StatusPlaying
+                            summaries <- summariesSTM env.lobby
+                            broadcastLobby env.lobby LobbyGamesUpdate {games = summaries}
   GamePassPriority ->
     withSeatedPlayer slot user \pk ->
       postEngineMsg slot user (PassPriority pk)
@@ -557,6 +592,7 @@ handleGameIn env slot user = \case
                       PromptUnitsWire {unitKeys = ks} -> PickUnits ks
                       PromptBoolWire {yes = b} -> PickBool b
                       PromptTargetOptionWire {option = o} -> PickTargetOption o
+                      PromptAmountWire {amount = n} -> PickAmount n
                       PromptNoneWire -> PickNone
                 ok <- postToEngine slot (Engine.EnginePromptAnswer engineResult)
                 unless ok $ sendGameError slot user "game_not_started"
@@ -698,6 +734,58 @@ capitalRaces = Map.fromList
   , ("orc", Orc)
   , ("dark_elf", DarkElf)
   ]
+
+-- | Inverse of 'capitalRaces': engine race → capital slug. Used when
+-- the server synthesizes a 'DeckView' for a starter deck.
+raceCapitalSlug :: Race -> Text
+raceCapitalSlug = \case
+  Dwarf -> "dwarf"
+  Empire -> "empire"
+  HighElf -> "high_elf"
+  Chaos -> "chaos"
+  Orc -> "orc"
+  DarkElf -> "dark_elf"
+
+-- | Display name embedded in the 'DeckView' for a starter deck. The
+-- frontend localizes the seat label separately; this is the fallback
+-- string carried on the wire.
+raceStarterName :: Race -> Text
+raceStarterName = \case
+  Dwarf -> "Dwarf Starter"
+  Empire -> "Empire Starter"
+  HighElf -> "High Elf Starter"
+  Chaos -> "Chaos Starter"
+  Orc -> "Orc Starter"
+  DarkElf -> "Dark Elf Starter"
+
+-- | Resolve both seats' deck selections to engine 'Deck' values for
+-- 'GameStart'. Honours the slot's 'useStarterDecks' flag: in starter
+-- mode the seat's 'starterRace' is the only thing we read; otherwise
+-- we go to the DB. Returns a protocol error code on the first failure.
+resolveDecks
+  :: WsEnv
+  -> GameSlot
+  -> DeckView
+  -> DeckView
+  -> IO (Either Text (Engine.Deck, Engine.Deck))
+resolveDecks env slot dv1 dv2
+  | slot.useStarterDecks = pure do
+      r1 <- maybeToEither "starter_not_selected" dv1.starterRace
+      r2 <- maybeToEither "starter_not_selected" dv2.starterRace
+      Right (Engine.starterDeckFor r1, Engine.starterDeckFor r2)
+  | otherwise = do
+      let dbDeck dv = maybeToEither "deck_not_found" dv.deckId
+      case (dbDeck dv1, dbDeck dv2) of
+        (Left e, _) -> pure (Left e)
+        (_, Left e) -> pure (Left e)
+        (Right did1, Right did2) -> do
+          md1 <- runDB env.dbPool (P.get (DeckKey did1))
+          md2 <- runDB env.dbPool (P.get (DeckKey did2))
+          case (md1, md2) of
+            (Nothing, _) -> pure (Left "deck_not_found")
+            (_, Nothing) -> pure (Left "deck_not_found")
+            (Just d1, Just d2) ->
+              pure $ (,) <$> engineDeckFromDb d1 <*> engineDeckFromDb d2
 
 -- ----------------------------------------------------------------------------
 -- Idle sweeper

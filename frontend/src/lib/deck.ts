@@ -33,15 +33,38 @@ export interface SavedDeck {
   updatedAt: string
 }
 
-export function cardFaction(card: Pick<Card, 'race'>): CardFaction {
-  return catalogRaceFaction(card.race)
+// Some Neutral-race cards (most notably the core-set Alliance banners,
+// but also various later-cycle cards) carry an "Order only" / "Destruction
+// only" rider in their text box. Those are faction-restricted despite
+// the Neutral race line, so the deck builder must treat them as belonging
+// to that faction rather than as universally legal neutrals.
+const ORDER_ONLY_RE = /\border only\b/i
+const DESTRUCTION_ONLY_RE = /\bdestruction only\b/i
+
+function factionRiderFromText(text: string | null | undefined): Faction | null {
+  if (!text) return null
+  if (ORDER_ONLY_RE.test(text)) return 'order'
+  if (DESTRUCTION_ONLY_RE.test(text)) return 'destruction'
+  return null
+}
+
+export function cardFaction(card: Pick<Card, 'race' | 'text'>): CardFaction {
+  const base = catalogRaceFaction(card.race)
+  if (base === 'neutral') {
+    const rider = factionRiderFromText(card.text)
+    if (rider) return rider
+  }
+  return base
 }
 
 /**
  * Whether a card may legally appear in a deck of a given faction.
  * 'unknown' (stub cards with no race) is rejected to avoid corrupting decks.
  */
-export function isCardAllowedInFaction(card: Pick<Card, 'race'>, faction: Faction | null): boolean {
+export function isCardAllowedInFaction(
+  card: Pick<Card, 'race' | 'text'>,
+  faction: Faction | null,
+): boolean {
   const cf = cardFaction(card)
   if (cf === 'unknown') return false
   if (cf === 'neutral') return true
@@ -49,7 +72,10 @@ export function isCardAllowedInFaction(card: Pick<Card, 'race'>, faction: Factio
   return cf === faction
 }
 
-export function isCardAllowedInDeck(card: Pick<Card, 'race'>, capital: Capital | null): boolean {
+export function isCardAllowedInDeck(
+  card: Pick<Card, 'race' | 'text'>,
+  capital: Capital | null,
+): boolean {
   return isCardAllowedInFaction(card, capital == null ? null : factionOfCapital(capital))
 }
 

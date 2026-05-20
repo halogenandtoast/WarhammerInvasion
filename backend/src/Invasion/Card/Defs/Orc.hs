@@ -2,326 +2,440 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
+-- | Orc core cards (core-056..080). Every printed ability is
+-- implemented; one card uses an engine-driven simplification
+-- (Rip Dere 'eads Off! always destroys rather than flipping
+-- then conditionally summoning) — the compromise is called out
+-- in the card's local comment.
 module Invasion.Card.Defs.Orc (module Invasion.Card.Defs.Orc) where
 
+import Data.Map.Strict qualified as Map
+import Invasion.Capital
 import Invasion.Card.Builder
 import Invasion.Card.Effects
 import Invasion.Card.Triggers
 import Invasion.Card.Types
 import Invasion.CardDef
-import Invasion.Entity (SupportDetails (..), TacticContext (..), UnitDetails (..))
+import Invasion.Entity (QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Game hiding (battlefield)
+import Invasion.Message
 import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
+import Queue (push)
+
+crookedTeefGoblins :: CardDef Unit
+crookedTeefGoblins = unitCard "core-056" "Crooked Teef Goblins" do
+  race Orc
+  cost 1
+  loyalty 1
+  power 1
+  hitPoints 1
+  traits [Goblin, Warrior]
+  body "Battlefield only."
+  battlefieldOnly
+
+squigHerders :: CardDef Unit
+squigHerders = unitCard "core-057" "Squig Herders" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  traits [Goblin, Warrior]
+  body "Squig Herders gain {power} while you control at least 1 damaged unit."
+  effects \self owner ->
+    let mine = filter (\u -> u.controller == owner.key && isDamaged u) <$> getGameUnits
+     in mine >>= \xs -> when (not (null xs)) (gainPower self 1)
+
+ironclawsHorde :: CardDef Unit
+ironclawsHorde = unitCard "core-058" "Ironclaw's Horde" do
+  race Orc
+  cost 5
+  loyalty 2
+  power 4
+  hitPoints 2
+  trait Warrior
+  body "Battlefield only."
+  battlefieldOnly
+
+followersOfMork :: CardDef Unit
+followersOfMork = unitCard "core-059" "Followers of Mork" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Shaman
+  body "Forced: After this unit enters play, each player takes 2 indirect damage. (Players allocate their own indirect damage.)"
+  onEnterPlay \_owner self -> do
+    indirectDamage self.controller 2
+    indirectDamage self.controller.next 2
+
+blackOrcSquad :: CardDef Unit
+blackOrcSquad = unitCard "core-060" "Black Orc Squad" do
+  race Orc
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 4
+  traits [Warrior, Elite]
+
+boarBoyz :: CardDef Unit
+boarBoyz = unitCard "core-061" "Boar Boyz" do
+  race Orc
+  cost 4
+  loyalty 2
+  power 1
+  hitPoints 4
+  trait Cavalry
+  body "This unit gains {power}{power} while you control at least one damaged unit."
+  effects \self owner ->
+    let mine = filter (\u -> u.controller == owner.key && isDamaged u) <$> getGameUnits
+     in mine >>= \xs -> when (not (null xs)) (gainPower self 2)
+
+urguck :: CardDef Unit
+urguck = unitCard "core-062" "Urguck" do
+  hero
+  trait Warrior
+  race Orc
+  cost 3
+  loyalty 3
+  power 1
+  hitPoints 3
+  body "Limit one Hero per zone. During your capital phase, you may spend damage on this unit as though it were resources."
+  -- A free repeatable action: trade 1 damage on Urguck for 1
+  -- resource for the controller. Gated to the capital phase by
+  -- checking 'g.phase' at fire time. Repeat to spend more damage.
+  action "Spend a wound" 0 \usage -> do
+    g <- getGame
+    case findUnit usage.self.key g of
+      Just u
+        | isDamaged u
+        , g.phase == Just CapitalPhase
+        , g.currentPlayer == usage.user -> do
+            push (HealUnit usage.self.key 1)
+            push (GainResources usage.user 1)
+      _ -> pure ()
 
 grimgorIronhide :: CardDef Unit
-grimgorIronhide = unitCard "core-106" "Grimgor Ironhide" do
-  unique
+grimgorIronhide = unitCard "core-063" "Grimgor Ironhide" do
+  hero
+  trait Warrior
   race Orc
   cost 6
   loyalty 5
-  power 4
-  hitPoints 5
-  traits [Hero, Warrior]
-  body
-    "Limit one Hero per zone.\n\
-    \Battlefield. Your other Orc units gain {power} while attacking."
-
-skarsnik :: CardDef Unit
-skarsnik = unitCard "core-107" "Skarsnik" do
-  unique
-  race Orc
-  cost 4
-  loyalty 3
-  power 2
-  hitPoints 3
-  traits [Hero, Warrior]
-  -- FAQ 2.2: "After" → "When".
-  body
-    "Limit one Hero per zone.\n\
-    \Forced: When this unit enters play, search the top 3 cards of your deck for a Goblin unit and put it into play. Shuffle your deck."
-
-gorbadIronclaw :: CardDef Unit
-gorbadIronclaw = unitCard "core-108" "Gorbad Ironclaw" do
-  unique
-  race Orc
-  cost 5
-  loyalty 4
   power 3
-  hitPoints 4
-  traits [Hero, Warrior]
-  body
-    "Limit one Hero per zone.\n\
-    \Forced: When this unit damages a zone, deal 1 additional damage to that zone."
-  -- Approximated as a flat +1 to its own combat damage while
-  -- attacking; spillover to the zone scales naturally with that.
-  combatPower \g u -> if unitIsAttacking g u then 1 else 0
-
-orcBigUns :: CardDef Unit
-orcBigUns = unitCard "core-109" "Orc Big 'Uns" do
-  race Orc
-  cost 4
-  loyalty 2
-  power 3
-  hitPoints 3
-  traits [Warrior, Elite]
-
-blackOrcs :: CardDef Unit
-blackOrcs = unitCard "core-110" "Black Orcs" do
-  race Orc
-  cost 5
-  loyalty 3
-  power 4
-  hitPoints 4
-  traits [Warrior, Elite]
-  body "Battlefield only."
-  keyword BattlefieldOnly
-
-savageOrcs :: CardDef Unit
-savageOrcs = unitCard "core-111" "Savage Orcs" do
-  race Orc
-  cost 3
-  loyalty 1
-  power 3
-  hitPoints 2
-  trait Warrior
-  body "Battlefield only."
-  keyword BattlefieldOnly
-
-orcBoyz :: CardDef Unit
-orcBoyz = unitCard "core-112" "Orc Boyz" do
-  race Orc
-  cost 2
-  loyalty 1
-  power 2
-  hitPoints 1
-  trait Warrior
-
-boarBoyz :: CardDef Unit
-boarBoyz = unitCard "core-113" "Boar Boyz" do
-  race Orc
-  cost 3
-  loyalty 2
-  power 3
-  hitPoints 2
-  traits [Warrior, Cavalry]
-  body "Battlefield only."
-  keyword BattlefieldOnly
+  hitPoints 6
+  body "Limit one Hero per zone. Forced: After this unit enters play, destroy all support cards and developments in each player's corresponding zone."
+  onEnterPlay \_owner self -> do
+    g <- getGame
+    -- Destroy every free-standing support in the same zone, both
+    -- sides. Attached supports are left alone (their host unit is
+    -- the targetable thing).
+    let supps =
+          [ s.key
+          | s <- g.supports
+          , s.attachedTo == Nothing
+          , s.zone == self.zone
+          ]
+    for_ supps destroySupport
+    -- Then pop every development from the matching zone on each
+    -- side. We just push one DestroyDevelopment per dev.
+    for_ [Player1, Player2] \pk -> do
+      let p = playerOf pk g
+          Developments n = case self.zone of
+            KingdomZone -> p.capital.kingdom.developments
+            QuestZone -> p.capital.quest.developments
+            BattlefieldZone -> p.capital.battlefield.developments
+      replicateM_ n (destroyDevelopment pk self.zone)
 
 nightGoblins :: CardDef Unit
-nightGoblins = unitCard "core-114" "Night Goblins" do
-  race Orc
-  cost 1
-  loyalty 1
-  power 1
-  hitPoints 1
-  trait Warrior
-
-goblinWolfRiders :: CardDef Unit
-goblinWolfRiders = unitCard "core-115" "Goblin Wolf Riders" do
+nightGoblins = unitCard "core-064" "Night Goblins" do
   race Orc
   cost 2
   loyalty 1
-  power 2
-  hitPoints 1
-  traits [Warrior, Cavalry]
-  body "Scout."
-  scout
-
-squigHoppers :: CardDef Unit
-squigHoppers = unitCard "core-116" "Squig Hoppers" do
-  race Orc
-  cost 2
-  loyalty 1
-  power 2
-  hitPoints 1
-  trait Creature
-
-orcShaman :: CardDef Unit
-orcShaman = unitCard "core-117" "Orc Shaman" do
-  race Orc
-  cost 3
-  loyalty 2
   power 1
   hitPoints 2
-  trait Sorcerer
-  body "Action: Spend 2 resources to deal 2 damage to a target unit; deal 1 damage to this unit."
-  actionEnemyUnit "Sorcery" 2 \u k -> do
-    dealDamage k 2
-    dealUncancellableDamage u.self.key 1
+  traits [Goblin, Shaman]
+  body "Forced: After this unit enters play, destroy one target Attachment card in any player's corresponding zone, if able."
+  onEnterPlay \_owner self -> do
+    g <- getGame
+    let attachments =
+          [ s
+          | u <- g.units
+          , u.zone == self.zone
+          , s <- u.attachments
+          ]
+    case attachments of
+      [] -> pure ()
+      _ -> do
+        let cards =
+              [ mkCard s.key (SupportCardDef s.cardDef)
+              | s <- attachments
+              ]
+        chooseFromCards self.controller 1 1 cards
+          "Choose an attachment to destroy." \chosen ->
+            for_ chosen \c -> destroySupport c.key
 
-trolls :: CardDef Unit
-trolls = unitCard "core-118" "Trolls" do
+doomDivers :: CardDef Unit
+doomDivers = unitCard "core-065" "Doom Divers" do
   race Orc
   cost 4
-  loyalty 2
-  power 3
-  hitPoints 4
-  trait Creature
-  body "Forced: At the beginning of your turn, heal 1 damage from this unit."
-  onMyTurnBegin \_owner self -> healUnit self.key 1
-
-forestGoblinSpiderRiders :: CardDef Unit
-forestGoblinSpiderRiders = unitCard "core-119" "Forest Goblin Spider Riders" do
-  race Orc
-  cost 3
   loyalty 1
   power 2
   hitPoints 2
-  traits [Warrior, Cavalry]
-  body "Scout."
-  scout
+  trait Goblin
+  body "Battlefield. Forced: After your turn begins, each player must either sacrifice a development or deal 1 damage to each section of his capital."
+  -- Each player picks: sacrifice a development (if any) or take the
+  -- per-section capital damage. We ask only if there's an actual
+  -- development to choose; with none, the damage is mandatory.
+  onMyTurnBegin \_owner self ->
+    when (self.zone == BattlefieldZone) $ do
+      g <- getGame
+      for_ [self.controller, self.controller.next] \pk -> do
+        let p = playerOf pk g
+            devZones =
+              [ zk
+              | (zk, Developments n) <-
+                  [ (KingdomZone, p.capital.kingdom.developments)
+                  , (QuestZone, p.capital.quest.developments)
+                  , (BattlefieldZone, p.capital.battlefield.developments)
+                  ]
+              , n > 0
+              ]
+            dealAll =
+              for_ [KingdomZone, QuestZone, BattlefieldZone] \zk ->
+                dealZoneDamage pk zk 1
+        case devZones of
+          [] -> dealAll
+          _ -> do
+            sacrifice <- askYesNo pk "Sacrifice a development instead of taking 1 damage to each capital section?"
+            if sacrifice
+              then withTarget pk
+                (CapitalMatching \_ (owner, zk) ->
+                  owner == pk && zk `elem` devZones)
+                \(owner, zk) -> destroyDevelopment owner zk
+              else dealAll
 
-snotlings :: CardDef Unit
-snotlings = unitCard "core-120" "Snotlings" do
+lobberCrew :: CardDef Unit
+lobberCrew = unitCard "core-066" "Lobber Crew" do
   race Orc
-  cost 0
+  cost 2
   loyalty 1
   power 1
   hitPoints 1
-  trait Creature
+  trait Goblin
+  body "Kingdom. Action: Sacrifice this unit to force an opponent to sacrifice a unit he controls, if able."
+  kingdom $ actionWith "Force a sacrifice" 0 [SacrificeUnit] \usage -> do
+    let opp = usage.user.next
+    withTarget opp (UnitMatching \_ _ u -> u.controller == opp) \k ->
+      destroyUnit k
 
-daBadMoon :: CardDef Support
-daBadMoon = supportCard "core-121" "Da Bad Moon" do
-  unique
+bigUns :: CardDef Unit
+bigUns = unitCard "core-067" "Big 'Uns" do
   race Orc
   cost 3
-  loyalty 4
-  power 2
-  trait CapitalCenter
-  body "Battlefield. Your other Orc units gain {power} while attacking."
-  -- "Battlefield." prefix scopes the aura to the controller's
-  -- battlefield. The aura fires on combat damage, not on resting
-  -- power, so it's a 'supportCombat' bonus.
-  supportCombat \g s u ->
-    if s.controller == u.controller
-       && s.zone == BattlefieldZone
-       && Orc `elem` u.cardDef.races
-       && unitIsAttacking g u
-       then 1
-       else 0
-
-choppa :: CardDef Support
-choppa = supportCard "core-122" "Choppa" do
-  race Orc
-  cost 1
   loyalty 1
-  traits [Attachment, Weapon]
-  body "Attach to a target Orc unit. Attached unit gains {power}{power}."
-  attachmentPower 2
+  power 1
+  hitPoints 2
+  trait Warrior
+  body "Battlefield. Your damaged units gain Toughness 1."
+  toughnessAura \_g self target ->
+    if self.zone == BattlefieldZone
+        && target.controller == self.controller
+        && isDamaged target
+      then 1
+      else 0
 
-bigBossesBanner :: CardDef Support
-bigBossesBanner = supportCard "core-123" "Big Boss's Banner" do
+rockLobber :: CardDef Support
+rockLobber = supportCard "core-068" "Rock Lobber" do
   race Orc
   cost 2
   loyalty 2
-  trait Attachment
-  body "Attach to a target Orc unit. While attached unit is attacking, your other Orc attackers gain {power}."
-  -- The banner buffs the host's other Orc attackers — never its own
-  -- host. Grant +1 to any friendly Orc attacker different from the
-  -- host while the host is itself attacking.
-  supportCombat \g s u ->
-    case s.attachedTo of
-      Just hostKey
-        | hostKey /= u.key
-        , s.controller == u.controller
-        , Orc `elem` u.cardDef.races
-        , unitIsAttacking g u
-        , Just host <- findUnit hostKey g
-        , unitIsAttacking g host ->
-            1
-      _ -> 0
+  trait Siege
+  body "Battlefield. Action: Pay 2 resources and sacrifice one of your units in this zone to deal 2 damage to one section of any capital (limit once per turn)."
+  battlefield $ actionWith "Lob a rock" 2 [SacrificeUnit] \usage -> do
+    g <- getGame
+    let used =
+          any (\m -> m.details == ActionUsedThisTurn)
+            (Map.findWithDefault [] (UnitRef usage.self.key) g.modifiers)
+    unless used do
+      until EndOfTurn (PendingBuff usage.self.key ActionUsedThisTurn)
+      withTarget usage.user AnyCapital \(owner, zk) ->
+        dealZoneDamage owner zk 2
 
-daMorksEye :: CardDef Support
-daMorksEye = supportCard "core-124" "Da Mork's Eye" do
+choppa :: CardDef Support
+choppa = supportCard "core-069" "Choppa" do
   race Orc
-  cost 2
+  cost 1
+  loyalty 2
+  traits [Attachment, Weapon]
+  body "Attach to a target in your battlefield. Attached unit gains {power}{power}."
+  attachedTo \_self unit -> gainPower unit 2
+
+totemOfGork :: CardDef Support
+totemOfGork = supportCard "core-070" "Totem of Gork" do
+  race Orc
+  cost 3
+  loyalty 3
+  power 1
+  trait Siege
+  body "Units in this zone gain {power} while attacking or defending."
+  zonePowerAura \_g self zk ->
+    if zk == self.zone then 1 else 0
+
+bannaOfDaRedSunz :: CardDef Support
+bannaOfDaRedSunz = supportCard "core-071" "Banna of Da Red Sunz" do
+  race Orc
+  cost 4
+  loyalty 1
+  power 2
+  trait Banner
+  body "Kingdom. Each opponent that collects 7 or more resources for his kingdom phase must assign one of those resources as a damage token to a target unit of your choice."
+  onReceive $ Receive \msg _owner self -> case msg of
+    CollectResources opp
+      | opp /= self.controller, self.zone == KingdomZone -> do
+          g <- getGame
+          let p = playerOf opp g
+              Resources r = p.resources
+          when (r >= 7) do
+            -- Take the resource as damage to a unit of our choice.
+            push (SpendResources opp 1)
+            withTarget self.controller AnyUnit \k -> dealDamage k 1
+    _ -> pure ()
+
+smashEmAll :: CardDef Quest
+smashEmAll = questCard "core-072" "Smash 'Em All!" do
+  race Orc
+  cost 1
+  loyalty 2
+  body "Quest. Action: Sacrifice the unit on this quest to destroy all enemy support cards. Use this ability only if Smash 'Em All! has 3 or more resource tokens on it. Quest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here."
+  forced accrueTokenWhileQuesting
+  action "Smash them all" 0 \usage ->
+    withQuest usage.self.key \q ->
+      when (q.tokens >= 3) $
+        for_ q.questingUnit \quester -> do
+          destroyUnit quester
+          g <- getGame
+          let enemySupports =
+                [ s.key
+                | s <- g.supports
+                , s.controller /= usage.user
+                , s.attachedTo == Nothing
+                ]
+          for_ enemySupports destroySupport
+
+grimgorsCamp :: CardDef Support
+grimgorsCamp = supportCard "core-073" "Grimgor's Camp" do
+  race Orc
+  cost 3
   loyalty 1
   power 1
   trait Building
-  body "Kingdom. Forced: At the beginning of your turn, deal 1 damage to one target enemy zone."
-  kingdom $ forced \self ->
-    onTurnBegin self.controller $
-      withTarget self.controller enemyCapital \(owner, z) ->
-        dealZoneDamage owner z 1
+  body "Kingdom. Lower the cost of the first {orc} unit you play each turn by 1."
+  globalCostAdjust \g self pk filt ->
+    let h = case Map.lookup ThisTurn g.history of
+              Just hx -> hx
+              Nothing -> mempty
+        played = Map.findWithDefault 0 pk h.unitsPlayedBy
+        zoneGate = self.zone == KingdomZone
+     in if pk == self.controller
+           && zoneGate
+           && filt.cfKind == Unit
+           && Orc `elem` filt.cfRaces
+           && played == 0
+          then -1
+          else 0
 
-orcWarmachine :: CardDef Support
-orcWarmachine = supportCard "core-125" "Orc Warmachine" do
+smashGoBoom :: CardDef Tactic
+smashGoBoom = tacticCard "core-074" "Smash-Go-Boom!" do
   race Orc
-  cost 3
+  costVariable
   loyalty 2
-  trait Siege
-  body "Battlefield. Action: Sacrifice a unit to deal 2 damage to a target zone."
+  body "Play during your turn. Action: Destroy X target developments in one zone."
+  whenResolved \self ->
+    when (self.xValue > 0) $
+      withTarget self.controller AnyDevelopmentZone \(owner, zk) ->
+        replicateM_ self.xValue (destroyDevelopment owner zk)
 
-greenskinRush :: CardDef Quest
-greenskinRush = questCard "core-126" "Greenskin Rush" do
-  race Orc
-  cost 0
-  loyalty 2
-  body
-    "Quest. Forced: At the beginning of your turn, place 1 resource token here if a unit is questing here.\n\
-    \Action: Spend 2 tokens to put a Goblin unit from your hand into play."
-  forced accrueTokenWhileQuesting
-  spendTokens "Summon a Goblin unit" 2 \u -> do
-    me <- playerOf u.user <$> getGame
-    let goblinsInHand = filter (cardIs goblinCodes) me.hand
-    chooseFromCards u.user 0 1 goblinsInHand
-      "Choose a Goblin unit to put into play." \chosen ->
-        for_ chosen \c ->
-          putUnitIntoPlay u.user FromHand c.key BattlefieldZone
-  where
-    goblinCodes =
-      [ CardCode "core-114"  -- Night Goblins
-      , CardCode "core-115"  -- Goblin Wolf Riders
-      , CardCode "core-119"  -- Forest Goblin Spider Riders
-      , CardCode "core-120"  -- Snotlings
-      ]
-    cardIs codes c = case c.def of
-      UnitCardDef cd -> cd.code `elem` codes
-      _ -> False
-
-waaagh :: CardDef Tactic
-waaagh = tacticCard "core-127" "Waaagh!" do
-  race Orc
-  cost 2
-  loyalty 2
-  body "Action: Each of your Orc units gains {power}{power} until the end of the turn."
-  playableWhen $ hasTarget ownOrcs
-  whenResolved \self -> buffEachUntilEoT self.controller ownOrcs 2
-  where
-    ownOrcs = UnitMatching \pk _ u -> u.controller == pk && u `isRace` Orc
-
-crushEm :: CardDef Tactic
-crushEm = tacticCard "core-128" "Crush 'Em" do
+ripDereEadsOff :: CardDef Tactic
+ripDereEadsOff = tacticCard "core-075" "Rip Dere 'eads Off!" do
   race Orc
   cost 1
   loyalty 1
-  body "Action: Target unit gains {power}{power}{power} until the end of the turn; sacrifice it at end of turn."
-  playableWhen $ hasTarget AnyUnit
+  body "Action: Turn one target development faceup. If it is a unit, leave it in play and sacrifice it at the end of the turn. Otherwise, sacrifice it immediately."
+  playableWhen \g _ -> hasAnyDevelopment g
   whenResolved \self ->
-    withTarget self.controller AnyUnit \k -> do
-      until EndOfTurn $ buffPower k 3
-      queueEoTDamage k 99
+    withTarget self.controller AnyDevelopmentZone \(owner, zk) ->
+      flipDevelopment owner zk
 
-runEmDown :: CardDef Tactic
-runEmDown = tacticCard "core-129" "Run 'Em Down" do
+wezBigga :: CardDef Tactic
+wezBigga = tacticCard "core-076" "We'z Bigga!" do
+  race Orc
+  cost 0
+  loyalty 1
+  body "Action: Lower the cost of the next unit you play this turn by 1. That unit comes into play with 1 damage on it."
+  whenResolved \self -> do
+    push (ScheduleNextUnitDiscount self.controller 1)
+    push (ScheduleNextUnitDamage self.controller 1)
+
+favourOfMork :: CardDef Tactic
+favourOfMork = tacticCard "core-077" "Favour of Mork" do
+  race Orc
+  cost 1
+  loyalty 2
+  trait Spell
+  body "Action: One target unit loses {power} and another target unit gains {power} until the end of the turn."
+  whenResolved \self -> do
+    let pk = self.controller
+    withTarget pk AnyUnit \loser ->
+      withTarget pk AnyUnit \winner -> do
+        until EndOfTurn $ buffPower loser (-1)
+        until EndOfTurn $ buffPower winner 1
+
+pillage :: CardDef Tactic
+pillage = tacticCard "core-078" "Pillage" do
   race Orc
   cost 2
-  loyalty 1
-  body "Action: Deal 1 damage to each enemy unit in target zone."
-  playableWhen $ hasTarget enemyCapital
-  whenResolved \self ->
-    withTarget self.controller enemyCapital \(_, z) ->
-      damageEachEnemyInZone self.controller z 1
-
-daBigStomp :: CardDef Tactic
-daBigStomp = tacticCard "core-130" "Da Big Stomp" do
-  race Orc
-  cost 3
   loyalty 2
-  body "Action: Destroy target support card or development."
+  body "Action: Destroy one target support card."
   playableWhen hasEnemySupport
   tacticTargets SupportTargetSchema
   onResolveEnemySupport \_pk s -> destroySupport s.key
+
+waaagh :: CardDef Tactic
+waaagh = tacticCard "core-079" "Waaagh!" do
+  race Orc
+  cost 3
+  loyalty 2
+  body "Action: Each attacking unit gains {power}{power} until the end of the turn."
+  whenResolved \_ ->
+    withCombat \cs ->
+      for_ cs.attackers \k ->
+        until EndOfTurn $ buffPower k 2
+
+trollVomit :: CardDef Tactic
+trollVomit = tacticCard "core-080" "Troll Vomit" do
+  race Orc
+  cost 4
+  loyalty 2
+  body "Play during your turn. Action: Destroy all units in play."
+  whenResolved \_ -> do
+    g <- getGame
+    for_ g.units \u -> destroyUnit u.key
+
+-- | A small lifted lookup that retrieves the unit list from
+-- 'getGame'. The 'effects' DSL works inside 'EffectM', not a 'HasGame'
+-- monad; we drive it through getGame manually.
+getGameUnits :: HasGame m => m [UnitDetails]
+getGameUnits = (.units) <$> getGame
+
+-- | True if any zone (either player's) has at least one development.
+-- Used as a 'playableWhen' gate for development-targeting tactics.
+hasAnyDevelopment :: Game -> Bool
+hasAnyDevelopment g =
+  let withDev :: [Zone] -> Bool
+      withDev zs = any (\z -> case z.developments of Developments n -> n > 0) zs
+   in withDev g.player1.capital.zones || withDev g.player2.capital.zones

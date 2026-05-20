@@ -25,10 +25,10 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type {
   EngineCard,
-  EngineCardDef,
   EngineLegend,
   EnginePlayer,
   EngineQuest,
+  EngineSupport,
   EngineUnit,
   EngineZone,
   PlayerKey,
@@ -42,6 +42,12 @@ import CardArt from './CardArt.vue'
 const props = defineProps<{
   player: EnginePlayer
   units: EngineUnit[]
+  // Free-standing (non-attached) supports controlled by this player.
+  // Attached supports live inside their host unit's `attachments` and
+  // are rendered through that path; this list is just the floating
+  // ones (Kingdom / Battlefield / Quest supports like Keystone Forge,
+  // Grudge Thrower).
+  supports: EngineSupport[]
   quests: EngineQuest[]
   legend: EngineLegend | null
   perspective: 'self' | 'opponent'
@@ -53,7 +59,11 @@ const props = defineProps<{
   seatNames: Record<PlayerKey, string>
   isActive: boolean
   isFirstPlayer: boolean
-  canPlayCard?: (card: EngineCardDef) => boolean
+  canPlayCard?: (card: EngineCard) => boolean
+  // Tags a hand card as currently unplayable. Such cards stay
+  // clickable (so the popover can explain why) but render dimmed so
+  // the player sees at a glance which choices are unavailable.
+  cardIsUnplayable?: (card: EngineCard) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -256,6 +266,14 @@ const ATTACHMENT_OFFSET = 16
 const zoneUnits = (z: EngineZone): EngineUnit[] =>
   props.units.filter((u) => u.zone === zoneToZoneKind(z))
 
+// Free-standing supports in this zone for this player. Attached
+// supports show up under their host unit's render path, so we exclude
+// anything with a non-null 'attachedTo'.
+const zoneSupports = (z: EngineZone): EngineSupport[] =>
+  props.supports.filter(
+    (s) => s.attachedTo === null && s.zone === zoneToZoneKind(z),
+  )
+
 function zoneToZoneKind(z: EngineZone): ZoneKind {
   return z.kind
 }
@@ -352,9 +370,18 @@ const handCards = computed<Array<EngineCard | null>>(() => {
 })
 
 function isCardClickable(card: EngineCard | null): boolean {
+  // Any face-up card in our own hand is clickable: a playable card
+  // opens the play picker, an unplayable one opens the reason panel.
+  // Both routes go through the same `hand-card-click` emit; PlayView
+  // decides which popover to render.
   if (!card || props.perspective !== 'self') return false
-  if (!props.canPlayCard) return false
-  return props.canPlayCard(card)
+  return true
+}
+
+function isCardUnplayable(card: EngineCard | null): boolean {
+  if (!card || props.perspective !== 'self') return false
+  if (!props.cardIsUnplayable) return false
+  return props.cardIsUnplayable(card)
 }
 
 const handXs = computed(() =>
@@ -398,6 +425,11 @@ interface CardSlot {
   faceDown: boolean
   rotated: boolean
   clickable: boolean
+  // Hand-only: the engine has flagged this card as not playable right
+  // now (insufficient resources, wrong window, …). Slot still
+  // 'clickable' so a tap can show the reason. Non-hand slots leave
+  // this 'undefined' — only the hand-card branch sets it.
+  unplayable?: boolean
   // Position in SVG viewBox units.
   x: number
   y: number
@@ -429,6 +461,7 @@ const cardSlots = computed<CardSlot[]>(() => {
       faceDown: props.perspective === 'opponent',
       rotated: false,
       clickable: isCardClickable(c),
+      unplayable: isCardUnplayable(c),
       x: hxs[i],
       y: hy,
       w: CARD_SM.w,
@@ -457,12 +490,20 @@ const cardSlots = computed<CardSlot[]>(() => {
   }
 
   // Zone units + their attachments. Attachments first (so they render
-  // BEHIND the unit they're attached to), unit on top.
+  // BEHIND the unit they're attached to), unit on top. Free-standing
+  // supports (Buildings, Siege weapons, Runes) sit in the same lane
+  // after the units.
   for (const zr of zones.value) {
     const units = zoneUnits(zr.z)
+    const supports = zoneSupports(zr.z)
     if (zr.w > zr.h) {
       // Landscape zone — battlefield. Cards spread horizontally.
-      const xsLane = evenSpread(units.length, zr.x + 12, zr.w - 24, CARD_SM.w)
+      const xsLane = evenSpread(
+        units.length + supports.length,
+        zr.x + 12,
+        zr.w - 24,
+        CARD_SM.w,
+      )
       const ySlot = zr.y + (zr.h - CARD_SM.h) / 2
       units.forEach((u, i) => {
         u.attachments.forEach((att, ai) => {
@@ -494,6 +535,22 @@ const cardSlots = computed<CardSlot[]>(() => {
           zIndex: 30 + u.attachments.length + 1,
         })
       })
+      supports.forEach((s, j) => {
+        slots.push({
+          key: `support-${s.key}`,
+          cardKey: s.key,
+          card: { code: s.cardDef.code, title: s.cardDef.title },
+          faceDown: false,
+          rotated: false,
+          clickable: false,
+          x: xsLane[units.length + j],
+          y: ySlot,
+          w: CARD_SM.w,
+          h: CARD_SM.h,
+          zIndex: 30,
+          tokens: s.tokens > 0 ? s.tokens : undefined,
+        })
+      })
     } else {
       // Portrait zone — kingdom / quest. Cards stack vertically. The
       // quest zone also hosts any in-play quest cards whose zoneOwner
@@ -506,7 +563,7 @@ const cardSlots = computed<CardSlot[]>(() => {
       const ysLane = tallStackYs(
         zr.y + 26,
         zr.h - 26 - 30,
-        zoneQuests.length + units.length,
+        zoneQuests.length + units.length + supports.length,
       )
 
       zoneQuests.forEach((q, i) => {
@@ -559,6 +616,24 @@ const cardSlots = computed<CardSlot[]>(() => {
           w: CARD_SM.w,
           h: CARD_SM.h,
           zIndex: 30 + u.attachments.length + 1,
+        })
+      })
+
+      supports.forEach((s, j) => {
+        const yBase = ysLane[zoneQuests.length + units.length + j]
+        slots.push({
+          key: `support-${s.key}`,
+          cardKey: s.key,
+          card: { code: s.cardDef.code, title: s.cardDef.title },
+          faceDown: false,
+          rotated: false,
+          clickable: false,
+          x: xSlot,
+          y: yBase,
+          w: CARD_SM.w,
+          h: CARD_SM.h,
+          zIndex: 30,
+          tokens: s.tokens > 0 ? s.tokens : undefined,
         })
       })
     }
@@ -848,7 +923,7 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
         v-for="slot in cardSlots"
         :key="slot.key"
         class="card-slot"
-        :class="{ clickable: slot.clickable }"
+        :class="{ clickable: slot.clickable, unplayable: slot.unplayable }"
         :style="slotStyle(slot)"
         @click="onSlotClick(slot, $event)"
       >
@@ -905,6 +980,18 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
 }
 .card-slot.clickable:hover {
   filter: drop-shadow(0 0 6px var(--accent, #c4634a));
+}
+/* Unplayable hand cards stay clickable (tap to learn why) but render
+   dimmed and desaturated so the player sees the available choices at a
+   glance. Hover hint shifts to a warning tint instead of the regular
+   "you can play this" glow. */
+.card-slot.unplayable {
+  opacity: 0.55;
+  filter: grayscale(0.4);
+}
+.card-slot.unplayable.clickable:hover {
+  filter: grayscale(0.4) drop-shadow(0 0 6px rgba(180, 60, 60, 0.55));
+  opacity: 0.75;
 }
 
 .card-controller-banner {

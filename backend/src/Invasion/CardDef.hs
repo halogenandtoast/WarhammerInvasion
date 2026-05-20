@@ -64,7 +64,8 @@ data Trait
   | Siege
   | Daemon
   | Creature
-  | Sorcerer
+  | Sorceror
+    -- ^ Printed spelling on the cards.
   | Knight
   | Cavalry
   | Mission
@@ -73,6 +74,15 @@ data Trait
   | CapitalCenter
   | Rift
   | Relic
+  | Banner
+  | Goblin
+  | Mage
+  | Mutation
+  | Noble
+  | Shaman
+  | Skill
+  | Warpstone
+  | Zealot
   deriving stock (Show, Eq)
 
 mconcat
@@ -229,6 +239,35 @@ data UnitExtras = UnitExtras
     -- builders ('battlefield', 'kingdom', 'quest') in 'Invasion.Card'.
     -- Returns an 'ActiveEffect' monoid that the engine folds into the
     -- unit's cached stats alongside 'selfPowerBonus' and aura sources.
+  , unitCostAdjustment :: Game -> InPlay Unit -> PlayerKey -> CardCodeFilter -> Int
+    -- ^ Cost-of-play adjustment this in-play unit imposes on another
+    -- card being played (Nuln Tinkerers: -1 on the controller's
+    -- first support of the turn). Mirrors the support-side
+    -- 'globalCostAdjustment' slot.
+  , unitAuraToughness :: Game -> InPlay Unit -> InPlay Unit -> Int
+    -- ^ Extra Toughness this in-play unit grants another unit while
+    -- both are in play (Big 'Uns: +1 toughness to my damaged units
+    -- while it's on the battlefield). Sums across stacked sources.
+  , preDamageRedirect :: Game -> InPlay Unit -> Int -> Maybe PreDamageRedirect
+    -- ^ Consulted by the engine's 'DealDamageToUnit' handler BEFORE
+    -- the damage lands. Args: game, the unit about to take damage,
+    -- the inbound (post-multiplier, post-toughness) amount. Return
+    -- 'Just plan' to claim some or all of the damage and route it
+    -- elsewhere; 'Nothing' lets the damage land normally.
+  }
+
+-- | Card-supplied redirect plan returned from 'preDamageRedirect'.
+-- The engine pulls @amount@ off the original target's incoming
+-- damage and runs @run@, which is expected to enqueue the
+-- redirected damage and mark whatever per-turn state the card uses
+-- to avoid double-triggering.
+data PreDamageRedirect = PreDamageRedirect
+  { amount :: Int
+  , run :: ActionEffect 'Unit
+    -- ^ Reuses 'ActionEffect' purely to get the same constrained
+    -- monad (HasGame + HasPromptIO + HasQueue Message). The
+    -- 'ActionUsage' it receives carries the unit being redirected
+    -- and the firing player (always the unit's controller).
   }
 
 -- | Accumulator for the runtime output of an 'EffectM' builder block.
@@ -284,6 +323,17 @@ data SupportExtras = SupportExtras
     -- ^ Marks the printed Rune of Fortitude effect: every attacker
     -- of the zone owes 1 resource to its controller or eats a
     -- @-1@ power penalty for the combat.
+  , supportTargetTax :: Game -> InPlay Support -> PlayerKey -> InPlay Unit -> Int
+    -- ^ Extra resources an effect must pay to target one of this
+    -- support's controller's units (Church of Sigmar: 1 for
+    -- opponents while in kingdom). Args: game, this support, the
+    -- player firing the effect, the unit being targeted. Stacks
+    -- with King Kazador-style per-unit 'extraTargetTax'.
+  , supportAuraHP :: Game -> InPlay Support -> InPlay Unit -> Int
+    -- ^ Extra HP this support grants (positive) or subtracts
+    -- (negative) from a unit while both are in play (Horrific
+    -- Mutation: -1 HP to defenders while host attacks). Read by
+    -- 'recomputeUnitStats' alongside 'attachmentHPBonus'.
   }
 
 -- | Static metadata about a card that's currently being played, used
@@ -326,6 +376,9 @@ instance HasDefaultExtras Unit where
     , extraTargetTax = \_ _ _ -> 0
     , damageMultiplierWhileInPlay = 1
     , runtimeEffects = \_ _ -> mempty
+    , unitCostAdjustment = \_ _ _ _ -> 0
+    , unitAuraToughness = \_ _ _ -> 0
+    , preDamageRedirect = \_ _ _ -> Nothing
     }
 
 instance HasDefaultExtras Support where
@@ -337,6 +390,8 @@ instance HasDefaultExtras Support where
     , supportCombatBonus = \_ _ _ -> 0
     , zonePowerBonus = \_ _ _ -> 0
     , globalCostAdjustment = \_ _ _ _ -> 0
+    , supportTargetTax = \_ _ _ _ -> 0
+    , supportAuraHP = \_ _ _ -> 0
     , runeOfFortitudeTax = False
     }
 

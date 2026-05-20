@@ -70,6 +70,13 @@ race r = modify \cardDef -> cardDef {races = r : cardDef.races}
 cost :: Int -> CardBuilder k ()
 cost c = modify \cardDef -> cardDef {cost = Fixed c}
 
+-- | Variable-cost cards: the printed cost is "X" and the actual cost
+-- is determined when the card is played (Smash-Go-Boom!, Flames of
+-- Tzeentch, ...). The engine skips the standard pay-X-resources flow
+-- for these — per-card resolution is up to the effect body.
+costVariable :: CardBuilder k ()
+costVariable = modify \cardDef -> cardDef {cost = Variable}
+
 loyalty :: Int -> CardBuilder k ()
 loyalty l = modify \cardDef -> cardDef {loyalty = l}
 
@@ -120,6 +127,12 @@ counterstrike n = keyword (Counterstrike n)
 -- development is face-down. Used by Cataclysm-era developments.
 ambush :: CardBuilder k ()
 ambush = keyword Ambush
+
+-- | Limited keyword: only one Limited card may be played each turn,
+-- regardless of which Limited card it is. Enforced by the engine in
+-- 'canPlayCard' via the per-turn 'limitedPlayed' history bucket.
+limited :: CardBuilder k ()
+limited = keyword Limited
 
 -- | Order Only keyword: cannot be included in a Destruction deck.
 orderOnly :: CardBuilder k ()
@@ -218,6 +231,25 @@ combatPower f = modifyUnitExtras \e -> e {combatPowerBonus = f}
 unitAura :: (Game -> UnitDetails -> UnitDetails -> Int) -> CardBuilder Unit ()
 unitAura f = modifyUnitExtras \e -> e {unitAuraPower = f}
 
+-- | Aura toughness granted to other units. Source unit is 'self';
+-- target unit is the third arg. Used by Big 'Uns ("Your damaged
+-- units gain Toughness 1").
+toughnessAura :: (Game -> UnitDetails -> UnitDetails -> Int) -> CardBuilder Unit ()
+toughnessAura f = modifyUnitExtras \e -> e {unitAuraToughness = f}
+
+-- | Install a pre-damage redirect plan. The slice receives the
+-- in-flight damage and decides whether (and how much) to claim;
+-- when it returns 'Just', the engine pulls that many points off
+-- the original target and runs the supplied body, which is
+-- expected to enqueue the redirected damage and mark its own
+-- per-turn cooldown if applicable. Used by Warrior Priests and
+-- Defend the Border.
+preDamageRedirectHook
+  :: (Game -> UnitDetails -> Int -> Maybe PreDamageRedirect)
+  -> CardBuilder Unit ()
+preDamageRedirectHook f =
+  modifyUnitExtras \e -> e {preDamageRedirect = f}
+
 -- | Predicate gating attacker eligibility (Sworn of Khorne).
 canAttack :: (Game -> PlayerKey -> ZoneKind -> UnitDetails -> Bool) -> CardBuilder Unit ()
 canAttack f = modifyUnitExtras \e -> e {canAttackZone = f}
@@ -315,6 +347,30 @@ globalCostAdjust
   :: (Game -> SupportDetails -> PlayerKey -> CardCodeFilter -> Int)
   -> CardBuilder Support ()
 globalCostAdjust f = modifySupportExtras \e -> e {globalCostAdjustment = f}
+
+-- | Cost-of-play adjustment this in-play unit imposes on other cards
+-- being played (Nuln Tinkerers: -1 on the controller's first support
+-- of the turn). Mirrors 'globalCostAdjust' on the support side.
+unitCostAdjust
+  :: (Game -> UnitDetails -> PlayerKey -> CardCodeFilter -> Int)
+  -> CardBuilder Unit ()
+unitCostAdjust f = modifyUnitExtras \e -> e {unitCostAdjustment = f}
+
+-- | Support-side target tax that fires when an effect targets a
+-- specific unit (Church of Sigmar: opponents pay +1 to target
+-- the controller's units). Args: game, this support, the player
+-- firing the effect, the targeted unit.
+supportTax
+  :: (Game -> SupportDetails -> PlayerKey -> UnitDetails -> Int)
+  -> CardBuilder Support ()
+supportTax f = modifySupportExtras \e -> e {supportTargetTax = f}
+
+-- | Per-tick HP adjustment this support grants another unit. Used
+-- by Horrific Mutation (defenders lose 1 HP while host attacks).
+supportHPAura
+  :: (Game -> SupportDetails -> UnitDetails -> Int)
+  -> CardBuilder Support ()
+supportHPAura f = modifySupportExtras \e -> e {supportAuraHP = f}
 
 -- | Mark the printed Rune of Fortitude effect on this support.
 imposesRuneOfFortitudeTax :: CardBuilder Support ()

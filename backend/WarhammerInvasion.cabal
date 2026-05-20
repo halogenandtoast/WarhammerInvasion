@@ -33,6 +33,7 @@ library
       Invasion.Card.Defs.Dwarf
       Invasion.Card.Defs.Empire
       Invasion.Card.Defs.HighElf
+      Invasion.Card.Defs.Neutral
       Invasion.Card.Defs.Orc
       Invasion.Card.Effects
       Invasion.Card.Triggers

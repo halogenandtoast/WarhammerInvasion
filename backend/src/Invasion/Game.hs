@@ -14,6 +14,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import {-# SOURCE #-} Invasion.Card.Types (Card)
 import Invasion.Capital
+import Invasion.CardDef (ActionTarget)
 import Invasion.Entity (LegendDetails, QuestDetails, SupportDetails, UnitDetails)
 import Invasion.Modifier
 import Invasion.Player
@@ -167,6 +168,14 @@ data PromptKind
     -- options list is a heterogeneous mix of units / capital zones /
     -- … and the player picks exactly one. The response is the
     -- chosen 'TargetOption'.
+  | ChooseAmount
+      { minAmount :: Int
+      , maxAmount :: Int
+      , description :: Text
+      }
+    -- ^ Pick an integer in @[minAmount, maxAmount]@. Used by
+    -- variable-cost cards (Smash-Go-Boom!, Flames of Tzeentch) to
+    -- ask the player how much X to pay; response is the chosen X.
   deriving stock Show
 
 -- | A single tagged target option offered to the player by
@@ -220,6 +229,10 @@ data PendingEffect
   | PESacrificeAttackersThisPhase
     -- ^ Destroy every unit currently recorded in
     -- 'Game.attackersThisPhase'. Used by Reckless Attack.
+  | PEDestroyUnit UnitKey
+    -- ^ Destroy the named unit unconditionally when the effect
+    -- fires. Used by Rip Dere 'eads Off! and similar
+    -- "sacrifice at end of turn" effects.
   deriving stock Show
 
 -- | In-flight combat state. Set on 'BeginCombat', mutated through the
@@ -312,6 +325,14 @@ data History = History
     -- ^ Total damage landed on each unit in this scope.
   , limitedPlayed :: Int
     -- ^ How many Limited cards have been played in this scope.
+  , supportsPlayedBy :: Map PlayerKey Int
+    -- ^ Per-player count of Support cards that player has played in
+    -- this scope. Read by cost-discount cards that fire on the
+    -- first support of the turn (Nuln Tinkerers, Grimgor's Camp).
+  , unitsPlayedBy :: Map PlayerKey Int
+    -- ^ Per-player count of Unit cards that player has played in
+    -- this scope. Used by We'z Bigga!-style "next unit"
+    -- discounts when that lands.
   }
   deriving stock Show
 
@@ -322,6 +343,8 @@ instance Semigroup History where
     , damagedUnits = a.damagedUnits <> b.damagedUnits
     , damageTaken = Map.unionWith (+) a.damageTaken b.damageTaken
     , limitedPlayed = a.limitedPlayed + b.limitedPlayed
+    , supportsPlayedBy = Map.unionWith (+) a.supportsPlayedBy b.supportsPlayedBy
+    , unitsPlayedBy = Map.unionWith (+) a.unitsPlayedBy b.unitsPlayedBy
     }
 
 instance Monoid History where
@@ -331,6 +354,8 @@ instance Monoid History where
     , damagedUnits = []
     , damageTaken = Map.empty
     , limitedPlayed = 0
+    , supportsPlayedBy = Map.empty
+    , unitsPlayedBy = Map.empty
     }
 
 -- | Initial history map with every 'Scope' present at 'mempty'.
@@ -415,6 +440,34 @@ data Game = Game
     -- action window has neither a Tactic card in hand nor an in-play
     -- own card carrying an action ability. Combat sub-step windows
     -- already auto-pass regardless of this flag.
+  , capitalShields :: Map PlayerKey Int
+    -- ^ Per-player count of "cancel the next 1 capital damage this
+    -- turn" tokens. Decremented when 'DealDamageToZone' fires and
+    -- reset to 0 at 'BeginTurn'. Today only Contested Fortress
+    -- writes to this; future cards that cancel capital damage add
+    -- to the same pool.
+  , pendingUnitDiscount :: Map PlayerKey Int
+    -- ^ Per-player "next unit you play costs N less". Decremented
+    -- to 0 on first 'PlayUnit'. Reset at 'BeginTurn'. Written by
+    -- We'z Bigga!.
+  , pendingUnitOnPlayDamage :: Map PlayerKey Int
+    -- ^ Per-player "next unit you play comes in with N damage".
+    -- Consumed on first 'PlayUnit'. Reset at 'BeginTurn'. Written
+    -- by We'z Bigga!.
+  , unitsRedirectedThisTurn :: Map UnitKey Int
+    -- ^ Per-unit count of "first damage redirect" effects already
+    -- consumed this turn. Cards with a once-per-turn redirect
+    -- (Warrior Priests) check this before firing. Reset at
+    -- 'BeginTurn'.
+  , lastResolvedTactic :: Maybe (CardCode, ActionTarget, Int)
+    -- ^ The most recently resolved tactic, with the target it
+    -- carried and the X paid. Used by Twin-Tailed Comet to copy
+    -- the previous tactic. Cleared at end of turn.
+  , pendingActionCancel :: Map PlayerKey Int
+    -- ^ Per-player count of "next card action cancel" tokens.
+    -- Decremented and consumed on the next 'TriggerCardAction'
+    -- firing for that player. Written by Bright Wizard Apprentice;
+    -- reset at end of turn.
   }
   deriving stock Show
 
@@ -428,6 +481,8 @@ data PromptResult
     -- ^ Yes/No answer for 'ChooseYesNo'.
   | PickTargetOption TargetOption
     -- ^ The chosen tagged option from a 'ChooseTargetOption' prompt.
+  | PickAmount Int
+    -- ^ Integer answer to a 'ChooseAmount' prompt.
   | PickNone
     -- ^ Player declined / no eligible target.
   deriving stock Show

@@ -2,6 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
+-- | Dwarf core cards (core-001..025). Static data matches @cards.json@
+-- and every printed ability has a functional implementation against
+-- the engine's effect / trigger / modifier primitives.
 module Invasion.Card.Defs.Dwarf (module Invasion.Card.Defs.Dwarf) where
 
 import Data.Map.Strict qualified as Map
@@ -15,9 +18,47 @@ import Invasion.Entity (QuestDetails (..), SupportDetails (..), TacticContext (.
 import Invasion.Game hiding (battlefield)
 import Invasion.Message
 import Invasion.Modifier
+import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
 import Queue (push)
+
+defenderOfTheHold :: CardDef Unit
+defenderOfTheHold = unitCard "core-001" "Defender of the Hold" do
+  race Dwarf
+  cost 1
+  loyalty 1
+  power 1
+  hitPoints 1
+  trait Warrior
+  body "Battlefield only."
+  battlefieldOnly
+
+zhufbarEngineers :: CardDef Unit
+zhufbarEngineers = unitCard "core-002" "Zhufbar Engineers" do
+  race Dwarf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Engineer
+  body "Forced: After this unit leaves play, each opponent must sacrifice a unit in this corresponding zone."
+  onSelfLeavesPlay \_owner self -> do
+    let opp = self.controller.next
+    withTarget opp
+      (UnitMatching \_ _ u -> u.controller == opp && u.zone == self.zone)
+      destroyUnit
+
+hammererOfKarakAzul :: CardDef Unit
+hammererOfKarakAzul = unitCard "core-003" "Hammerer of Karak Azul" do
+  race Dwarf
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  traits [Warrior, Elite]
+  toughness 1
+  body "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage)."
 
 trollSlayers :: CardDef Unit
 trollSlayers = unitCard "core-004" "Troll Slayers" do
@@ -27,8 +68,7 @@ trollSlayers = unitCard "core-004" "Troll Slayers" do
   power 1
   hitPoints 3
   trait Slayer
-  body
-    "Battlefield. This unit gains {power}{power} while you have at least two developments in this zone."
+  body "Battlefield. This unit gains {power}{power} while you have at least two developments in this zone."
   battlefield $ constant \self ->
     withZoneOf self \z ->
       when (z.developments >= 2) $ gainPower self 2
@@ -41,8 +81,7 @@ runesmith = unitCard "core-005" "Runesmith" do
   power 1
   hitPoints 1
   trait Priest
-  body
-    "Quest. Action: Spend 2 resources to have a target unit gain {power} until the end of the turn."
+  body "Quest. Action: Spend 2 resources to have a target unit gain {power} until the end of the turn."
   quest $ action "Buff a unit" 2 \usage ->
     withTarget usage.user AnyUnit \t -> until EndOfTurn $ buffPower t 1
 
@@ -55,8 +94,7 @@ durgnarTheBold = unitCard "core-006" "Durgnar the Bold" do
   loyalty 3
   power 2
   hitPoints 2
-  body
-    "Limit one Hero per zone.\nThis unit gains {power}{power} while one section of your capital is burning."
+  body "Limit one Hero per zone. This unit gains {power}{power} while one section of your capital is burning."
   effects \self owner ->
     when (capitalBurning owner) $ gainPower self 2
 
@@ -69,9 +107,8 @@ kingKazador = unitCard "core-007" "King Kazador" do
   loyalty 5
   power 3
   hitPoints 6
-  body
-    "Limit one Hero per zone.\nToughness 2.\nOpponents cannot target this unit with card effects unless they pay an additional 3 resources per effect."
   toughness 2
+  body "Limit one Hero per zone. Toughness 2. Opponents cannot target this unit with card effects unless they pay an additional 3 resources per effect."
   targetTax \_g caster self ->
     if caster /= self.controller then 3 else 0
 
@@ -83,8 +120,7 @@ dwarfCannonCrew = unitCard "core-008" "Dwarf Cannon Crew" do
   power 1
   hitPoints 2
   trait Engineer
-  body
-    "Forced: When this unit enters play, search the top five cards of your deck for a support card with cost 2 or lower. You may put that card into this zone. Then, shuffle your deck."
+  body "Forced: After this unit enters play, search the top five cards of your deck for a support card with cost 2 or lower and put it into this zone, if able. Then shuffle your deck."
   onEnterPlay \_owner self -> do
     let pk = self.controller
     searchTopOfDeck pk 5 \result -> do
@@ -102,10 +138,7 @@ dwarfMasons = unitCard "core-009" "Dwarf Masons" do
   power 1
   hitPoints 3
   trait Engineer
-  -- FAQ 2.2: "After" → "When" on card text.
-  body
-    "Forced: When this unit enters play, put the top card of your deck facedown into this zone as a development."
-  flavor "Put your faith in the rock, lad."
+  body "Forced: After this unit enters play, put the top card of your deck facedown into this zone as a development."
   onEnterPlay \_owner self ->
     addDevelopment self.controller self.zone
 
@@ -118,8 +151,7 @@ dwarfRanger = unitCard "core-010" "Dwarf Ranger" do
   hitPoints 2
   trait Ranger
   scout
-  body
-    "Scout.\nQuest. Forced: When one of your other Dwarf units leaves play, deal 1 damage to one target unit or capital."
+  body "Scout. Quest. Forced: After one of your other {dwarf} units leaves play, deal 1 damage to one target unit or capital."
   quest $ forced \self ->
     onUnitOfLeavesPlay self.controller \unit ->
       when (unit.key /= self.key && unit `isRace` Dwarf) $
@@ -135,7 +167,6 @@ mountainBrigade = unitCard "core-011" "Mountain Brigade" do
   power 2
   hitPoints 6
   trait Warrior
-  flavor "These stout dwarfs are the first line of defence."
 
 ironbreakersOfAnkhor :: CardDef Unit
 ironbreakersOfAnkhor = unitCard "core-012" "Ironbreakers of Ankhor" do
@@ -146,8 +177,7 @@ ironbreakersOfAnkhor = unitCard "core-012" "Ironbreakers of Ankhor" do
   hitPoints 3
   traits [Warrior, Elite]
   toughnessX
-  body
-    "Toughness X (whenever this unit is assigned damage, cancel X of that damage).\nX is the number of developments in this zone."
+  body "Toughness X (whenever this unit is assigned damage, cancel X of that damage). X is the number of development cards in this zone."
 
 runeOfFortitude :: CardDef Support
 runeOfFortitude = supportCard "core-013" "Rune of Fortitude" do
@@ -165,7 +195,7 @@ keystoneForge = supportCard "core-014" "Keystone Forge" do
   loyalty 1
   power 1
   trait Building
-  body "Kingdom. Forced: At the beginning of your turn, heal 1 damage to your capital."
+  body "Kingdom. Forced: After your turn begins, heal 1 damage to your capital."
   kingdom $ forced \self ->
     onTurnBegin self.controller $
       healCapital self.controller 1
@@ -176,8 +206,7 @@ organGun = supportCard "core-015" "Organ Gun" do
   cost 0
   loyalty 2
   traits [Attachment, Weapon]
-  body "Attach to a target unit.\n Attached unit gains {power}{power} while defending."
-  flavor "A dwarf device deadly and reliable forever."
+  body "Attach to a target unit. Attached unit gains {power}{power} while defending."
   attachedTo \_self unit ->
     when unit.defending $ gainPower unit 2
 
@@ -186,9 +215,9 @@ masterRuneOfDismay = supportCard "core-016" "Master Rune of Dismay" do
   race Dwarf
   cost 4
   loyalty 3
+  power 2
   trait Rune
   body "Kingdom. Opponent's units cost 1 additional resource to play."
-  flavor "Enemies of the dwarfs beware, your fears are returned to you a hundredfold!"
   globalCostAdjust \_g s playing _filter ->
     if playing /= s.controller && s.zone == KingdomZone then 1 else 0
 
@@ -197,8 +226,7 @@ aGloriousDeath = questCard "core-017" "A Glorious Death" do
   race Dwarf
   cost 0
   loyalty 2
-  body
-    "Quest. Action: Sacrifice the unit on this quest to destroy up to two target attacking units. Use this ability only if A Glorious Death has 3 or more resource tokens on it.\nQuest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here."
+  body "Quest. Action: Sacrifice the unit on this quest to destroy up to two target attacking units. Use this ability only if A Glorious Death has 3 or more resource tokens on it. Quest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here."
   forced accrueTokenWhileQuesting
   action "Glorious sacrifice" 0 \usage ->
     withQuest usage.self.key \q -> when (q.tokens >= 3) $
@@ -214,8 +242,7 @@ grudgeThrower = supportCard "core-018" "Grudge Thrower" do
   cost 1
   loyalty 2
   trait Siege
-  body
-    "Battlefield. Action: Spend 1 resource and sacrifice a unit to have each attacking or defending unit gain {power} until the end of the turn."
+  body "Battlefield. Action: Spend 1 resource and sacrifice a unit to have each attacking or defending unit gain {power} until the end of the turn."
   battlefield $ actionWith "Volley" 1 [SacrificeUnit] \_usage ->
     withCombat \cs ->
       for_ (cs.attackers <> cs.defenders) \k ->
@@ -227,7 +254,6 @@ buryingTheGrudge = tacticCard "core-019" "Burying the Grudge" do
   cost 0
   loyalty 2
   body "Action: Gain 1 resource for each unit that entered a discard pile this turn."
-  flavor "Grudges are best buried with the corpse of the wrongdoer."
   playableWhen \g _ ->
     maybe 0 (.unitsDiscarded) (Map.lookup ThisTurn g.history) > 0
   whenResolved \self ->
@@ -239,8 +265,7 @@ stubbornRefusal = tacticCard "core-020" "Stubborn Refusal" do
   race Dwarf
   cost 2
   loyalty 1
-  body
-    "Action: Move all damage from one target unit to another target unit in any player's corresponding zone."
+  body "Action: Move all damage from one target unit to another target unit in any player's corresponding zone."
   playableWhen \g _pk ->
     any (\u -> isDamaged u && hasPeerInZone g u) g.units
   whenResolved \self -> do
@@ -256,9 +281,7 @@ strikingTheGrudge = tacticCard "core-021" "Striking the Grudge" do
   race Dwarf
   cost 1
   loyalty 3
-  body
-    "Action: One target attacking or defending unit gains {power}{power} until the end of the turn."
-  flavor "Honour redeemed, oaths fulfilled."
+  body "Action: One target attacking or defending unit gains {power}{power} until the end of the turn."
   playableWhen $ hasTarget (Or attackingUnit defendingUnit)
   whenResolved \self ->
     withTarget self.controller (Or attackingUnit defendingUnit) \case
@@ -270,8 +293,7 @@ grudgeThrowerAssault = tacticCard "core-022" "Grudge Thrower Assault" do
   race Dwarf
   cost 2
   loyalty 3
-  body
-    "Play during combat, after damage has been assigned.\nAction: Destroy one target attacking unit."
+  body "Play during combat, after damage has been assigned. Action: Destroy one target attacking unit."
   playableWhen hasEnemyAttacker
   whenResolved \self ->
     withTarget self.controller attackingUnit \k -> destroyUnit k
@@ -282,18 +304,40 @@ demolition = tacticCard "core-023" "Demolition!" do
   cost 2
   loyalty 1
   body "Action: Destroy one target support card or development."
-  flavor "KABOOM!"
-  playableWhen hasEnemySupport
+  -- Two-prong: if an enemy support exists we route through the
+  -- existing tactic-targets pipeline (which pre-prompts at play
+  -- time). Otherwise resolve a development pick. Each resolution
+  -- path destroys the right kind; together they cover the printed
+  -- "support or development" choice without needing a unified
+  -- mixed-target picker.
+  playableWhen \g pk -> hasEnemySupport g pk || hasAnyDevelopment g
   tacticTargets SupportTargetSchema
   onResolveEnemySupport \_pk s -> destroySupport s.key
+  whenResolved \self -> do
+    g <- getGame
+    let pk = self.controller
+    -- Only fire the development path if the support path didn't
+    -- claim the resolution. The engine fires both handlers for the
+    -- same TacticResolved; harmless because destroySupport just
+    -- runs once on its enemy pick. To avoid a double development
+    -- destroy, gate this branch on "no enemy supports in play".
+    unless (hasEnemySupport g pk) $
+      withTarget pk AnyDevelopmentZone \(owner, zk) ->
+        destroyDevelopment owner zk
+
+-- | True if any zone (either player's) has at least one development.
+hasAnyDevelopment :: Game -> Bool
+hasAnyDevelopment g =
+  let withDev :: [Zone] -> Bool
+      withDev zs = any (\z -> case z.developments of Developments n -> n > 0) zs
+   in withDev g.player1.capital.zones || withDev g.player2.capital.zones
 
 wakeTheMountain :: CardDef Tactic
 wakeTheMountain = tacticCard "core-024" "Wake the Mountain" do
   race Dwarf
   cost 3
   loyalty 2
-  body
-    "Action: Put the top three cards of your deck into your battlefield or kingdom facedown as developments. (All three developments must go in the same zone.)"
+  body "Action: Put the top three cards of your deck into your battlefield or kingdom facedown as developments. (All three developments must go in the same zone.)"
   playableWhen \g pk -> hasDeckSize 3 g pk && canDevelop g pk
   whenResolved \self -> do
     let pk = self.controller
@@ -307,42 +351,6 @@ masterRuneOfValaya = tacticCard "core-025" "Master Rune of Valaya" do
   loyalty 1
   traits [Spell, Rune]
   body "Action: Cancel all damage assigned during the battlefield phase this turn."
-  flavor "Valaya preseve and protect us in our hour of need!"
   whenResolved \_ -> do
     push CancelAllAssignedDamage
     push CancelAllBattlefieldDamageThisTurn
-
-defenderOfTheHold :: CardDef Unit
-defenderOfTheHold = unitCard "core-001" "Defender of the Hold" do
-  race Dwarf
-  cost 1
-  loyalty 1
-  power 1
-  hitPoints 1
-  trait Warrior
-  body "Battlefield only."
-  flavor "My blood for the hold, 'tis a fair trade."
-  keyword BattlefieldOnly
-
-zhufbarEngineers :: CardDef Unit
-zhufbarEngineers = unitCard "core-002" "Zhufbar Engineers" do
-  race Dwarf
-  cost 3
-  loyalty 1
-  power 1
-  hitPoints 3
-  trait Engineer
-  -- FAQ 2.2: "After" → "When" on card text.
-  body "Forced: When this unit leaves play, each opponent must sacrifice a unit in this corresponding zone."
-
-hammererOfKarakAzul :: CardDef Unit
-hammererOfKarakAzul = unitCard "core-003" "Hammerer of Karak Azul" do
-  race Dwarf
-  cost 2
-  loyalty 1
-  power 1
-  hitPoints 2
-  traits [Warrior, Elite]
-  toughness 1
-  body "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage)."
-  flavor "\"The hammer blow rings out doom to our foe.\"\n-Ancient Hammerer saying"

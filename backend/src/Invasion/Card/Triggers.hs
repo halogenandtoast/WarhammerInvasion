@@ -102,6 +102,40 @@ onEnterPlay handler = onReceive $ Receive \msg owner self ->
           handler owner self
     _ -> pure ()
 
+-- | "When this in-play unit takes one or more damage." Fires off the
+-- 'DealDamageToUnit' message before Toughness is applied; if you
+-- need post-cancellation semantics, gate on the new damage amount in
+-- the handler. Used by cards like Silver Helm Brigade
+-- ("draw a card after taking damage").
+onSelfDamaged
+  :: HasField "key" UnitDetails UnitKey
+  => (forall m. TriggerM m => Player -> UnitDetails -> Int -> m ())
+  -> CardBuilder Unit ()
+onSelfDamaged handler = onReceive $ Receive \msg owner self -> case msg of
+  DealDamageToUnit uk n
+    | uk == self.key, n > 0 -> handler owner self n
+  _ -> pure ()
+
+-- | "When this card leaves play for any reason." Fires off the
+-- narration message ('UnitLeftPlay'), so it covers destruction,
+-- sacrifice, AND bounce-to-hand — distinct from 'onSelfDestroyed',
+-- which only fires for the destroy event proper. Cards whose text
+-- says "after this unit leaves play" want this; cards whose text
+-- says "when this unit is destroyed" want 'onSelfDestroyed'.
+onSelfLeavesPlay
+  :: ( forall m
+      . TriggerM m
+     => Player -> UnitDetails -> m ()
+     )
+  -> CardBuilder Unit ()
+onSelfLeavesPlay handler = onReceive $ Receive \msg owner self -> case msg of
+  UnitLeftPlay du
+    | du.key == self.key ->
+        -- 'self' is the pre-departure snapshot the engine handed us;
+        -- the departed unit info on 'du' matches what cards expect.
+        handler owner self
+  _ -> pure ()
+
 -- | "When this card is destroyed." Useful for sacrifice-on-destruction
 -- reactions (Festering Nurglings, Doombull, …). Pairs with the
 -- 'UnitLeftPlay' / 'SupportLeftPlay' /… narration messages, but fires
@@ -227,7 +261,7 @@ onResolve
      )
   -> CardBuilder Tactic ()
 onResolve handler = onReceive $ Receive \msg owner self -> case msg of
-  TacticResolved pk _code target
+  TacticResolved pk _code target _x
     | pk == self.controller ->
         handler owner self target
   _ -> pure ()
@@ -241,7 +275,7 @@ whenResolved
   :: (forall m. TriggerM m => TacticContext -> m ())
   -> CardBuilder Tactic ()
 whenResolved handler = onReceive $ Receive \msg _owner self -> case msg of
-  TacticResolved pk _code _target | pk == self.controller -> handler self
+  TacticResolved pk _code _target _x | pk == self.controller -> handler self
   _ -> pure ()
 
 -- | "When this tactic resolves, with the chosen enemy support
@@ -289,6 +323,30 @@ onMyAttackDeclared handler = onReceive $ Receive \msg owner self -> case msg of
   BeginCombat attacker zone attackers
     | attacker == self.controller, self.key `elem` attackers ->
         handler owner self zone attackers
+  _ -> pure ()
+
+-- | "When my zone is attacked by an opponent." Fires off
+-- 'BeginCombat'; the support's zone (its 'zone' field) is checked
+-- against the combat target. Cauldron of Blood uses this.
+onMyZoneAttacked
+  :: ( forall m
+      . TriggerM m
+     => Player -> SupportDetails -> CombatState -> m ()
+     )
+  -> CardBuilder Support ()
+onMyZoneAttacked handler = onReceive $ Receive \msg owner self -> case msg of
+  BeginCombat attacker zone attackers
+    | attacker /= self.controller, zone == self.zone -> do
+        let cs = CombatState
+              { attackingPlayer = attacker
+              , defendingPlayer = self.controller
+              , targetZone = zone
+              , attackers = attackers
+              , defenders = []
+              , attackerPowerPenalty = 0
+              , pendingAssignments = []
+              }
+        handler owner self cs
   _ -> pure ()
 
 -- | "When the given action window opens." Used by cards (Vicious

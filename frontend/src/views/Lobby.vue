@@ -106,6 +106,7 @@ function submitHost(payload: {
   password: string | null
   allowSpectators: boolean
   autoSkipActionWindows: boolean
+  useStarterDecks: boolean
 }) {
   creating.value = true
   errorBanner.value = null

@@ -147,36 +147,149 @@ data Deck = Deck
   , race :: Race
   }
 
-dwarfStarterDeck :: Deck
-dwarfStarterDeck =
-  let cards =
-        replicate 3 "core-001"
-          <> replicate 1 "core-002"
-          <> replicate 3 "core-003"
-          <> replicate 3 "core-004"
-          <> replicate 3 "core-005"
-          <> replicate 1 "core-006"
-          <> replicate 1 "core-007"
-          <> replicate 1 "core-008"
-          <> replicate 1 "core-009"
-          <> replicate 2 "core-010"
-          <> replicate 2 "core-011"
-          <> replicate 1 "core-012"
-          <> replicate 1 "core-013"
-          <> replicate 3 "core-014"
-          <> replicate 1 "core-015"
-          <> replicate 1 "core-016"
-          <> replicate 2 "core-017"
-          <> replicate 2 "core-018"
-          <> replicate 1 "core-019"
-          <> replicate 1 "core-020"
-          <> replicate 2 "core-021"
-          <> replicate 1 "core-022"
-          <> replicate 1 "core-023"
-          <> replicate 1 "core-024"
-          <> replicate 1 "core-025"
-      race = Dwarf
-  in Deck {..}
+-- | Size of each pre-built starter deck. The dwarf list below is the
+-- existing canonical 40-card starter; the other races match.
+starterDeckSize :: Int
+starterDeckSize = 40
+
+-- | The pre-built 40-card starter deck for the given race. Used both by
+-- 'runSetup' (the legacy debug path that boots a self-vs-self game) and
+-- by the WebSocket server when the host enables \"use starter decks\"
+-- on a new game. Card pools are drawn from the core set only.
+starterDeckFor :: Race -> Deck
+starterDeckFor r = Deck {race = r, cards = starterDeckCards r}
+
+-- | Per-race preconstructed starter deck. Quantities mirror the
+-- 'quantity' field in @cards.json@, which lines up with the
+-- preconstructed deck composition that ships in the published core
+-- set (40 cards each for the four main races). High Elf and Dark Elf
+-- only have 5 cards in the core box, so their starters are stubbed
+-- by combining those 5 cards with all 16 Neutrals — playable as a
+-- 21-card deck for setup smoke, not a tournament-legal build.
+starterDeckCards :: Race -> [CardCode]
+starterDeckCards = \case
+  Dwarf ->
+    replicate 3 "core-001"
+      <> replicate 1 "core-002"
+      <> replicate 3 "core-003"
+      <> replicate 3 "core-004"
+      <> replicate 3 "core-005"
+      <> replicate 1 "core-006"
+      <> replicate 1 "core-007"
+      <> replicate 1 "core-008"
+      <> replicate 1 "core-009"
+      <> replicate 2 "core-010"
+      <> replicate 2 "core-011"
+      <> replicate 1 "core-012"
+      <> replicate 1 "core-013"
+      <> replicate 3 "core-014"
+      <> replicate 1 "core-015"
+      <> replicate 1 "core-016"
+      <> replicate 1 "core-017"
+      <> replicate 1 "core-018"
+      <> replicate 1 "core-019"
+      <> replicate 1 "core-020"
+      <> replicate 2 "core-021"
+      <> replicate 1 "core-022"
+      <> replicate 1 "core-023"
+      <> replicate 2 "core-024"
+      <> replicate 1 "core-025"
+  Empire ->
+    replicate 1 "core-026"
+      <> replicate 3 "core-027"
+      <> replicate 1 "core-028"
+      <> replicate 1 "core-029"
+      <> replicate 2 "core-030"
+      <> replicate 1 "core-031"
+      <> replicate 1 "core-032"
+      <> replicate 3 "core-033"
+      <> replicate 3 "core-034"
+      <> replicate 2 "core-035"
+      <> replicate 3 "core-036"
+      <> replicate 1 "core-037"
+      <> replicate 1 "core-038"
+      <> replicate 2 "core-039"
+      <> replicate 1 "core-040"
+      <> replicate 1 "core-041"
+      <> replicate 1 "core-042"
+      <> replicate 2 "core-043"
+      <> replicate 1 "core-044"
+      <> replicate 1 "core-045"
+      <> replicate 3 "core-046"
+      <> replicate 1 "core-047"
+      <> replicate 1 "core-048"
+      <> replicate 1 "core-049"
+      <> replicate 1 "core-050"
+  HighElf ->
+    -- Only 5 High Elf cards exist in core; pad with neutrals so the
+    -- deck has enough draws to play out a setup smoke.
+    concatMap (replicate 1) ["core-051", "core-052", "core-053", "core-054", "core-055"]
+      <> neutralPadding
+  Orc ->
+    replicate 3 "core-056"
+      <> replicate 3 "core-057"
+      <> replicate 1 "core-058"
+      <> replicate 2 "core-059"
+      <> replicate 3 "core-060"
+      <> replicate 2 "core-061"
+      <> replicate 1 "core-062"
+      <> replicate 1 "core-063"
+      <> replicate 1 "core-064"
+      <> replicate 1 "core-065"
+      <> replicate 3 "core-066"
+      <> replicate 1 "core-067"
+      <> replicate 1 "core-068"
+      <> replicate 2 "core-069"
+      <> replicate 1 "core-070"
+      <> replicate 1 "core-071"
+      <> replicate 2 "core-072"
+      <> replicate 1 "core-073"
+      <> replicate 1 "core-074"
+      <> replicate 1 "core-075"
+      <> replicate 2 "core-076"
+      <> replicate 3 "core-077"
+      <> replicate 1 "core-078"
+      <> replicate 1 "core-079"
+      <> replicate 1 "core-080"
+  Chaos ->
+    replicate 3 "core-081"
+      <> replicate 3 "core-082"
+      <> replicate 3 "core-083"
+      <> replicate 1 "core-084"
+      <> replicate 2 "core-085"
+      <> replicate 1 "core-086"
+      <> replicate 1 "core-087"
+      <> replicate 1 "core-088"
+      <> replicate 1 "core-089"
+      <> replicate 3 "core-090"
+      <> replicate 2 "core-091"
+      <> replicate 1 "core-092"
+      <> replicate 1 "core-093"
+      <> replicate 1 "core-094"
+      <> replicate 1 "core-095"
+      <> replicate 1 "core-096"
+      <> replicate 2 "core-097"
+      <> replicate 3 "core-098"
+      <> replicate 2 "core-099"
+      <> replicate 1 "core-100"
+      <> replicate 1 "core-101"
+      <> replicate 1 "core-102"
+      <> replicate 2 "core-103"
+      <> replicate 1 "core-104"
+      <> replicate 1 "core-105"
+  DarkElf ->
+    concatMap (replicate 1) ["core-106", "core-107", "core-108", "core-109", "core-110"]
+      <> neutralPadding
+  where
+    -- All 16 Neutral core cards, one of each — used to pad the
+    -- elven starters since neither race has a full 40-card core.
+    neutralPadding =
+      [ "core-111", "core-112", "core-113", "core-114", "core-115"
+      , "core-116", "core-117", "core-118"
+      , "core-120", "core-121"
+      , "core-122", "core-123", "core-124"
+      , "core-125", "core-126", "core-127"
+      ]
 
 type DeckLoadError = String
 
@@ -344,6 +457,13 @@ instance Run Game where
           { currentPlayer = k
           , turn = g.turn + Turn 1
           , history = Map.insert ThisTurn mempty g.history
+          , -- Capital shields and one-shot play modifiers reset.
+            capitalShields = mempty
+          , pendingUnitDiscount = mempty
+          , pendingUnitOnPlayDamage = mempty
+          , unitsRedirectedThisTurn = mempty
+          , lastResolvedTactic = Nothing
+          , pendingActionCancel = mempty
           }
       t <- gets (.turn)
       logIt LogTurn
@@ -525,10 +645,22 @@ instance Run Game where
       -- Reuse the card's existing key as its in-play UnitKey. This is
       -- what lets the frontend's view-transition map a hand card to its
       -- zone landing spot.
-      withPaidPlay pk (takeUnitFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
+      withPaidPlay
+        pk
+        (takeUnitFromHand cardKey)
+        (\g cd -> max 0 (effectiveTotalCost g pk cd - pendingDiscountFor pk g))
         \cardDef paidPlayer n -> do
-          let unit = freshUnit cardKey pk zone cardDef
-          modify \gx -> (setPlayer pk paidPlayer gx) {units = unit : gx.units}
+          g <- get
+          let damageOnEnter = Map.findWithDefault 0 pk g.pendingUnitOnPlayDamage
+              unit0 = freshUnit cardKey pk zone cardDef
+              unit = unit0 {damage = Damage damageOnEnter} :: UnitDetails
+          modify \gx -> (setPlayer pk paidPlayer gx)
+            { units = unit : gx.units
+            , pendingUnitDiscount = Map.insert pk 0 gx.pendingUnitDiscount
+            , pendingUnitOnPlayDamage = Map.insert pk 0 gx.pendingUnitOnPlayDamage
+            }
+          recordEvent \h -> h
+            {unitsPlayedBy = Map.insertWith (+) pk 1 h.unitsPlayedBy}
           logIt LogPlayerAction "log.unit.played"
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
@@ -618,8 +750,25 @@ instance Run Game where
                 Map.findWithDefault 0 ukey
                   (historyOfScope ThisTurn g).damageTaken
               capped = applyPerTurnCap u already afterToughness
-              landing = capped
-              cancelled = inflated - landing
+          -- Consult the per-card pre-damage redirect slice. Returns
+          -- the amount the card claims; the card's 'run' is expected
+          -- to enqueue the redirected damage and mark whatever
+          -- per-turn state stops it from re-firing.
+          (landing, cancelled) <- case u.cardDef.extras.preDamageRedirect g u capped of
+            Just plan | plan.amount > 0 -> do
+              let redirected = min plan.amount capped
+                  remaining = capped - redirected
+              -- Run the card's redirect plan with a synthetic ActionUsage.
+              case plan.run of
+                ActionEffect fire ->
+                  fire ActionUsage
+                    { user = u.controller
+                    , self = u
+                    , target = NoTarget
+                    , payments = []
+                    }
+              pure (remaining, inflated - remaining)
+            _ -> pure (capped, inflated - capped)
           when (cancelled > 0) $
             logIt LogSystem
               "log.damage.cancelled"
@@ -738,7 +887,10 @@ instance Run Game where
       -- 'dispatchToInPlayUnits' runs cards' bespoke reactions; Game
       -- itself has nothing more to do.
       pure ()
-    CorruptUnit ukey -> setCorrupted True "log.unit.corrupted" ukey
+    CorruptUnit ukey -> do
+      g <- get
+      unless (hasModifier g.modifiers ukey CannotBeCorrupted) $
+        setCorrupted True "log.unit.corrupted" ukey
     CleanseUnit ukey -> setCorrupted False "log.unit.cleansed" ukey
     RestoreOneCorruptCard pk -> do
       g <- get
@@ -770,6 +922,8 @@ instance Run Game where
         \cardDef paidPlayer n -> do
           let support = freshSupport cardKey pk zone Nothing cardDef
           modify \gx -> (setPlayer pk paidPlayer gx) {supports = support : gx.supports}
+          recordEvent \h -> h
+            {supportsPlayedBy = Map.insertWith (+) pk 1 h.supportsPlayedBy}
           logIt LogPlayerAction "log.support.played"
             [ ("player", playerParam pk)
             , ("card", T.pack cardDef.title)
@@ -872,37 +1026,64 @@ instance Run Game where
               pure ()
           | not (validateTarget pk (tacticTargetSchema cardDef) target g) ->
               pure ()
-          | otherwise -> case cardDef.cost of
-              Variable -> pure ()
-              Fixed _ -> do
-                let baseCost = effectiveTotalCost g pk cardDef
-                    targetTax = extraTargetTax pk target g
-                    n = baseCost + targetTax
-                when (player.resources >= Resources n) $ do
-                  markPlayedLimited cardDef
-                  let paidPlayer =
-                        playerWithoutCard
-                          { resources = player.resources - Resources n
-                          , discard =
-                              mkCard cardKey (TacticCardDef cardDef)
-                                : playerWithoutCard.discard
-                          }
-                  modify (setPlayer pk paidPlayer)
-                  logIt LogPlayerAction
-                    "log.tactic.played"
-                    [ ("player", playerParam pk)
-                    , ("card", T.pack cardDef.title)
-                    , ("cost", tshow n)
-                    ]
-                  send $ TacticResolved pk cardDef.code target
-    TacticResolved pk code target -> do
+          | otherwise -> do
+              let loyaltyCost = loyaltySurcharge g pk cardDef
+                  Resources rNow = player.resources
+                  targetTax = extraTargetTax pk target g
+              x <- case cardDef.cost of
+                Fixed n -> pure (max 0 (n + printedCostAdjustment g pk cardDef))
+                Variable -> do
+                  -- Prompt the controller for an X in [0, available
+                  -- resources minus loyalty surcharge minus target tax].
+                  let cap = max 0 (rNow - loyaltyCost - targetTax)
+                  answer <- askPrompt Prompt
+                    { player = pk
+                    , kind = ChooseAmount
+                        { minAmount = 0
+                        , maxAmount = cap
+                        , description =
+                            "Pick X for " <> T.pack cardDef.title <> "."
+                        }
+                    , callback = CallbackInlinePrompt
+                    }
+                  pure $ case answer of
+                    PickAmount k -> max 0 (min cap k)
+                    _ -> 0
+              let n = x + loyaltyCost + targetTax
+              when (rNow >= n) $ do
+                markPlayedLimited cardDef
+                let paidPlayer =
+                      playerWithoutCard
+                        { resources = Resources (rNow - n)
+                        , discard =
+                            mkCard cardKey (TacticCardDef cardDef)
+                              : playerWithoutCard.discard
+                        }
+                modify (setPlayer pk paidPlayer)
+                logIt LogPlayerAction
+                  "log.tactic.played"
+                  [ ("player", playerParam pk)
+                  , ("card", T.pack cardDef.title)
+                  , ("cost", tshow n)
+                  ]
+                send $ TacticResolved pk cardDef.code target x
+    TacticResolved pk code target xVal -> do
       g <- get
       case Map.lookup code allCards of
         Just (TacticCardDef cardDef) -> do
-          let ctx = TacticContext {controller = pk, cardDef}
+          let ctx = TacticContext
+                { controller = pk
+                , cardDef
+                , xValue = xVal
+                }
               owner = lookupPlayer pk g
           case cardDef.receive of
-            Receive f -> f (TacticResolved pk code target) owner ctx
+            Receive f -> f (TacticResolved pk code target xVal) owner ctx
+          -- Remember the resolved tactic so Twin-Tailed Comet can
+          -- target it. Done after the body fires so the body sees
+          -- its own pre-state if it queries.
+          modify \gx -> gx
+            {lastResolvedTactic = Just (code, target, xVal)}
         _ -> pure ()
     RequestPrompt p -> do
       modify \g -> g {pendingPrompt = Just p}
@@ -945,8 +1126,23 @@ instance Run Game where
                         , ("cost", tshow totalCost)
                         ]
                       mpayments <- payExtras pk extras
+                      -- If a pending action-cancel token exists for
+                      -- this player (Bright Wizard Apprentice), pop
+                      -- one and skip the effect. Cost is still paid;
+                      -- only the body is suppressed.
+                      g' <- get
+                      let cancelled = Map.findWithDefault 0 pk g'.pendingActionCancel > 0
+                      when cancelled do
+                        modify \gx -> gx
+                          { pendingActionCancel =
+                              Map.adjust (subtract 1) pk gx.pendingActionCancel
+                          }
+                        logIt LogSystem
+                          "log.action.cancelled"
+                          [("player", playerParam pk)]
                       whenJust mpayments \payments ->
-                        fireAction src idx pk target payments
+                        unless cancelled $
+                          fireAction src idx pk target payments
     DeferDamageToUnitUntilEoT ukey n -> do
       modify \g ->
         g {pendingEndOfTurn = PEDealDamageToUnit ukey n : g.pendingEndOfTurn}
@@ -956,7 +1152,23 @@ instance Run Game where
         , ("trigger", "EndTurn")
         ]
     DealDamageToZone targetPlayer zoneKind raw -> do
-      let amount = max 0 raw
+      -- Capital shields cancel the first 1 damage per turn each.
+      g0 <- get
+      let raised = max 0 raw
+          shields0 = Map.findWithDefault 0 targetPlayer g0.capitalShields
+          shieldsUsed = min shields0 raised
+          amount = raised - shieldsUsed
+      when (shieldsUsed > 0) do
+        modify \gx -> gx
+          { capitalShields =
+              Map.insert targetPlayer (shields0 - shieldsUsed) gx.capitalShields
+          }
+        logIt LogSystem
+          "log.capital.shielded"
+          [ ("player", playerParam targetPlayer)
+          , ("zone", zoneParam zoneKind)
+          , ("amount", tshow shieldsUsed)
+          ]
       when (amount > 0) $ do
         g <- get
         let target = lookupPlayer targetPlayer g
@@ -1181,6 +1393,7 @@ instance Run Game where
                 , u.controller == defender
                 , u.zone == zone
                 , not u.corrupted
+                , not (hasModifier g.modifiers u.key CannotDefend)
                 ]
               -- Rune-of-Fortitude family: each support whose
               -- 'runeOfFortitudeTax' slice is set, sitting in the
@@ -1393,6 +1606,248 @@ instance Run Game where
             when (dstDmg + srcDmg >= dst.effectiveMaxHP) $
               send $ DestroyUnit toKey
         _ -> pure ()
+    MoveUnit ukey newZone -> do
+      g <- get
+      whenJust (findUnit ukey g) \u ->
+        when (u.zone /= newZone) do
+          let u' = (u {zone = newZone}) :: UnitDetails
+          modify \gx -> gx {units = replaceUnit u' gx.units}
+          logIt LogSystem
+            "log.unit.moved"
+            [ ("player", playerParam u.controller)
+            , ("card", T.pack u.cardDef.title)
+            , ("zone", zoneParam newZone)
+            ]
+    ReturnUnitToHand ukey -> do
+      g <- get
+      whenJust (findUnit ukey g) \u -> do
+        -- Card goes back to its controller's hand; attachments go to
+        -- their respective controllers' discard piles (the host left
+        -- play, so any attachments do too — the rulebook treats
+        -- bounce-to-hand as a "leaves play" event).
+        let player = lookupPlayer u.controller g
+            handCard = mkCard u.key (UnitCardDef u.cardDef)
+            player' = player {hand = handCard : player.hand}
+        modify (setPlayer u.controller player')
+        for_ u.attachments \a ->
+          discardToController a.controller $ mkCard a.key (SupportCardDef a.cardDef)
+        modify \gx -> gx {units = removeById ukey gx.units}
+        recordEvent \h -> h {unitsDiscarded = h.unitsDiscarded + 1}
+        logIt LogSystem
+          "log.unit.returned"
+          [ ("player", playerParam u.controller)
+          , ("card", T.pack u.cardDef.title)
+          ]
+        send $ UnitLeftPlay DepartedUnit
+          { key = ukey
+          , controller = u.controller
+          , zone = u.zone
+          , cardDef = u.cardDef
+          }
+    MillFromDeck pk n -> do
+      g <- get
+      let player = lookupPlayer pk g
+          (top, rest) = splitAt (max 0 n) player.deck
+      when (not (null top)) do
+        let player' = player {deck = rest, discard = reverse top <> player.discard}
+        modify (setPlayer pk player')
+        logIt LogSystem
+          "log.deck.milled"
+          [("player", playerParam pk), ("count", tshow (length top))]
+    DiscardHand pk -> do
+      g <- get
+      let player = lookupPlayer pk g
+          n = length player.hand
+      when (n > 0) do
+        let player' = player {hand = [], discard = player.hand <> player.discard}
+        modify (setPlayer pk player')
+        logIt LogSystem
+          "log.hand.discarded_all"
+          [("player", playerParam pk), ("count", tshow n)]
+    RecycleDiscard pk n -> do
+      g <- get
+      let player = lookupPlayer pk g
+          (back, rest) = splitAt (max 0 n) player.discard
+      when (not (null back)) do
+        let player' = player {discard = rest, deck = player.deck <> back}
+        modify (setPlayer pk player')
+        logIt LogSystem
+          "log.discard.recycled"
+          [("player", playerParam pk), ("count", tshow (length back))]
+        send (ShuffleDeck pk)
+    MoveDevelopment pk fromZ toZ -> do
+      g <- get
+      let player = lookupPlayer pk g
+          fromCards = Map.findWithDefault [] fromZ player.developmentCards
+      case fromCards of
+        [] -> pure ()
+        (c : rest) ->
+          when (fromZ /= toZ) do
+            let toCards = Map.findWithDefault [] toZ player.developmentCards
+                developmentCards' =
+                  Map.insert fromZ rest $
+                    Map.insert toZ (c : toCards) player.developmentCards
+                cap = player.capital
+                cap' = Capital
+                  { kingdom = bumpDev fromZ toZ cap.kingdom
+                  , quest = bumpDev fromZ toZ cap.quest
+                  , battlefield = bumpDev fromZ toZ cap.battlefield
+                  }
+                player' = player
+                  { developmentCards = developmentCards'
+                  , capital = cap'
+                  }
+            modify (setPlayer pk player')
+            logIt LogSystem
+              "log.development.moved"
+              [ ("player", playerParam pk)
+              , ("from", zoneParam fromZ)
+              , ("to", zoneParam toZ)
+              ]
+    IndirectDamage pk amount -> do
+      -- Auto-route to the player's most-slack non-burned zone so the
+      -- indirect damage minimises the chance of a burn. Real rules
+      -- let the player pick — that's a follow-up prompt task.
+      when (amount > 0) do
+        g <- get
+        let p = lookupPlayer pk g
+            cap = p.capital
+            candidates =
+              [ (KingdomZone, cap.kingdom)
+              , (QuestZone, cap.quest)
+              , (BattlefieldZone, cap.battlefield)
+              ]
+            slack z =
+              let HitPoints hp = z.hitPoints
+                  Damage d = z.damage
+               in hp - d
+            picks = filter (not . (.burned) . snd) candidates
+        case picks of
+          [] -> pure ()
+          _ -> do
+            let scored = [(slack z, zk) | (zk, z) <- picks]
+                (_, zk) = foldr1 (\a b -> if fst a >= fst b then a else b) scored
+            send (DealDamageToZone pk zk amount)
+            logIt LogSystem
+              "log.capital.indirect"
+              [ ("player", playerParam pk)
+              , ("amount", tshow amount)
+              , ("zone", zoneParam zk)
+              ]
+    RedirectAttackZone newZone -> do
+      g <- get
+      whenJust g.combat \cs ->
+        unless (cs.targetZone == newZone) do
+          -- Refuse to redirect into a burned zone.
+          let target = lookupPlayer cs.defendingPlayer g
+              destZone = getZone newZone target
+          unless destZone.burned do
+            let cs' = (cs {targetZone = newZone}) :: CombatState
+            modify \gx -> gx {combat = Just cs'}
+            logIt LogSystem
+              "log.combat.redirected"
+              [ ("attacker", playerParam cs.attackingPlayer)
+              , ("zone", zoneParam newZone)
+              ]
+    ScheduleCancelNextCapitalDamage pk -> do
+      modify \gx -> gx
+        { capitalShields =
+            Map.insertWith (+) pk 1 gx.capitalShields
+        }
+      logIt LogSystem
+        "log.capital.shield_scheduled"
+        [("player", playerParam pk)]
+    ArmActionCancel pk -> do
+      modify \gx -> gx
+        { pendingActionCancel =
+            Map.insertWith (+) pk 1 gx.pendingActionCancel
+        }
+      logIt LogSystem
+        "log.action.cancel_scheduled"
+        [("player", playerParam pk)]
+    SlaaneshDominate caster opp count -> do
+      g <- get
+      shuffled <- shuffleM (lookupPlayer opp g).hand
+      let revealed = take (max 0 count) shuffled
+          tactics =
+            [ (cd.code, cd.title)
+            | c <- revealed
+            , Just cd <- [asTactic c.def]
+            ]
+      for_ tactics \(code, title) -> do
+        play <- askYesNo caster
+          ("Play '" <> T.pack title <> "' for free?")
+        when play (send (TacticResolved caster code NoTarget 0))
+    ScheduleNextUnitDiscount pk n -> do
+      modify \gx -> gx
+        { pendingUnitDiscount =
+            Map.insertWith (+) pk n gx.pendingUnitDiscount
+        }
+    ScheduleNextUnitDamage pk n -> do
+      modify \gx -> gx
+        { pendingUnitOnPlayDamage =
+            Map.insertWith (+) pk n gx.pendingUnitOnPlayDamage
+        }
+    DestroyDevelopment pk zk -> do
+      g <- get
+      let player = lookupPlayer pk g
+          zoneCards = Map.findWithDefault [] zk player.developmentCards
+      case zoneCards of
+        [] -> pure ()
+        (c : rest) -> do
+          let cap = player.capital
+              cap' = Capital
+                { kingdom = decrementDev zk cap.kingdom
+                , quest = decrementDev zk cap.quest
+                , battlefield = decrementDev zk cap.battlefield
+                }
+              player' = player
+                { developmentCards = Map.insert zk rest player.developmentCards
+                , capital = cap'
+                , discard = c : player.discard
+                }
+          modify (setPlayer pk player')
+          logIt LogSystem
+            "log.development.destroyed"
+            [("player", playerParam pk), ("zone", zoneParam zk)]
+    FlipDevelopment pk zk -> do
+      g <- get
+      let player = lookupPlayer pk g
+          zoneCards = Map.findWithDefault [] zk player.developmentCards
+      case zoneCards of
+        [] -> pure ()
+        (c : rest) -> case c.def of
+          UnitCardDef cardDef -> do
+            -- Pop the dev (decrement count, remove from facedown
+            -- list), put the unit into play, schedule its EoT
+            -- sacrifice. Card key carries through so the frontend
+            -- can morph the dev → unit.
+            let cap = player.capital
+                cap' = Capital
+                  { kingdom = decrementDev zk cap.kingdom
+                  , quest = decrementDev zk cap.quest
+                  , battlefield = decrementDev zk cap.battlefield
+                  }
+                player' = player
+                  { developmentCards = Map.insert zk rest player.developmentCards
+                  , capital = cap'
+                  }
+                unit = freshUnit c.key pk zk cardDef
+            modify \gx -> (setPlayer pk player' gx) {units = unit : gx.units}
+            -- Schedule the printed end-of-turn sacrifice.
+            modify \gx -> gx
+              { pendingEndOfTurn = PEDestroyUnit c.key : gx.pendingEndOfTurn
+              }
+            logIt LogSystem
+              "log.development.flipped_unit"
+              [ ("player", playerParam pk)
+              , ("zone", zoneParam zk)
+              , ("card", T.pack cardDef.title)
+              ]
+            send (UnitEnteredPlay pk c.key)
+          _ ->
+            -- Non-unit flips immediately sacrifice the development.
+            send (DestroyDevelopment pk zk)
     PlayLegend pk cardKey -> do
       -- One legend per player at a time. If one is already in play for
       -- this player, silently refuse.
@@ -1475,6 +1930,7 @@ newPlayer k race cards =
     , discard = []
     , developmentCards = emptyDevelopmentCards
     , race
+    , handPlayability = mempty
     }
 
 newGame :: Deck -> Deck -> GameOptions -> Either DeckLoadError Game
@@ -1509,6 +1965,12 @@ newGame deck1 deck2 opts = do
       , pendingEndOfPhase = []
       , history = emptyHistory
       , autoSkipActionWindows = opts.autoSkipActionWindows
+      , capitalShields = mempty
+      , pendingUnitDiscount = mempty
+      , pendingUnitOnPlayDamage = mempty
+      , unitsRedirectedThisTurn = mempty
+      , lastResolvedTactic = Nothing
+      , pendingActionCancel = mempty
       }
 
 -- | Host-chosen options that shape engine behavior without altering
@@ -1589,6 +2051,32 @@ freshSupport key controller zone attachedTo cardDef = SupportDetails
 discardToController
   :: Monad m => PlayerKey -> Card -> StateT Game m ()
 discardToController pk c = modifyPlayer pk \p -> p {discard = c : p.discard}
+
+-- | One-shot discount accumulated for the next unit this player plays.
+pendingDiscountFor :: PlayerKey -> Game -> Int
+pendingDiscountFor pk g = Map.findWithDefault 0 pk g.pendingUnitDiscount
+
+-- | Drop one development from the named zone if 'z' matches.
+-- No-op for unrelated zones. Count is clamped non-negative.
+decrementDev :: ZoneKind -> Zone -> Zone
+decrementDev zk z
+  | z.kind == zk =
+      let Developments d = z.developments
+       in z {developments = Developments (max 0 (d - 1))}
+  | otherwise = z
+
+-- | Increment / decrement a 'Zone's development count when its kind
+-- matches the @from@ / @to@ pair of a 'MoveDevelopment' message.
+-- Untouched zones pass through. Counts are clamped non-negative.
+bumpDev :: ZoneKind -> ZoneKind -> Zone -> Zone
+bumpDev fromZ toZ z =
+  let Developments d = z.developments
+      delta
+        | z.kind == fromZ && z.kind == toZ = 0
+        | z.kind == fromZ = -1
+        | z.kind == toZ = 1
+        | otherwise = 0
+   in z {developments = Developments (max 0 (d + delta))}
 
 -- | Flip a unit's 'corrupted' flag and emit the matching log entry.
 -- No-op when the unit is missing or already in the requested state.
@@ -1677,6 +2165,7 @@ firePendingEffect = \case
   PESacrificeAttackersThisPhase -> do
     g <- get
     traverse_ (send . DestroyUnit) (historyOfScope ThisPhase g).attackersDeclared
+  PEDestroyUnit ukey -> send (DestroyUnit ukey)
 
 -- | The damage a single unit contributes in combat. Adds card-specific
 -- bonuses (Lord of Khorne self-burning, Rift of Battle, …) on top of
@@ -1714,8 +2203,17 @@ combatDamageOf g side u =
 -- Driven by the per-card 'canAttackZone' slice on 'UnitExtras'
 -- (Sworn of Khorne today; default lets every unit attack).
 eligibleAttacker :: Game -> PlayerKey -> ZoneKind -> UnitKey -> Bool
-eligibleAttacker g defender zone ukey =
-  maybe False (\u -> u.cardDef.extras.canAttackZone g defender zone u) (findUnit ukey g)
+eligibleAttacker g defender zone ukey = case findUnit ukey g of
+  Nothing -> False
+  Just u ->
+    not (hasModifier g.modifiers ukey CannotAttack)
+      && u.cardDef.extras.canAttackZone g defender zone u
+
+-- | True iff the named unit currently carries the given atomic
+-- modifier in 'Game.modifiers'.
+hasModifier :: Map.Map (Ref 'Target) [Modifier] -> UnitKey -> ModifierDetails -> Bool
+hasModifier mods ukey d =
+  any (\m -> m.details == d) (fromMaybe [] (Map.lookup (UnitRef ukey) mods))
 
 -- | Split the combat damage contributed by a list of units into a
 -- (cancellable, uncancellable) pair. Damage from units with the
@@ -2252,6 +2750,83 @@ canPlayCard pk cd g =
     && (not (isLimitedCard cd) || (historyOfScope ThisTurn g).limitedPlayed == 0)
     && cd.canPlay g pk
 
+-- | Decide whether a hand card is currently unplayable, and why.
+-- 'Nothing' = playable; 'Just issue' = surface @issue@ to the client
+-- (dimmed card, tap-for-reason).
+--
+-- Mirrors the engine's actual gating in 'withPaidPlay' / 'PlayTactic'
+-- / 'PlayLegend' so we don't drift: the same predicate that refuses
+-- to act on a 'PlayUnit' message is the one that classifies the
+-- hand card as unplayable up-front. If you add a new refusal path,
+-- thread it here too.
+assessHandCard :: Game -> PlayerKey -> Card -> Maybe PlayabilityIssue
+assessHandCard g pk c = case c.def of
+  UnitCardDef cd -> assessNonTactic g pk cd
+  SupportCardDef cd -> assessNonTactic g pk cd
+  QuestCardDef cd -> assessNonTactic g pk cd
+  LegendCardDef cd -> assessLegend g pk cd
+  TacticCardDef cd -> assessTactic g pk cd
+
+assessNonTactic :: Game -> PlayerKey -> CardDef k -> Maybe PlayabilityIssue
+assessNonTactic g pk cd
+  | g.currentPlayer /= pk = Just NotYourTurn
+  | otherwise = case g.actionWindow of
+      Nothing -> Just NotInActionWindow
+      Just aw
+        | priorityHolder aw.awaiting /= pk -> Just NotInActionWindow
+        | aw.trigger /= CapitalActionWindow -> Just WrongActionWindow
+        | otherwise -> baseUnplayable g pk cd
+
+assessTactic :: Game -> PlayerKey -> CardDef k -> Maybe PlayabilityIssue
+assessTactic g pk cd = case g.actionWindow of
+  Nothing -> Just NotInActionWindow
+  Just aw
+    | priorityHolder aw.awaiting /= pk -> Just NotInActionWindow
+    | otherwise -> baseUnplayable g pk cd
+
+assessLegend :: Game -> PlayerKey -> CardDef 'Legend -> Maybe PlayabilityIssue
+assessLegend g pk cd = case assessNonTactic g pk cd of
+  Just issue -> Just issue
+  Nothing
+    | any (\l -> l.controller == pk) g.legends -> Just LegendAlreadyInPlay
+    | otherwise -> Nothing
+
+baseUnplayable :: Game -> PlayerKey -> CardDef k -> Maybe PlayabilityIssue
+baseUnplayable g pk cd
+  | cd.unique && controlsCopyInPlay pk cd.code g = Just UniqueAlreadyInPlay
+  | isLimitedCard cd && (historyOfScope ThisTurn g).limitedPlayed > 0 =
+      Just LimitedAlreadyPlayed
+  | not (cd.canPlay g pk) = Just NoValidTarget
+  | otherwise = case cd.cost of
+      Variable -> Nothing
+      Fixed _ ->
+        let needed = effectiveTotalCost g pk cd
+            Resources have = (lookupPlayer pk g).resources
+         in if have < needed
+              then Just (InsufficientResources needed have)
+              else Nothing
+
+-- | Rewrite 'handPlayability' on both players to reflect 'assessHandCard'
+-- over the current snapshot. Invoked from the publish hook so the wire
+-- view always carries up-to-date reasons; the engine itself never
+-- consults this map.
+attachHandPlayability :: Game -> Game
+attachHandPlayability g =
+  g
+    { player1 = annotate Player1 g.player1
+    , player2 = annotate Player2 g.player2
+    }
+  where
+    annotate pk p =
+      p
+        { handPlayability =
+            Map.fromList
+              [ (c.key, issue)
+              | c <- p.hand
+              , Just issue <- [assessHandCard g pk c]
+              ]
+        }
+
 -- | Bump the Limited-played counter for the current turn if appropriate.
 markPlayedLimited :: CardDef k -> StateT Game GameT ()
 markPlayedLimited cd =
@@ -2261,12 +2836,15 @@ markPlayedLimited cd =
 -- | Sum of all Toughness contributions on a unit. Fixed values come
 -- straight from the keyword; 'Toughness Variable' (Ironbreakers of
 -- Ankhor) scales with the number of developments in the unit's zone.
+-- Plus any aura toughness granted by other in-play units (Big 'Uns).
 totalToughness :: Game -> UnitDetails -> Int
-totalToughness g u = sum (map asInt u.cardDef.keywords)
+totalToughness g u = printed + aura
   where
+    printed = sum (map asInt u.cardDef.keywords)
     asInt (Toughness (Fixed n)) = n
     asInt (Toughness Variable) = devsInZone g u
     asInt _ = 0
+    aura = sum [src.cardDef.extras.unitAuraToughness g src u | src <- g.units]
 
 -- 'devsInZone' moved to 'Invasion.Card' so both engine and card defs
 -- can read it.
@@ -2306,7 +2884,7 @@ loyaltySurcharge g pk cardDef =
 -- 'effectiveTotalCost'.
 printedCostAdjustment :: Game -> PlayerKey -> CardDef k -> Int
 printedCostAdjustment g pk cardDef =
-  cardDef.selfCostAdjustment g pk + supportAdjust
+  cardDef.selfCostAdjustment g pk + supportAdjust + unitAdjust
   where
     filt = cardCodeFilter cardDef
     supportAdjust =
@@ -2314,14 +2892,26 @@ printedCostAdjustment g pk cardDef =
         [ s.cardDef.extras.globalCostAdjustment g s pk filt
         | s <- g.supports
         ]
+    unitAdjust =
+      sum
+        [ u.cardDef.extras.unitCostAdjustment g u pk filt
+        | u <- g.units
+        ]
 
 -- | Additional resource cost an effect must pay to target the unit
--- referenced in the supplied 'ActionTarget'. Driven by the per-card
--- 'extraTargetTax' slice on 'UnitExtras' (King Kazador today).
+-- referenced in the supplied 'ActionTarget'. Sums the unit's own
+-- 'extraTargetTax' (King Kazador-style) with any 'supportTargetTax'
+-- contribution from in-play supports that cover the targeted unit
+-- (Church of Sigmar).
 extraTargetTax :: PlayerKey -> ActionTarget -> Game -> Int
 extraTargetTax caster target g = case target of
   TargetUnit k -> case findUnit k g of
-    Just u -> u.cardDef.extras.extraTargetTax g caster u
+    Just u ->
+      u.cardDef.extras.extraTargetTax g caster u
+        + sum
+            [ s.cardDef.extras.supportTargetTax g s caster u
+            | s <- g.supports
+            ]
     Nothing -> 0
   _ -> 0
 
@@ -2375,11 +2965,18 @@ recomputeUnitStats g = g {units = map update g.units}
         + selfScalingPowerBonus g u
         + runtimeEffectsPowerBonus g u
     computeMaxHP u =
-      unitPrintedHPFromDef u.cardDef
-        + sum (map (attachmentHPBonus u) u.attachments)
+      let base = unitPrintedHPFromDef u.cardDef
+            + sum (map (attachmentHPBonus u) u.attachments)
+          minus = modifierHPPenalty u
+          supportAura =
+            sum [s.cardDef.extras.supportAuraHP g s u | s <- allInPlaySupports g]
+       in max 1 (base + supportAura - minus)
     modifierPowerBonus u =
       let mods = fromMaybe [] (Map.lookup (UnitRef u.key) g.modifiers)
        in sum [n | Modifier (GainPower n) _ <- mods]
+    modifierHPPenalty u =
+      let mods = fromMaybe [] (Map.lookup (UnitRef u.key) g.modifiers)
+       in sum [n | Modifier (LoseHitPoints n) _ <- mods]
 
 -- | Per-attachment power contribution. Read from the support's
 -- 'attachmentPowerBonus' slice on 'SupportExtras'.
@@ -2576,6 +3173,6 @@ applyMessage g m = applyMessages g [m]
 -- 'GameSetup' — to actually begin turn 1, follow with
 -- @'applyMessage' g 'BeginGame'@.
 runSetup :: IO (Either DeckLoadError Game)
-runSetup = case newGame dwarfStarterDeck dwarfStarterDeck defaultGameOptions of
+runSetup = case newGame (starterDeckFor Dwarf) (starterDeckFor Dwarf) defaultGameOptions of
   Left err -> pure $ Left err
   Right game -> Right <$> applyMessage game Setup

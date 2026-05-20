@@ -34,8 +34,36 @@ data Player = Player
     -- 'Zone.developments' count is the length of the list for that
     -- zone and is kept in sync by the engine.
   , race :: Race
+  , handPlayability :: Map UnitKey PlayabilityIssue
+    -- ^ Derived view-side field: keyed by the hand card's stable
+    -- 'UnitKey', it lists the reason a card can't be played in the
+    -- current game state. Absent = playable. Not maintained by the
+    -- engine itself; rewritten in bulk just before the snapshot is
+    -- published, so engine logic never reads from it.
   }
   deriving stock Show
+
+-- | Why a hand card cannot be played right now. Surfaces to the client
+-- so the hand can dim unplayable cards and explain why on tap. The
+-- engine still re-checks server-side in 'withPaidPlay' — this is a
+-- pure derivation off the same predicates.
+data PlayabilityIssue
+  = InsufficientResources Int Int
+    -- ^ @InsufficientResources needed have@.
+  | UniqueAlreadyInPlay
+  | LimitedAlreadyPlayed
+  | LegendAlreadyInPlay
+  | NotYourTurn
+    -- ^ Non-tactic plays require it to be the controller's turn.
+  | NotInActionWindow
+    -- ^ No open action window with priority for the would-be caster.
+  | WrongActionWindow
+    -- ^ A window is open, but a non-tactic needs the capital window
+    -- specifically. (Tactics are happy with any window.)
+  | NoValidTarget
+    -- ^ The card's per-card 'canPlay' predicate refused — usually
+    -- because a required target doesn't exist (Stubborn Refusal, …).
+  deriving stock (Show, Eq)
 
 -- | Initial empty per-zone development cards.
 emptyDevelopmentCards :: Map ZoneKind [Card]
@@ -84,6 +112,13 @@ data Drawing = Drawing
 
 mconcat
   [ deriveToJSON defaultOptions ''EliminationReason
+  , -- Tagged-object on every constructor (no string-tag shortcut for
+    -- the nullary cases) so the client only ever switches on
+    -- 'PlayabilityIssue.tag' — never on whether the field is a string
+    -- or an object.
+    deriveToJSON
+      defaultOptions {allNullaryToStringTag = False}
+      ''PlayabilityIssue
   , deriveToJSON defaultOptions ''Player
   , deriveToJSON defaultOptions ''PlayerState
   , deriveToJSON defaultOptions ''Drawing

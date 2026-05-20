@@ -120,6 +120,11 @@ data GameSlot = GameSlot
     -- holder of an open action window has no tactic in hand and no
     -- in-play own card with an action ability. Chosen by the host at
     -- 'createGame' time; immutable for the lifetime of the slot.
+  , useStarterDecks :: Bool
+    -- ^ When 'True', the waiting room only accepts 'GameSelectStarter'
+    -- (race-picker mode) and 'GameStart' loads the pre-built starter
+    -- for the seat's chosen race. Chosen by the host at 'createGame'
+    -- time; immutable for the lifetime of the slot.
   , inviteToken :: Text
   , seats :: TVar (Map Text SeatRow) -- key = "Player1" | "Player2"
   , chat :: TVar (Seq ChatLine)
@@ -224,9 +229,10 @@ createGame
   -> Maybe Text
   -> Bool
   -> Bool
+  -> Bool
   -> Text
   -> STM GameSlot
-createGame st gid name host vis pw allowSpec autoSkip token = do
+createGame st gid name host vis pw allowSpec autoSkip starters token = do
   seats <- newTVar Map.empty
   chat <- newTVar Seq.empty
   status <- newTVar StatusWaiting
@@ -243,6 +249,7 @@ createGame st gid name host vis pw allowSpec autoSkip token = do
         , password = pw
         , allowSpectators = allowSpec
         , autoSkipActionWindows = autoSkip
+        , useStarterDecks = starters
         , inviteToken = token
         , seats
         , chat
@@ -389,6 +396,7 @@ gameViewSTM slot viewer = do
     , hasPassword = isJust slot.password
     , allowSpectators = slot.allowSpectators
     , spectatorCount = spec
+    , useStarterDecks = slot.useStarterDecks
     , inviteToken = tokenForViewer
     , seats = seatList
     , status = sts

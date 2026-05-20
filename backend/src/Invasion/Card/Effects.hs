@@ -133,6 +133,61 @@ gainResources pk n = push (GainResources pk n)
 moveAllDamage :: HasQueue Message m => UnitKey -> UnitKey -> m ()
 moveAllDamage src dst = push (MoveAllDamage src dst)
 
+-- | Relocate an in-play unit to another zone controlled by the same
+-- player. No-op if the destination equals its current zone.
+moveUnit :: HasQueue Message m => UnitKey -> ZoneKind -> m ()
+moveUnit ukey zk = push (MoveUnit ukey zk)
+
+-- | Bounce an in-play unit back to its owner's hand. Fires the
+-- standard 'UnitLeftPlay' hook so on-leaves-play handlers see it.
+returnUnitToHand :: HasQueue Message m => UnitKey -> m ()
+returnUnitToHand ukey = push (ReturnUnitToHand ukey)
+
+-- | Send the top N cards of the named player's deck to their
+-- discard pile (the canonical "mill" effect — Infiltrate!).
+millFromDeck :: HasQueue Message m => PlayerKey -> Int -> m ()
+millFromDeck pk n = push (MillFromDeck pk n)
+
+-- | Discard the entirety of the named player's hand. Used by
+-- Will of Tzeentch / Journey to the Gate.
+discardHand :: HasQueue Message m => PlayerKey -> m ()
+discardHand pk = push (DiscardHand pk)
+
+-- | Recycle the top N of the named player's discard pile back into
+-- their deck and shuffle.
+recycleDiscard :: HasQueue Message m => PlayerKey -> Int -> m ()
+recycleDiscard pk n = push (RecycleDiscard pk n)
+
+-- | Move one development from @from@ to @to@ in this player's capital.
+moveDevelopment :: HasQueue Message m => PlayerKey -> ZoneKind -> ZoneKind -> m ()
+moveDevelopment pk fromZ toZ = push (MoveDevelopment pk fromZ toZ)
+
+-- | "Player takes N indirect damage." The engine auto-allocates to
+-- the player's safest unburned zone today; a player-driven
+-- allocator UI is a follow-up.
+indirectDamage :: HasQueue Message m => PlayerKey -> Int -> m ()
+indirectDamage pk n = push (IndirectDamage pk n)
+
+-- | Sigmar's Intervention: redirect the in-flight attack to a different
+-- zone of the defender's capital.
+redirectAttackZone :: HasQueue Message m => ZoneKind -> m ()
+redirectAttackZone zk = push (RedirectAttackZone zk)
+
+-- | Contested Fortress: arm one "cancel the next 1 capital damage"
+-- token on this player's capital, lasting until end of turn.
+scheduleCapitalShield :: HasQueue Message m => PlayerKey -> m ()
+scheduleCapitalShield pk = push (ScheduleCancelNextCapitalDamage pk)
+
+-- | Pop one development from the named player's zone. Discards the
+-- facedown card to that player's pile.
+destroyDevelopment :: HasQueue Message m => PlayerKey -> ZoneKind -> m ()
+destroyDevelopment pk zk = push (DestroyDevelopment pk zk)
+
+-- | Flip a facedown development. If a unit, put it into play in the
+-- zone and queue an end-of-turn sacrifice; otherwise discard.
+flipDevelopment :: HasQueue Message m => PlayerKey -> ZoneKind -> m ()
+flipDevelopment pk zk = push (FlipDevelopment pk zk)
+
 -- | "Place / remove N resource tokens on this quest."
 addQuestToken :: HasQueue Message m => UnitKey -> Int -> m ()
 addQuestToken k n = push (AdjustQuestTokens k n)
@@ -477,6 +532,23 @@ data PendingBuff = PendingBuff UnitKey ModifierDetails
 buffPower :: UnitKey -> Int -> PendingBuff
 buffPower target n = PendingBuff target (GainPower n)
 
+-- | "Target unit gets -N hit points." Negative HP is clamped to 1
+-- in the engine. Vile Sorceress, Horrific Mutation.
+debuffHP :: UnitKey -> Int -> PendingBuff
+debuffHP target n = PendingBuff target (LoseHitPoints n)
+
+-- | "Target unit cannot attack." Franz's Decree.
+disableAttack :: UnitKey -> PendingBuff
+disableAttack target = PendingBuff target CannotAttack
+
+-- | "Target unit cannot defend." Franz's Decree.
+disableDefend :: UnitKey -> PendingBuff
+disableDefend target = PendingBuff target CannotDefend
+
+-- | "Target unit cannot be corrupted." Blessing of Isha.
+shieldFromCorruption :: UnitKey -> PendingBuff
+shieldFromCorruption target = PendingBuff target CannotBeCorrupted
+
 -- | Install a 'PendingBuff' for the named 'ModifierScope'. Mirrors the
 -- card text "until end of turn" / "while X is in play".
 --
@@ -770,6 +842,18 @@ data Target a where
     -- ^ One of the controller's own non-burned development zones
     -- (kingdom or battlefield). Used by cards that place developments
     -- in a chosen zone (Wake the Mountain).
+  MyAnyZone :: Target ZoneKind
+    -- ^ Any of the controller's three zones (burned zones included
+    -- in the enumeration so that move-into-burned is the engine's
+    -- decision, not the picker's). Used by relocate cards
+    -- (Pistoliers, Forced March, Temple of Shallya).
+  AnyDevelopmentZone :: Target (PlayerKey, ZoneKind)
+    -- ^ A capital zone — either player's — that currently holds
+    -- at least one development. Used by destroy-development
+    -- effects (Demolition!, Smash-Go-Boom!).
+  EnemyDevelopmentZone :: Target (PlayerKey, ZoneKind)
+    -- ^ Same as 'AnyDevelopmentZone' but restricted to the
+    -- opponent's side.
   UnitMatching :: (PlayerKey -> Game -> UnitDetails -> Bool) -> Target UnitKey
     -- ^ A unit satisfying the supplied predicate. The first argument
     -- is the player making the pick (so predicates can reference
@@ -855,6 +939,21 @@ pickTarget pk = \case
     promptForOption pk opts >>= \case
       Just (TargetZoneOption _ z) -> pure (Just z)
       _ -> pure Nothing
+  MyAnyZone -> do
+    opts <- enumerateOptions pk MyAnyZone
+    promptForOption pk opts >>= \case
+      Just (TargetZoneOption _ z) -> pure (Just z)
+      _ -> pure Nothing
+  AnyDevelopmentZone -> do
+    opts <- enumerateOptions pk AnyDevelopmentZone
+    promptForOption pk opts >>= \case
+      Just (TargetZoneOption owner z) -> pure (Just (owner, z))
+      _ -> pure Nothing
+  EnemyDevelopmentZone -> do
+    opts <- enumerateOptions pk EnemyDevelopmentZone
+    promptForOption pk opts >>= \case
+      Just (TargetZoneOption owner z) -> pure (Just (owner, z))
+      _ -> pure Nothing
   UnitMatching p -> do
     opts <- enumerateOptions pk (UnitMatching p)
     promptForOption pk opts >>= \case
@@ -919,6 +1018,28 @@ enumerateOptionsPure pk g = \case
      in [ TargetZoneOption pk z.kind
         | z <- [me.capital.kingdom, me.capital.battlefield]
         , not z.burned
+        ]
+  MyAnyZone ->
+    let me = playerOf pk g
+     in [ TargetZoneOption pk z.kind
+        | z <- me.capital.zones
+        , not z.burned
+        ]
+  AnyDevelopmentZone ->
+    let devsOf p =
+          [ TargetZoneOption p.key z.kind
+          | z <- p.capital.zones
+          , let Developments d = z.developments
+          , d > 0
+          ]
+     in devsOf g.player1 <> devsOf g.player2
+  EnemyDevelopmentZone ->
+    let opp = pk.next
+        opponent = playerOf opp g
+     in [ TargetZoneOption opp z.kind
+        | z <- opponent.capital.zones
+        , let Developments d = z.developments
+        , d > 0
         ]
   UnitMatching p ->
     [TargetUnitOption u.key | u <- g.units, p pk g u]

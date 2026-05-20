@@ -146,6 +146,7 @@ function createGame(input: {
   password: string | null
   allowSpectators: boolean | null
   autoSkipActionWindows: boolean | null
+  useStarterDecks: boolean | null
 }) {
   socket?.send({ tag: 'LobbyCreateGame', ...input })
 }

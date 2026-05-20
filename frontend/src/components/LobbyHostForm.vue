@@ -18,6 +18,7 @@ const emit = defineEmits<{
     password: string | null
     allowSpectators: boolean
     autoSkipActionWindows: boolean
+    useStarterDecks: boolean
   }): void
 }>()
 
@@ -33,6 +34,9 @@ const allowSpectators = ref(true)
 // Off by default — every action window waits for a manual pass unless
 // the host opts in.
 const autoSkip = ref(false)
+// Off by default — players bring their own decks unless the host opts
+// in to the pre-built 40-card starters.
+const useStarterDecks = ref(false)
 
 watch(visibility, (v) => {
   allowSpectators.value = v === 'Public'
@@ -48,6 +52,7 @@ function onSubmit() {
     password: visibility.value === 'Private' && pw.length > 0 ? pw : null,
     allowSpectators: allowSpectators.value,
     autoSkipActionWindows: autoSkip.value,
+    useStarterDecks: useStarterDecks.value,
   })
 }
 </script>
@@ -107,6 +112,14 @@ function onSubmit() {
       <span>
         <strong>{{ t('lobby.games.new_form.auto_skip_label') }}</strong>
         <small>{{ t('lobby.games.new_form.auto_skip_help') }}</small>
+      </span>
+    </label>
+
+    <label class="spec-option">
+      <input v-model="useStarterDecks" type="checkbox" />
+      <span>
+        <strong>{{ t('lobby.games.new_form.starter_decks_label') }}</strong>
+        <small>{{ t('lobby.games.new_form.starter_decks_help') }}</small>
       </span>
     </label>
 

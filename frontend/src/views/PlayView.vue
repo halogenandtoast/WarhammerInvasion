@@ -16,12 +16,13 @@ import type {
   EngineLegend,
   EnginePlayer,
   EngineQuest,
+  EngineSupport,
   EngineUnit,
+  PlayabilityIssue,
   PlayerKey,
   SeatView,
   ZoneKind,
 } from '../api/protocol'
-import { priorityHolder } from '../api/protocol'
 import PlaySide from '../components/PlaySide.vue'
 import CardOverlay from '../components/CardOverlay.vue'
 import { cardHover } from '../stores/cardHover'
@@ -59,14 +60,6 @@ function seatName(k: PlayerKey): string {
   return props.seats.find((s) => s.seat === k)?.user.displayName ?? k
 }
 
-// Priority lookup is still needed for hand-card "playable" checks.
-// The visible action-window pill itself now lives in the bottom phase
-// bar (Game.vue), so this view doesn't render trigger/pass UI.
-const priorityIsMe = computed(() => {
-  const aw = props.engine.actionWindow
-  return aw != null && mySeatKey.value != null && priorityHolder(aw.awaiting) === mySeatKey.value
-})
-
 const finished = computed(() => {
   const lc = props.engine.lifecycle
   if (lc.tag !== 'GameFinished') return null
@@ -94,6 +87,25 @@ const opponentUnits = computed<EngineUnit[]>(() => {
   const k = opponentSeatKey.value
   if (!k) return []
   return props.engine.units.filter((u) => u.controller === k)
+})
+
+// Free-standing supports per side. Attached supports travel with their
+// host unit (rendered by PlaySide via `u.attachments`), so we filter
+// them out here.
+const mySupports = computed<EngineSupport[]>(() => {
+  const k = mySeatKey.value
+  if (!k) return []
+  return props.engine.supports.filter(
+    (s) => s.controller === k && s.attachedTo === null,
+  )
+})
+
+const opponentSupports = computed<EngineSupport[]>(() => {
+  const k = opponentSeatKey.value
+  if (!k) return []
+  return props.engine.supports.filter(
+    (s) => s.controller === k && s.attachedTo === null,
+  )
 })
 
 // At most one legend per player at a time (engine-enforced).
@@ -136,6 +148,10 @@ const seatNames = computed<Record<PlayerKey, string>>(() => ({
 interface OpenPlay {
   card: EngineCard
   anchor: DOMRect
+  // When the click landed on an unplayable card, this carries the
+  // engine-supplied reason and the popover renders it instead of the
+  // normal zone/target picker. Null = normal play flow.
+  issue: PlayabilityIssue | null
 }
 const openPlay = ref<OpenPlay | null>(null)
 
@@ -149,29 +165,44 @@ function isAttachment(card: EngineCardDef): boolean {
   return card.traits.includes('Attachment')
 }
 
-// Is this card playable at all right now? Tactics any time we hold
-// priority; everything else needs the active player to be us AND the
-// open window to be the capital action window. Legends additionally
-// require that the controller doesn't already have one in play
-// (engine-enforced, but mirroring the rule client-side avoids opening
-// a popover that won't do anything).
-const canPlayCard = (card: EngineCardDef): boolean => {
-  if (!priorityIsMe.value) return false
-  if (card.kind === 'Tactic') return true
-  if (props.engine.actionWindow?.trigger !== 'CapitalActionWindow') return false
-  if (props.engine.currentPlayer !== mySeatKey.value) return false
-  if (card.kind === 'Legend' && myLegend.value) return false
-  return true
+// Playability is fully server-driven: the engine ships a per-hand-card
+// 'handPlayability' map on each Player ('Invasion.Engine.attachHandPlayability').
+// An entry's absence means the card is playable; presence means it
+// isn't, and the value is the reason to display.
+function issueFor(card: EngineCard): PlayabilityIssue | null {
+  const map = me.value?.handPlayability
+  if (!map) return null
+  return map[String(card.key)] ?? null
 }
+
+const canPlayCard = (card: EngineCard): boolean => issueFor(card) === null
+
+// Allow clicking ANY card in our hand so an unplayable card can still
+// surface "here's why". PlaySide's `cardIsUnplayable` controls the
+// dimmed visual style.
+const cardIsUnplayable = (card: EngineCard): boolean => issueFor(card) !== null
 
 function onHandCardClick(payload: { card: EngineCard | null; rect: DOMRect }) {
   if (!payload.card) return
-  if (!canPlayCard(payload.card)) return
-  openPlay.value = { card: payload.card, anchor: payload.rect }
+  openPlay.value = {
+    card: payload.card,
+    anchor: payload.rect,
+    issue: issueFor(payload.card),
+  }
 }
 
 function closePopover() {
   openPlay.value = null
+}
+
+// Resolve a PlayabilityIssue into the i18n-formatted reason string.
+function unplayableReason(issue: PlayabilityIssue): string {
+  const base = `game.play.unplayable.reason.${issue.tag}`
+  if (issue.tag === 'InsufficientResources') {
+    const [needed, have] = issue.contents
+    return t(base, { needed, have })
+  }
+  return t(base)
 }
 
 // Zones a unit/support card may legally enter. BattlefieldOnly cards
@@ -259,6 +290,7 @@ const popoverStyle = computed<Record<string, string>>(() => {
         v-if="opponent && opponentSeatKey"
         :player="opponent"
         :units="opponentUnits"
+        :supports="opponentSupports"
         :quests="opponentQuests"
         :legend="opponentLegend"
         perspective="opponent"
@@ -274,6 +306,7 @@ const popoverStyle = computed<Record<string, string>>(() => {
         v-if="me && mySeatKey"
         :player="me"
         :units="myUnits"
+        :supports="mySupports"
         :quests="myQuests"
         :legend="myLegend"
         perspective="self"
@@ -282,6 +315,7 @@ const popoverStyle = computed<Record<string, string>>(() => {
         :is-active="engine.currentPlayer === mySeatKey"
         :is-first-player="engine.firstPlayer === mySeatKey"
         :can-play-card="canPlayCard"
+        :card-is-unplayable="cardIsUnplayable"
         @hand-card-click="onHandCardClick"
       />
     </div>
@@ -311,12 +345,28 @@ const popoverStyle = computed<Record<string, string>>(() => {
           @click.stop
         >
           <header class="play-popover-head">
-            <p class="play-popover-eyebrow">{{ t('game.play.action.heading') }}</p>
+            <p class="play-popover-eyebrow">
+              {{ openPlay.issue
+                ? t('game.play.unplayable.heading')
+                : t('game.play.action.heading') }}
+            </p>
             <p class="play-popover-title">{{ openPlay.card.title }}</p>
           </header>
 
+          <!-- Unplayable: just show the reason and an OK button -->
+          <template v-if="openPlay.issue">
+            <p class="play-popover-hint unplayable">
+              {{ unplayableReason(openPlay.issue) }}
+            </p>
+            <div class="play-popover-actions">
+              <button class="play-popover-btn primary" type="button" @click="closePopover">
+                {{ t('game.play.unplayable.dismiss') }}
+              </button>
+            </div>
+          </template>
+
           <!-- Unit / non-attachment Support: pick a zone -->
-          <template v-if="openPlay.card.kind === 'Unit' || (openPlay.card.kind === 'Support' && !isAttachment(openPlay.card))">
+          <template v-else-if="openPlay.card.kind === 'Unit' || (openPlay.card.kind === 'Support' && !isAttachment(openPlay.card))">
             <div class="play-popover-actions">
               <button
                 v-for="z in legalZones(openPlay.card)"
@@ -360,7 +410,12 @@ const popoverStyle = computed<Record<string, string>>(() => {
             </div>
           </template>
 
-          <button class="play-popover-cancel" type="button" @click="closePopover">
+          <button
+            v-if="!openPlay.issue"
+            class="play-popover-cancel"
+            type="button"
+            @click="closePopover"
+          >
             {{ t('game.play.action.cancel') }}
           </button>
         </div>
@@ -486,6 +541,11 @@ const popoverStyle = computed<Record<string, string>>(() => {
   margin: 0;
   font-size: 0.78rem;
   color: var(--fg-faint);
+}
+.play-popover-hint.unplayable {
+  color: var(--fg);
+  font-size: 0.86rem;
+  line-height: 1.35;
 }
 .play-popover-empty {
   padding: 0.5rem 0;

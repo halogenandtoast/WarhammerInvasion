@@ -5,7 +5,7 @@ import { auth } from '../stores/auth'
 import { game } from '../stores/game'
 import { listDecks, type DeckRecord } from '../api/decks'
 import { ApiError } from '../api/client'
-import type { ChatLine, LogEntry, PlayerKey } from '../api/protocol'
+import type { ChatLine, LogEntry, PlayerKey, Race } from '../api/protocol'
 import PlayView from './PlayView.vue'
 import PromptPanel from '../components/PromptPanel.vue'
 import MaintenanceBanner from '../components/MaintenanceBanner.vue'
@@ -182,6 +182,7 @@ function selectDeck(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   if (v) game.selectDeck(v)
 }
+function selectStarter(race: Race) { game.selectStarter(race) }
 function clearDeck() { game.clearDeck() }
 function start() { game.startGame() }
 function leave() {
@@ -231,6 +232,7 @@ function pass() { game.passPriority() }
           :is-spectator="isSpectator"
           :start-disabled-reason="startDisabledReason"
           @select-deck="selectDeck"
+          @select-starter="selectStarter"
           @clear-deck="clearDeck"
           @start="start"
           @leave="leave"

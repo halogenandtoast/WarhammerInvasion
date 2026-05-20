@@ -7,7 +7,7 @@
 
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { GameView, PlayerKey, SeatView, UserInfo } from '../api/protocol'
+import type { GameView, PlayerKey, Race, SeatView, UserInfo } from '../api/protocol'
 import type { DeckRecord } from '../api/decks'
 import SeatBody from './SeatBody.vue'
 
@@ -23,6 +23,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select-deck', ev: Event): void
+  (e: 'select-starter', race: Race): void
   (e: 'clear-deck'): void
   (e: 'start'): void
   (e: 'leave'): void
@@ -109,7 +110,9 @@ async function copyInvite() {
         :decks-loading="decksLoading"
         :decks-error="decksError"
         :game-status="view.status"
+        :use-starter-decks="view.useStarterDecks"
         @select="(e) => emit('select-deck', e)"
+        @select-starter="(r) => emit('select-starter', r)"
         @clear="emit('clear-deck')"
       />
     </article>

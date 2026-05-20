@@ -144,11 +144,13 @@ data Message where
     -- tactic's 'receive' once with 'TacticResolved'. The
     -- 'ActionTarget' is the target the player chose at play time (or
     -- 'NoTarget' for non-targeting tactics).
-  TacticResolved :: PlayerKey -> CardCode -> ActionTarget -> Message
+  TacticResolved :: PlayerKey -> CardCode -> ActionTarget -> Int -> Message
     -- ^ Dispatch hook fired exactly once when a tactic resolves. The
     -- tactic's CardDef.receive is invoked with this message; cards
     -- like Berserk Fury and Blood for the Blood God react here. The
-    -- 'ActionTarget' carries the choice from 'PlayTactic'.
+    -- 'ActionTarget' carries the choice from 'PlayTactic'; the 'Int'
+    -- carries the X value paid for variable-cost tactics (0 for
+    -- fixed-cost tactics).
   -- Prompts
   RequestPrompt :: Prompt -> Message
     -- ^ Suspend the engine with the given prompt. 'gameMain' will
@@ -194,6 +196,78 @@ data Message where
   MoveAllDamage :: UnitKey -> UnitKey -> Message
     -- ^ Move all damage on 'fromKey' to 'toKey'. Source unit ends with
     -- 0 damage; destination accumulates.
+  -- Unit relocation
+  MoveUnit :: UnitKey -> ZoneKind -> Message
+    -- ^ Relocate an in-play unit to a different zone controlled by
+    -- the SAME player. No-op if the destination equals the unit's
+    -- current zone. Used by Pistoliers, Forced March, Temple of
+    -- Shallya, Johannes Broheim.
+  ReturnUnitToHand :: UnitKey -> Message
+    -- ^ Remove a unit from play and put its card into its owner's
+    -- hand (not discard). Triggers 'UnitLeftPlay' the same way
+    -- 'DestroyUnit' does so on-leaves-play hooks fire. Used by
+    -- Sigmar's Blessed, Pilgrimage.
+  -- Deck manipulation
+  MillFromDeck :: PlayerKey -> Int -> Message
+    -- ^ Send the top N cards of the named player's deck to their
+    -- discard pile. Used by Infiltrate!.
+  DiscardHand :: PlayerKey -> Message
+    -- ^ Discard every card in the named player's hand. Used by
+    -- Will of Tzeentch and Journey to the Gate's sacrifice ability.
+  RecycleDiscard :: PlayerKey -> Int -> Message
+    -- ^ Shuffle up to N cards from the named player's discard pile
+    -- back into their deck (engine picks first N for now; a real
+    -- prompt is a follow-up). Prepare for War!.
+  -- Development shuffling
+  MoveDevelopment :: PlayerKey -> ZoneKind -> ZoneKind -> Message
+    -- ^ Move one development from @from@ to @to@ in the named
+    -- player's capital. Will of the Electors moves up to two via
+    -- two consecutive messages.
+  -- Indirect damage
+  IndirectDamage :: PlayerKey -> Int -> Message
+    -- ^ Allocate N damage across the named player's capital, the
+    -- player choosing where it lands. Today the engine auto-routes
+    -- it to the player's least-damaged non-burned zone to maximise
+    -- survival; a player-driven allocator prompt is a follow-up
+    -- (the rules let the player choose).
+  -- Combat redirection
+  RedirectAttackZone :: ZoneKind -> Message
+    -- ^ Sigmar's Intervention. Rewrite the current 'CombatState's
+    -- target zone before defenders are declared. No-op outside
+    -- combat or if the destination zone is already burning.
+  -- Development destruction
+  DestroyDevelopment :: PlayerKey -> ZoneKind -> Message
+    -- ^ Remove one development from the named zone. The card lands
+    -- in the controller's discard so destroy-development effects
+    -- (Demolition!, Grimgor Ironhide, Smash-Go-Boom!) route the
+    -- facedown card back to the controller's pile.
+  FlipDevelopment :: PlayerKey -> ZoneKind -> Message
+    -- ^ Reveal the top facedown development in the named zone. If
+    -- the underlying card is a Unit it enters play in this zone
+    -- and an end-of-turn sacrifice is scheduled; any other type
+    -- is sacrificed immediately. Used by Rip Dere 'eads Off!.
+  -- Slaanesh's Domination: random hand peek + opt-in free play
+  SlaaneshDominate :: PlayerKey -> PlayerKey -> Int -> Message
+    -- ^ Caster picks @count@ cards at random from @opp@'s hand and
+    -- is asked, per revealed tactic, whether to play it for free.
+    -- Cards stay in the opponent's hand. Args: caster, opponent,
+    -- number to reveal.
+  -- Action cancellation
+  ArmActionCancel :: PlayerKey -> Message
+    -- ^ Add one "next card action this player fires has its
+    -- effect cancelled" token. Cost is still paid; only the body
+    -- is suppressed. Bright Wizard Apprentice writes to this.
+  -- Capital damage cancellation (per turn, once)
+  ScheduleCancelNextCapitalDamage :: PlayerKey -> Message
+  -- One-shot next-unit modifiers (We'z Bigga!)
+  ScheduleNextUnitDiscount :: PlayerKey -> Int -> Message
+    -- ^ Add N to this player's "next unit costs N less" budget.
+    -- Resets at end of turn or as soon as the player plays a unit.
+  ScheduleNextUnitDamage :: PlayerKey -> Int -> Message
+    -- ^ The next unit this player plays enters with N damage.
+    -- ^ Contested Fortress. Arms a one-shot cancel of the next
+    -- damage point about to land on the named player's capital
+    -- this turn. Reset at start of each turn.
   -- Legends
   PlayLegend :: PlayerKey -> UnitKey -> Message
     -- ^ Play a legend from hand directly onto the controller's capital

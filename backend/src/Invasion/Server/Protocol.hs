@@ -38,7 +38,7 @@ import Data.UUID (UUID)
 import GHC.Generics (Generic)
 import Invasion.Game (TargetOption)
 import Invasion.Prelude
-import Invasion.Types (CardCode, PlayerKey, UnitKey, ZoneKind)
+import Invasion.Types (CardCode, PlayerKey, Race, UnitKey, ZoneKind)
 
 -- ----------------------------------------------------------------------------
 -- Common
@@ -76,8 +76,13 @@ data MaintenanceState = MaintenanceState
   }
   deriving stock (Show, Eq, Generic)
 
+-- | Summary of the deck loaded into a seat. Two shapes share the
+-- record: a user-built deck carries @deckId :: Just …@ with the row's
+-- name/capital; a pre-built starter carries @starterRace :: Just …@
+-- (and a 'Nothing' @deckId@). At most one of the two is ever set.
 data DeckView = DeckView
-  { deckId :: UUID
+  { deckId :: Maybe UUID
+  , starterRace :: Maybe Race
   , name :: Text
   , capital :: Maybe Text
   , size :: Int
@@ -117,6 +122,10 @@ data GameView = GameView
   , hasPassword :: Bool
   , allowSpectators :: Bool
   , spectatorCount :: Int
+  , useStarterDecks :: Bool
+    -- ^ When True, the waiting room offers a race picker instead of the
+    -- saved-deck picker; the server seats the pre-built 40-card
+    -- starter for the chosen race when the game begins.
   , inviteToken :: Maybe Text
   , seats :: [SeatView]
   , status :: GameStatus
@@ -143,12 +152,17 @@ data LobbyIn
     -- automatically passes priority for whichever player has no tactic
     -- in hand and no in-play card carrying an action ability. Defaults
     -- to False (every action window waits for an explicit pass).
+    -- 'useStarterDecks' is optional: when 'Just True' players pick a
+    -- race in the waiting room (instead of one of their saved decks)
+    -- and the server seats the pre-built 40-card starter for that
+    -- race. Defaults to False.
     LobbyCreateGame
       { name :: Text
       , visibility :: Visibility
       , password :: Maybe Text
       , allowSpectators :: Maybe Bool
       , autoSkipActionWindows :: Maybe Bool
+      , useStarterDecks :: Maybe Bool
       }
   | -- | Join a public game (no password needed). Reply: 'LobbyGameJoinOk'.
     LobbyJoinPublic { gameId :: UUID }
@@ -189,8 +203,13 @@ data LobbyOut
 data GameIn
   = GameChatSend { text :: Text }
   | -- | Replace this seat's loaded deck with the deck identified by id.
-    -- The deck must belong to the seated user.
+    -- The deck must belong to the seated user. Rejected when the slot
+    -- was created with 'useStarterDecks' — use 'GameSelectStarter'
+    -- instead.
     GameSelectDeck { deckId :: UUID }
+  | -- | Load a pre-built starter for the named race into this seat.
+    -- Only valid when the slot was created with 'useStarterDecks'.
+    GameSelectStarter { race :: Race }
   | -- | Clear the loaded deck for this seat.
     GameClearDeck
   | -- | Host-only. Transition Waiting -> Playing if both seats have decks.
@@ -239,6 +258,7 @@ data PromptResultWire
   = PromptUnitsWire { unitKeys :: [UnitKey] }
   | PromptBoolWire { yes :: Bool }
   | PromptTargetOptionWire { option :: TargetOption }
+  | PromptAmountWire { amount :: Int }
   | PromptNoneWire
   deriving stock (Show, Generic)
 

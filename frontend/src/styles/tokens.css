@@ -2,9 +2,6 @@
  * Design tokens — every colour, radius, font stack, and timing used by the
  * frontend lives here. Components should reference these via var(--token);
  * never hard-code a colour or magic number in component CSS.
- *
- * Dark mode is the default. Light mode overrides the colour tokens; the
- * structural tokens (radii, fonts, motion, z-index) are scheme-agnostic.
  */
 
 :root {
@@ -132,19 +129,4 @@
   /* Elevation */
   --shadow-drawer: 0 10px 30px rgba(0, 0, 0, 0.4);
   --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.75);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f5f1;
-    --bg-elev: #ffffff;
-    --bg-elev-2: #eceae3;
-    --fg: #1c1c1f;
-    --fg-dim: #4a4a52;
-    --fg-faint: #7d7d85;
-    --border: rgba(0, 0, 0, 0.12);
-    --accent: #a44229;
-    --accent-strong: #8b3621;
-    --shadow-card: 0 3px 10px rgba(0, 0, 0, 0.22);
-  }
 }

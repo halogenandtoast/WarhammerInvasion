@@ -28,8 +28,13 @@ export interface MaintenanceState {
   message: string | null
 }
 
+// Summary of the deck loaded into a seat. Two shapes share the record:
+// a user-built deck carries `deckId` (and no `starterRace`); a pre-built
+// starter carries `starterRace` (and a `null` `deckId`). At most one of
+// the two is ever non-null.
 export interface DeckView {
-  deckId: string
+  deckId: string | null
+  starterRace: Race | null
   name: string
   capital: Capital | null
   size: number
@@ -62,6 +67,10 @@ export interface GameView {
   hasPassword: boolean
   allowSpectators: boolean
   spectatorCount: number
+  // When true, the waiting room offers a race picker instead of the
+  // saved-deck picker; the server loads the pre-built 40-card starter
+  // for the chosen race when the game starts.
+  useStarterDecks: boolean
   inviteToken: string | null
   seats: SeatView[]
   status: GameStatus
@@ -94,8 +103,10 @@ export type EngineNumber =
 export type Trait =
   | 'Warrior' | 'Spell' | 'Engineer' | 'Elite' | 'Slayer' | 'Priest' | 'Hero'
   | 'Ranger' | 'Rune' | 'Building' | 'Attachment' | 'Weapon' | 'Siege'
-  | 'Daemon' | 'Creature' | 'Sorcerer' | 'Knight' | 'Cavalry' | 'Mission'
+  | 'Daemon' | 'Creature' | 'Sorceror' | 'Knight' | 'Cavalry' | 'Mission'
   | 'QuestTrait' | 'Wasteland' | 'CapitalCenter' | 'Rift' | 'Relic'
+  | 'Banner' | 'Goblin' | 'Mage' | 'Mutation' | 'Noble' | 'Shaman'
+  | 'Skill' | 'Warpstone' | 'Zealot'
 
 // Card definition as serialized by Invasion.CardDef.ToJSON. The 'receive'
 // function field is dropped on the wire — see CardDef.hs.
@@ -241,7 +252,26 @@ export interface EnginePlayer {
   deck: EngineCard[]
   discard: EngineCard[]
   race: Race
+  // Map from hand card key (as a stringified integer — Aeson encodes
+  // newtype-around-Int map keys as strings) to the reason the card is
+  // currently unplayable. Absent key = card is playable. The server
+  // recomputes this on every snapshot publish; treat it as derived
+  // state, never write to it locally.
+  handPlayability: Record<string, PlayabilityIssue>
 }
+
+// Mirrors Invasion.Player.PlayabilityIssue. Every case is encoded as a
+// tagged object (allNullaryToStringTag = false on the Haskell side) so
+// the discriminator is always `tag`.
+export type PlayabilityIssue =
+  | { tag: 'InsufficientResources'; contents: [number, number] }
+  | { tag: 'UniqueAlreadyInPlay' }
+  | { tag: 'LimitedAlreadyPlayed' }
+  | { tag: 'LegendAlreadyInPlay' }
+  | { tag: 'NotYourTurn' }
+  | { tag: 'NotInActionWindow' }
+  | { tag: 'WrongActionWindow' }
+  | { tag: 'NoValidTarget' }
 
 export type GameLifecycle =
   | { tag: 'GameSetup' }
@@ -332,6 +362,12 @@ export type PromptKind =
       options: TargetOption[]
       description: string
     }
+  | {
+      tag: 'ChooseAmount'
+      minAmount: number
+      maxAmount: number
+      description: string
+    }
 
 export type TargetOption =
   | { tag: 'TargetUnitOption'; contents: number }
@@ -349,6 +385,7 @@ export type PromptResultWire =
   | { tag: 'PromptUnitsWire'; unitKeys: number[] }
   | { tag: 'PromptBoolWire'; yes: boolean }
   | { tag: 'PromptTargetOptionWire'; option: TargetOption }
+  | { tag: 'PromptAmountWire'; amount: number }
   | { tag: 'PromptNoneWire' }
 
 // Derived helpers — keep alongside the wire types so they stay in sync.
@@ -382,6 +419,11 @@ export type LobbyIn =
       // (no Tactic in hand, no in-play card carrying an action).
       // Defaults to false on the server when null.
       autoSkipActionWindows: boolean | null
+      // Optional: when true, the waiting room offers a race picker and
+      // the server seats the pre-built 40-card starter for the chosen
+      // race instead of one of the seated player's saved decks.
+      // Defaults to false on the server when null.
+      useStarterDecks: boolean | null
     }
   | { tag: 'LobbyJoinPublic'; gameId: string }
   | { tag: 'LobbyJoinWithPassword'; gameId: string; password: string | null }
@@ -411,6 +453,8 @@ export type LobbyOut =
 export type GameIn =
   | { tag: 'GameChatSend'; text: string }
   | { tag: 'GameSelectDeck'; deckId: string }
+  // Only valid when the slot was created with `useStarterDecks`.
+  | { tag: 'GameSelectStarter'; race: Race }
   | { tag: 'GameClearDeck' }
   | { tag: 'GameStart' }
   | { tag: 'GamePassPriority' }

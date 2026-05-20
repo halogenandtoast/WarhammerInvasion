@@ -13,6 +13,8 @@ import type {
   EngineUnit,
   PlayerKey,
   Race,
+  TargetOption,
+  ZoneKind,
 } from '../api/protocol'
 import { game } from '../stores/game'
 
@@ -133,6 +135,58 @@ const minOk = computed(() => {
   if (!prompt.value || prompt.value.kind.tag !== 'ChooseUnits') return true
   return picks.value.length >= prompt.value.kind.minPick
 })
+
+// ChooseAmount: integer slider/input bounded by [minAmount, maxAmount].
+const amountPick = ref<number>(0)
+watch(prompt, () => {
+  if (prompt.value?.kind.tag === 'ChooseAmount') {
+    amountPick.value = prompt.value.kind.minAmount
+  }
+})
+
+function submitAmount() {
+  game.resolvePromptAmount(amountPick.value)
+}
+
+// ChooseTargetOption: the engine has already pre-filtered the legal
+// picks into `options`. Render one button per option, resolving unit
+// keys to titles and zone tags to a "{player}'s {zone}" label.
+const unitTitleByKey = computed<Map<number, string>>(() => {
+  const m = new Map<number, string>()
+  for (const u of props.engine.units) m.set(u.key, u.cardDef.title)
+  return m
+})
+
+function zoneLabel(z: ZoneKind): string {
+  switch (z) {
+    case 'KingdomZone': return 'Kingdom'
+    case 'QuestZone': return 'Quest zone'
+    case 'BattlefieldZone': return 'Battlefield'
+  }
+}
+
+function playerLabel(p: PlayerKey): string {
+  if (props.seat && p === props.seat) return 'Your'
+  return "Opponent's"
+}
+
+function targetOptionLabel(o: TargetOption): string {
+  if (o.tag === 'TargetUnitOption') {
+    return unitTitleByKey.value.get(o.contents) ?? `Unit #${o.contents}`
+  }
+  const [owner, zone] = o.contents
+  return `${playerLabel(owner)} ${zoneLabel(zone).toLowerCase()}`
+}
+
+function targetOptionKey(o: TargetOption): string {
+  if (o.tag === 'TargetUnitOption') return `u:${o.contents}`
+  const [owner, zone] = o.contents
+  return `z:${owner}:${zone}`
+}
+
+function submitTargetOption(o: TargetOption) {
+  game.resolvePromptTargetOption(o)
+}
 </script>
 
 <template>
@@ -175,6 +229,60 @@ const minOk = computed(() => {
             Confirm ({{ picks.length }}/{{ prompt.kind.maxPick }})
           </button>
           <button v-if="prompt.kind.minPick === 0" type="button" @click="submitNone">Skip</button>
+        </div>
+      </template>
+      <template v-else>
+        <em>Waiting…</em>
+      </template>
+    </div>
+
+    <!-- ChooseAmount -->
+    <div v-else-if="prompt.kind.tag === 'ChooseAmount'" class="actions">
+      <template v-if="itsMine">
+        <div class="amount-row">
+          <input
+            type="number"
+            :min="prompt.kind.minAmount"
+            :max="prompt.kind.maxAmount"
+            v-model.number="amountPick"
+            class="amount-input"
+          />
+          <span class="amount-bounds">
+            ({{ prompt.kind.minAmount }}–{{ prompt.kind.maxAmount }})
+          </span>
+        </div>
+        <div class="confirm">
+          <button
+            type="button"
+            :disabled="
+              amountPick < prompt.kind.minAmount ||
+              amountPick > prompt.kind.maxAmount
+            "
+            @click="submitAmount"
+          >
+            Confirm
+          </button>
+        </div>
+      </template>
+      <template v-else>
+        <em>Waiting…</em>
+      </template>
+    </div>
+
+    <!-- ChooseTargetOption -->
+    <div v-else-if="prompt.kind.tag === 'ChooseTargetOption'" class="actions">
+      <template v-if="itsMine">
+        <div class="picks">
+          <button
+            v-for="o in prompt.kind.options"
+            :key="targetOptionKey(o)"
+            type="button"
+            class="pick"
+            @click="submitTargetOption(o)"
+          >
+            {{ targetOptionLabel(o) }}
+          </button>
+          <p v-if="prompt.kind.options.length === 0" class="empty">No valid targets.</p>
         </div>
       </template>
       <template v-else>
@@ -253,6 +361,26 @@ const minOk = computed(() => {
 .confirm {
   display: flex;
   gap: 0.5rem;
+}
+.amount-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.amount-input {
+  width: 5rem;
+  min-height: 44px;
+  background: #3a3a44;
+  color: #f5f5f5;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 0 0.6rem;
+  font-size: 1rem;
+}
+.amount-bounds {
+  color: #aaa;
+  font-size: 0.85rem;
 }
 .confirm button {
   min-height: 44px;
