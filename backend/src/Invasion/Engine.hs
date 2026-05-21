@@ -1901,35 +1901,26 @@ instance Run Game where
               , ("to", zoneParam toZ)
               ]
     IndirectDamage pk amount -> do
-      -- Auto-route to the player's most-slack non-burned zone so the
-      -- indirect damage minimises the chance of a burn. Real rules
-      -- let the player pick — that's a follow-up prompt task.
-      when (amount > 0) do
-        g <- get
-        let p = lookupPlayer pk g
-            cap = p.capital
-            candidates =
-              [ (KingdomZone, cap.kingdom)
-              , (QuestZone, cap.quest)
-              , (BattlefieldZone, cap.battlefield)
-              ]
-            slack z =
-              let HitPoints hp = z.hitPoints
-                  Damage d = z.damage
-               in hp - d
-            picks = filter (not . (.burned) . snd) candidates
-        case picks of
-          [] -> pure ()
-          _ -> do
-            let scored = [(slack z, zk) | (zk, z) <- picks]
-                (_, zk) = foldr1 (\a b -> if fst a >= fst b then a else b) scored
-            send (DealDamageToZone pk zk amount)
-            logIt LogSystem
-              "log.capital.indirect"
-              [ ("player", playerParam pk)
-              , ("amount", tshow amount)
-              , ("zone", zoneParam zk)
-              ]
+      -- Per rules: the targeted player chooses how to distribute
+      -- each point. They cannot put more on a zone than its
+      -- remaining HP and cannot target a burned zone. Excess that
+      -- can't be assigned (all non-burned zones full) is lost. We
+      -- prompt one point at a time, tracking already-placed
+      -- allocations so the eligibility filter respects the
+      -- slack-vs-HP cap across the whole effect; finally we queue a
+      -- single 'DealDamageToZone' per chosen zone so the normal
+      -- shield / burn / elimination machinery fires.
+      when (amount > 0) $ do
+        allocation <- collectIndirect pk amount mempty
+        let totalAllocated = sum (Map.elems allocation)
+        for_ (Map.toList allocation) $ \(zk, n) ->
+          when (n > 0) $ send (DealDamageToZone pk zk n)
+        when (totalAllocated > 0) $
+          logIt LogSystem
+            "log.capital.indirect"
+            [ ("player", playerParam pk)
+            , ("amount", tshow totalAllocated)
+            ]
     RedirectAttackZone newZone -> do
       g <- get
       whenJust g.combat \cs ->
@@ -2421,14 +2412,75 @@ combatDamageOf g side u =
 
 -- | Card-aware attacker eligibility check at 'BeginCombat'. Returns
 -- 'True' if the unit can attack the named defender zone right now.
--- Driven by the per-card 'canAttackZone' slice on 'UnitExtras'
--- (Sworn of Khorne today; default lets every unit attack).
+-- Hard rules:
+--   * Only battlefield units can attack.
+--   * Corrupt units cannot attack.
+--   * Units modifier-tagged 'CannotAttack' cannot attack.
+-- Then the per-card 'canAttackZone' slice ('Sworn of Khorne', etc.)
+-- gets the last word.
 eligibleAttacker :: Game -> PlayerKey -> ZoneKind -> UnitKey -> Bool
 eligibleAttacker g defender zone ukey = case findUnit ukey g of
   Nothing -> False
   Just u ->
-    not (hasModifier g.modifiers ukey CannotAttack)
+    u.zone == BattlefieldZone
+      && not u.corrupted
+      && not (hasModifier g.modifiers ukey CannotAttack)
       && u.cardDef.extras.canAttackZone g defender zone u
+
+-- | Prompt the named player to place 'remaining' indirect-damage
+-- points one at a time, respecting the slack-vs-HP cap and skipping
+-- burned zones. Returns the per-zone tally; the caller turns that
+-- into actual 'DealDamageToZone' messages. Falls back gracefully on
+-- a declined / illegal prompt response by stopping the loop (any
+-- unallocated remainder is simply not assigned).
+collectIndirect
+  :: PlayerKey
+  -> Int
+  -> Map.Map ZoneKind Int
+  -> StateT Game GameT (Map.Map ZoneKind Int)
+collectIndirect pk remaining acc
+  | remaining <= 0 = pure acc
+  | otherwise = do
+      g <- get
+      let p = lookupPlayer pk g
+          cap = p.capital
+          baseZones =
+            [ (KingdomZone, cap.kingdom)
+            , (QuestZone, cap.quest)
+            , (BattlefieldZone, cap.battlefield)
+            ]
+          accFor zk = Map.findWithDefault 0 zk acc
+          slackOf z =
+            let HitPoints hp = z.hitPoints
+                Damage d = z.damage
+             in hp - d
+          eligible =
+            [ zk
+            | (zk, z) <- baseZones
+            , not z.burned
+            , slackOf z - accFor zk > 0
+            ]
+          bump zk = collectIndirect pk (remaining - 1) (Map.insertWith (+) zk 1 acc)
+      case eligible of
+        [] -> pure acc
+        [only] -> bump only
+        many -> do
+          ans <- askPrompt Prompt
+            { player = pk
+            , kind = ChooseTargetOption
+                { options = [TargetZoneOption pk zk | zk <- many]
+                , description =
+                    "Place 1 indirect damage ("
+                      <> tshow remaining
+                      <> " left)."
+                }
+            , callback = CallbackInlinePrompt
+            }
+          case ans of
+            PickTargetOption (TargetZoneOption owner zk)
+              | owner == pk, zk `elem` many ->
+                  bump zk
+            _ -> pure acc
 
 -- | Units the named player may legally declare as defenders of the
 -- given zone right now. Excludes corrupt units and anything carrying
@@ -2971,30 +3023,34 @@ isCombatSubStepWindow = \case
   AfterApplyCombatDamage -> True
   _ -> False
 
--- | A player has "something to do" in an action window if they hold a
--- Tactic card in hand or control an in-play card that prints any
--- action ability. Cost and loyalty are intentionally not consulted —
--- erring toward the prompt keeps the spectator-information tell weak
--- and avoids skipping past a state the player may still want to react
--- to.
+-- | A player has "something to do" in an action window if any hand
+-- card is currently playable here, or they control an in-play card
+-- with an action ability whose zone gate matches its location and
+-- whose base cost they can afford. Both checks are window-aware, so
+-- begin-of-turn / end-of-turn / phase windows auto-pass whenever the
+-- player can't actually act — a Battlefield-only tactic in hand
+-- doesn't keep the Kingdom window open.
 playerHasActionMove :: PlayerKey -> Game -> Bool
 playerHasActionMove pk g =
-  let p = lookupPlayer pk g
-   in any handIsTactic p.hand
-        || hasAction g.units
-        || hasAction g.supports
-        || hasAction g.quests
-        || hasAction g.legends
+  any (isNothing . assessHandCard g pk) (lookupPlayer pk g).hand
+    || any (unitActionUsable resources) ownUnits
+    || any (otherActionUsable resources) ownSupports
+    || any (otherActionUsable resources) ownQuests
+    || any (otherActionUsable resources) ownLegends
   where
-    handIsTactic c = case c.def of
-      TacticCardDef _ -> True
-      _ -> False
-    hasAction
-      :: ( HasField "controller" a PlayerKey
-         , HasField "cardDef" a (CardDef k)
-         )
-      => [a] -> Bool
-    hasAction = any \x -> x.controller == pk && not (null x.cardDef.actions)
+    Resources resources = (lookupPlayer pk g).resources
+    ownUnits = filter (\u -> u.controller == pk) g.units
+    ownSupports = filter (\s -> s.controller == pk) g.supports
+    ownQuests = filter (\q -> q.controller == pk) g.quests
+    ownLegends = filter (\l -> l.controller == pk) g.legends
+    unitActionUsable have u = any (unitActionLegal u have) u.cardDef.actions
+    unitActionLegal u have a =
+      let zoneOk = maybe True (== u.zone) a.availableInZone
+       in zoneOk && have >= a.actionCost
+    otherActionUsable
+      :: HasField "cardDef" a (CardDef k)
+      => Int -> a -> Bool
+    otherActionUsable have x = any (\a -> have >= a.actionCost) x.cardDef.actions
 
 -- | Enqueue a 'PassPriority' for the named player when they have
 -- nothing playable in this window. Phase-level windows opt in via

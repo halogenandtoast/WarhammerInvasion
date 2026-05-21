@@ -162,11 +162,27 @@ recycleDiscard pk n = push (RecycleDiscard pk n)
 moveDevelopment :: HasQueue Message m => PlayerKey -> ZoneKind -> ZoneKind -> m ()
 moveDevelopment pk fromZ toZ = push (MoveDevelopment pk fromZ toZ)
 
--- | "Player takes N indirect damage." The engine auto-allocates to
--- the player's safest unburned zone today; a player-driven
--- allocator UI is a follow-up.
+-- | "Player takes N indirect damage." Engine prompts the targeted
+-- player to place each point one at a time, respecting the
+-- HP-vs-slack cap and skipping burned zones.
 indirectDamage :: HasQueue Message m => PlayerKey -> Int -> m ()
 indirectDamage pk n = push (IndirectDamage pk n)
+
+-- | Trigger an off-phase attack, e.g. "Wolves of the North". The
+-- engine runs the full 5-step combat ladder regardless of the
+-- current phase: the per-card hooks ('when this unit attacks',
+-- Counterstrike, Scout, post-damage triggers) all fire normally.
+-- The attacker key list is filtered by 'eligibleAttacker' on
+-- 'BeginCombat', so a non-battlefield or corrupted unit is silently
+-- dropped from the attack rather than throwing.
+triggerOffPhaseAttack
+  :: HasQueue Message m
+  => PlayerKey     -- ^ attacker
+  -> ZoneKind      -- ^ defender's target zone
+  -> [UnitKey]     -- ^ attacking unit keys
+  -> m ()
+triggerOffPhaseAttack pk zone attackers =
+  push (BeginCombat pk zone attackers)
 
 -- | Sigmar's Intervention: redirect the in-flight attack to a different
 -- zone of the defender's capital.
