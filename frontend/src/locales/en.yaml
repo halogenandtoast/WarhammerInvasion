@@ -830,6 +830,7 @@ game:
   messages:
     heading: Messages
     empty: No messages yet.
+    show_earlier: "Show {n} earlier entries"
   chat:
     placeholder: Say something to your opponent…
     send: Send
@@ -935,6 +936,13 @@ game:
         NoValidTarget: No valid target for this card is in play.
     quest:
       controlled_by: "{name}'s"
+    under_attack: Under attack
+    corrupted_tag: Corrupted
+    fx:
+      burned: Burned!
+    drag:
+      release_to_play: Release to play
+      aim_at_zone: Drag onto a highlighted zone
     combat:
       declare_heading: Battlefield phase
       declare_button: Declare attack
@@ -955,6 +963,20 @@ game:
       attackers_label: Attackers
       defenders_label: Defenders
       undefended: Undefended.
+  prompt:
+    your_choice: Your choice
+    waiting_on_opponent: Waiting on opponent
+    waiting: Waiting…
+    yes: "Yes"
+    no: "No"
+    confirm: Confirm
+    confirm_n: "Confirm ({n}/{max})"
+    skip: Skip
+    sacrifice: Sacrifice
+    no_eligible: No eligible cards.
+    no_targets: No valid targets.
+    yours: Your
+    opponents: "Opponent's"
 
 cards:
   page_title: Card Database
@@ -1061,7 +1083,10 @@ log:
     summoned_from_discard: "{player} resurrects {card} from the discard pile."
     damage_moved: "{source}'s damage ({amount}) is moved onto {target}."
     moved: "{player} moves {card} to {zone}."
+    move_blocked_hero: "{card} cannot move to {zone} — limit one Hero per zone."
     returned: "{player} returns {card} to hand."
+    played_on_quest: "{player} plays {card} onto the quest {quest} ({cost} resources)."
+    assigned_to_quest: "{player} sends {card} questing on {quest}."
   attachment:
     played: "{player} attaches {card} to {target} ({cost} resources)."
   support:
@@ -1072,6 +1097,8 @@ log:
     draw: "{player} draws from questing."
     played: "{player} starts the quest {card} ({cost} resources)."
     tokens: "{card} now has {count} tokens."
+    unit_left: "The unit questing on {card} departs; its tokens are lost."
+    destroyed: "{player}'s quest {card} is destroyed."
   tactic:
     played: "{player} plays the tactic {card} ({cost} resources)."
   legend:
@@ -1088,6 +1115,7 @@ log:
   zone:
     damaged: "{player}'s {zone} zone takes {amount} damage."
     burned: "{player}'s {zone} zone burns!"
+    damage_wasted: "{amount} damage to {player}'s burning {zone} is wasted."
     development_played: "{player} plays a face-down development into their {zone}."
   hand:
     discarded_all: "{player} discards their hand ({count} cards)."
@@ -1099,14 +1127,13 @@ log:
   capital:
     indirect: "{player} takes {amount} indirect damage on {zone}."
     shielded: "{player}'s capital shield cancels {amount} damage on {zone}."
-    shield_scheduled: "{player}'s capital is shielded from the next damage."
+    redirected: "{player} redirects the first capital damage ({card})."
   combat:
     begins: "{attacker} attacks the {zone}."
     resolved: "Combat resolves: attackers {attacker_damage}, defenders {defender_damage}."
     assigned: "Damage assigned — attackers {attacker_damage}, defenders {defender_damage}."
     ends: "Combat ends."
     aborted: "{attacker}'s attack aborted (no eligible attackers)."
-    cancelled: "Combat cancelled."
     redirected: "{attacker}'s attack is redirected to {zone}."
     rune_paid: "Rune of Fortitude tax paid: {amount} resources."
     rune_penalty: "Rune of Fortitude unpaid: attackers take −{amount} power."

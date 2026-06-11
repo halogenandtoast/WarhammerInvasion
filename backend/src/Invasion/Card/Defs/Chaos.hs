@@ -187,9 +187,14 @@ cloudOfFlies = supportCard "core-093" "Cloud of Flies" do
   loyalty 1
   traits [Attachment, Spell]
   body "Attach to a target unit you control. At the beginning of your turn, you may deal 1 uncancellable damage to this unit and to one target unit."
-  onAttachedHostTurnBegin \_owner self host -> do
-    dealUncancellableDamage host.key 1
-    withTarget self.controller AnyUnit \k -> dealUncancellableDamage k 1
+  -- "You may": the whole package (damage to the host AND to a target)
+  -- is optional, gated behind one yes/no.
+  onAttachedHostTurnBegin \_owner self host ->
+    may self.controller
+      "Cloud of Flies: deal 1 uncancellable damage to the attached unit and one target unit?"
+      do
+        dealUncancellableDamage host.key 1
+        withTarget self.controller AnyUnit \k -> dealUncancellableDamage k 1
 
 horrificMutation :: CardDef Support
 horrificMutation = supportCard "core-094" "Horrific Mutation" do

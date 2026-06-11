@@ -189,11 +189,6 @@ triggerOffPhaseAttack pk zone attackers =
 redirectAttackZone :: HasQueue Message m => ZoneKind -> m ()
 redirectAttackZone zk = push (RedirectAttackZone zk)
 
--- | Contested Fortress: arm one "cancel the next 1 capital damage"
--- token on this player's capital, lasting until end of turn.
-scheduleCapitalShield :: HasQueue Message m => PlayerKey -> m ()
-scheduleCapitalShield pk = push (ScheduleCancelNextCapitalDamage pk)
-
 -- | Pop one development from the named player's zone. Discards the
 -- facedown card to that player's pile.
 destroyDevelopment :: HasQueue Message m => PlayerKey -> ZoneKind -> m ()
@@ -328,6 +323,26 @@ instance HasRaces LegendDetails where
 
 instance HasRaces DepartedUnit where
   racesOf du = du.cardDef.races
+
+-- | "Choose a number between lo and hi." Returns the picked amount,
+-- falling back to @lo@ on a declined / out-of-range answer. Skips the
+-- prompt entirely when there's nothing to choose (@lo == hi@).
+--
+-- > n <- chooseAmount pk 1 2 "Move how many developments?"
+chooseAmount
+  :: (HasGame m, HasPromptIO m)
+  => PlayerKey -> Int -> Int -> Text -> m Int
+chooseAmount pk lo hi desc
+  | hi <= lo = pure lo
+  | otherwise = do
+      ans <- askPrompt Prompt
+        { player = pk
+        , kind = ChooseAmount {minAmount = lo, maxAmount = hi, description = desc}
+        , callback = CallbackInlinePrompt
+        }
+      pure case ans of
+        PickAmount k | k >= lo && k <= hi -> k
+        _ -> lo
 
 -- | "May …" — yes/no prompt that gates an effect. Mirrors card text
 -- "You may put that card into this zone."
@@ -876,6 +891,10 @@ data Target a where
     -- "your" / "an opponent's" via @u.controller@). Use the smart
     -- constructors below (@ownUnit@, @enemyUnit@, @defendingUnit@…)
     -- for common cases.
+  AnySupportCard :: Target UnitKey
+    -- ^ Any in-play support card — free-standing or attached, either
+    -- controller's. Used by "destroy one target support card"
+    -- effects (Demolition!).
   CapitalMatching
     :: (PlayerKey -> (PlayerKey, ZoneKind) -> Bool)
     -> Target (PlayerKey, ZoneKind)
@@ -975,6 +994,11 @@ pickTarget pk = \case
     promptForOption pk opts >>= \case
       Just (TargetUnitOption k) -> pure (Just k)
       _ -> pure Nothing
+  AnySupportCard -> do
+    opts <- enumerateOptions pk AnySupportCard
+    promptForOption pk opts >>= \case
+      Just (TargetSupportOption k) -> pure (Just k)
+      _ -> pure Nothing
   CapitalMatching p -> do
     opts <- enumerateOptions pk (CapitalMatching p)
     promptForOption pk opts >>= \case
@@ -1059,6 +1083,9 @@ enumerateOptionsPure pk g = \case
         ]
   UnitMatching p ->
     [TargetUnitOption u.key | u <- g.units, p pk g u]
+  AnySupportCard ->
+    [TargetSupportOption s.key | s <- g.supports]
+      <> [TargetSupportOption a.key | u <- g.units, a <- u.attachments]
   CapitalMatching p ->
     let zonesOf player =
           [ (player.key, z.kind)

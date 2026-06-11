@@ -200,6 +200,21 @@ function leave() {
 }
 function backToLobby() { navigate('#/lobby') }
 function pass() { game.passPriority() }
+
+// ---- mobile side-panel drawer ----
+// Below 880px the side rail collapses to a bottom drawer. Prompts and
+// combat panels always render (you can't miss a decision); the toggle
+// only collapses the log/chat stream to give the table the screen.
+const panelOpen = ref(false)
+
+// Pop the drawer open automatically when a prompt lands on YOUR seat,
+// so a decision never hides behind a collapsed drawer.
+watch(
+  () => engine.value?.pendingPrompt,
+  (p) => {
+    if (p && mySeatKey.value && p.player === mySeatKey.value) panelOpen.value = true
+  },
+)
 </script>
 
 <template>
@@ -250,8 +265,19 @@ function pass() { game.passPriority() }
         </section>
       </section>
 
-      <!-- Side rail: prompt panel (when present) + merged log/chat. -->
-      <aside class="side-panel">
+      <!-- Side rail: prompt panel (when present) + merged log/chat.
+           On narrow viewports this collapses to a bottom drawer. -->
+      <aside class="side-panel" :class="{ open: panelOpen }">
+        <button
+          type="button"
+          class="drawer-toggle"
+          :aria-expanded="panelOpen"
+          @click="panelOpen = !panelOpen"
+        >
+          <span class="drawer-grip" aria-hidden="true"></span>
+          {{ t('game.messages.heading') }}
+          <span class="drawer-caret" aria-hidden="true">{{ panelOpen ? '▾' : '▴' }}</span>
+        </button>
         <CombatStatusBanner
           v-if="engine && engine.combat && view"
           :engine="engine"
@@ -395,16 +421,58 @@ function pass() { game.passPriority() }
   min-height: 0;
   min-width: 0;
 }
+
+/* The drawer toggle only exists on narrow viewports. */
+.drawer-toggle {
+  display: none;
+}
+
 @media (max-width: 880px) {
   .side-panel {
     border-left: none;
     border-top: 1px solid var(--border);
-    /* Keep the messages rail compact on narrow screens — the table is
-       the focus; the rail is just enough to see recent activity and
-       reach the chat input. */
-    min-height: 140px;
-    max-height: 28dvh;
+    /* Collapsed: just the toggle plus any prompt/combat panel. The
+       table keeps the screen. */
+    max-height: 40dvh;
   }
+  .side-panel:not(.open) .messages-panel {
+    display: none;
+  }
+  .side-panel.open {
+    min-height: 240px;
+  }
+  .drawer-toggle {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    min-height: 36px;
+    padding: 0.3rem 0.75rem 0.25rem;
+    background: var(--bg-elev-2, var(--bg-elev));
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg-dim);
+    font-size: 0.74rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .drawer-grip {
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--fg-faint);
+    opacity: 0.6;
+  }
+  .drawer-caret { font-size: 0.85rem; }
 }
 
 .messages-panel {

@@ -186,6 +186,14 @@ Design choices:
 - **Full state, not deltas**, at least initially. The `Game` value is small,
   the engine already has a `ToJSON` instance, and full snapshots make the
   client trivial and reconnection free. Revisit if frames get large.
+- **Per-viewer redaction.** Snapshots are redacted server-side before they
+  go on the wire (`redactEngineFor` in `Invasion/Server/Lobby.hs`): deck
+  contents/order are hidden from everyone (counts survive as empty
+  objects), the opponent's hand and facedown developments are reduced to
+  key-only stubs, and `ChooseFromCards` prompt payloads are emptied for
+  viewers other than the prompted player. This is both the
+  hidden-information guarantee (no devtools peeking) and the main frame-
+  size optimization — the two serialized decks dominated the old payload.
 - **No optimistic UI.** The client renders the last `State` it received.
   Sending an action does *not* update local state — the server's reply does.
   This is what makes G3 (authoritative server) tractable.

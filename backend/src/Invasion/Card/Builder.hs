@@ -8,7 +8,7 @@ import Control.Monad.State.Strict
 import Invasion.Card.Effects
 import Invasion.CardDef
 import Invasion.CardDef qualified as CardDef
-import Invasion.Entity (SupportDetails (..), UnitDetails (..))
+import Invasion.Entity (QuestDetails (..), SupportDetails (..), UnitDetails (..))
 import Invasion.Game hiding (battlefield)
 import Invasion.Player
 import Invasion.Prelude
@@ -217,6 +217,26 @@ modifyUnitExtras f =
 modifySupportExtras :: (SupportExtras -> SupportExtras) -> CardBuilder Support ()
 modifySupportExtras f =
   modify \cd -> cd {extras = f cd.extras}
+
+modifyQuestExtras :: (QuestExtras -> QuestExtras) -> CardBuilder Quest ()
+modifyQuestExtras f =
+  modify \cd -> cd {extras = f cd.extras}
+
+-- | "Cancel 1 damage to your capital each turn" (Contested Fortress).
+-- Evaluated live by the engine's 'DealDamageToZone' pipeline, once per
+-- turn per copy, on either player's turn.
+capitalShieldEachTurn :: CardBuilder Support ()
+capitalShieldEachTurn =
+  modifySupportExtras \e -> e {capitalShieldPerTurn = True}
+
+-- | "Redirect the first point of damage done to your capital each turn
+-- to another target unit or capital" while the supplied predicate
+-- holds (Defend the Border with 3+ resource tokens). Evaluated live at
+-- damage time; once per turn per copy.
+redirectsFirstCapitalDamage
+  :: (Game -> QuestDetails -> Bool) -> CardBuilder Quest ()
+redirectsFirstCapitalDamage f =
+  modifyQuestExtras \e -> e {capitalRedirectFirstDamage = f}
 
 -- | Game-state-derived self power bonus (Troll Slayers, Korhil, …).
 selfPower :: (Game -> UnitDetails -> Int) -> CardBuilder Unit ()

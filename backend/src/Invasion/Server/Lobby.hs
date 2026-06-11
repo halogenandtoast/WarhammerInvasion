@@ -36,6 +36,7 @@ module Invasion.Server.Lobby
   , setSeatDeck
   , clearSeatDeck
   , gameViewSTM
+  , redactEngineFor
   , reserveSeat
   , removeSeat
   , trySetStatus
@@ -55,7 +56,8 @@ module Invasion.Server.Lobby
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.STM
 import Control.Monad (forM)
-import Data.Aeson (toJSON)
+import Data.Aeson (Value (..), toJSON)
+import Data.Aeson.KeyMap qualified as KM
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Sequence (Seq, (|>))
@@ -376,7 +378,11 @@ gameViewSTM slot viewer = do
   chatLines <- foldr (:) [] <$> readTVar slot.chat
   mEngine <- readTVar slot.engine
   spec <- countSpectatorsSTM slot
-  let seatList =
+  let viewerSeat = case viewer of
+        Just u ->
+          listToMaybe [k | (k, r) <- Map.toList sm, r.user.userId == u.userId]
+        Nothing -> Nothing
+      seatList =
         [ SeatView
             { seat = k
             , user = r.user
@@ -401,8 +407,80 @@ gameViewSTM slot viewer = do
     , seats = seatList
     , status = sts
     , chat = chatLines
-    , engine = fmap toJSON mEngine
+    , engine = fmap (redactEngineFor viewerSeat . toJSON) mEngine
     }
+
+-- | Strip hidden information from the engine snapshot before it goes
+-- on the wire. Applied per viewer in 'gameViewSTM':
+--
+--   * Deck contents and order are hidden from EVERYONE (owner
+--     included) — only the count survives, as a list of empty
+--     objects so @deck.length@ keeps working client-side.
+--   * The opponent's (and, for spectators, both players') hand and
+--     facedown development cards are reduced to key-only stubs: the
+--     client can still count them and animate by key, but the card
+--     identity stays server-side.
+--   * A pending prompt aimed at another player has its
+--     'ChooseFromCards' payload emptied — search results and similar
+--     hidden-zone reveals are for the prompted player's eyes only.
+--
+-- Beyond the information-leak fix this also cuts the per-update frame
+-- size by roughly the two serialized decks (~40 full card defs each).
+-- | 'Data.Aeson.KeyMap' has no @adjust@; tiny local shim.
+kmAdjust :: (Value -> Value) -> KM.Key -> KM.KeyMap Value -> KM.KeyMap Value
+kmAdjust f k m = case KM.lookup k m of
+  Just x -> KM.insert k (f x) m
+  Nothing -> m
+
+redactEngineFor :: Maybe Text -> Value -> Value
+redactEngineFor viewerSeat v = case v of
+  Object o ->
+    Object
+      . kmAdjust (redactPlayer (viewerSeat == Just "Player1")) "player1"
+      . kmAdjust (redactPlayer (viewerSeat == Just "Player2")) "player2"
+      . kmAdjust redactPrompt "pendingPrompt"
+      $ o
+  other -> other
+  where
+    redactPlayer isViewer pv = case pv of
+      Object po ->
+        Object
+          . kmAdjust hideDeck "deck"
+          . ( if isViewer
+                then id
+                else
+                  kmAdjust keyOnlyCards "hand"
+                    . kmAdjust hideDevMap "developmentCards"
+            )
+          $ po
+      other -> other
+    hideDeck dv = case dv of
+      Array arr -> Array (fmap (const (Object KM.empty)) arr)
+      other -> other
+    keyOnlyCards hv = case hv of
+      Array arr -> Array (fmap keyOnly arr)
+      other -> other
+    keyOnly cv = case cv of
+      Object co -> Object (KM.filterWithKey (\k _ -> k == "key") co)
+      other -> other
+    hideDevMap mv = case mv of
+      Object mo -> Object (fmap keyOnlyCards mo)
+      other -> other
+    redactPrompt pv = case pv of
+      Object po ->
+        let promptFor = case KM.lookup "player" po of
+              Just (String s) -> Just s
+              _ -> Nothing
+         in if promptFor == viewerSeat
+              then pv
+              else Object (kmAdjust redactKind "kind" po)
+      other -> other
+    redactKind kv = case kv of
+      Object ko -> case KM.lookup "tag" ko of
+        Just (String "ChooseFromCards") ->
+          Object (KM.insert "cards" (Array mempty) ko)
+        _ -> kv
+      other -> other
 
 -- | If the slot has no connections, write 'now' to the empty timestamp.
 -- Idempotent.

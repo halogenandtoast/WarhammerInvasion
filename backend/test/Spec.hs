@@ -8,6 +8,8 @@
 
 module Main (main) where
 
+import Data.Aeson (Value (..), toJSON)
+import Data.Aeson.KeyMap qualified as KM
 import Invasion.Capital (Capital (..), Damage (..), Zone (..))
 import Invasion.Card (Card (..), SomeCardDef (..))
 import Invasion.CardDef (CardDef (..), Keyword (..))
@@ -16,6 +18,7 @@ import Invasion.Entity (UnitDetails (..))
 import Invasion.Game
 import Invasion.Player
 import Invasion.Prelude
+import Invasion.Server.Lobby (redactEngineFor)
 import Invasion.Types
 
 import System.Exit (exitFailure)
@@ -121,10 +124,10 @@ main = do
     Nothing -> do
       putStrLn "  FAIL active hand has no affordable Unit; can't exercise PlayUnit"
       exitFailure
-    Just (cardKey, cardCode, cardCost) -> do
+    Just (cardKey, cardCode, cardCost, playZone) -> do
       let handBefore = length preP.hand
           Resources resBefore = preP.resources
-      g5 <- applyMessage g4cap (PlayUnit g4cap.currentPlayer cardKey KingdomZone)
+      g5 <- applyMessage g4cap (PlayUnit g4cap.currentPlayer cardKey playZone)
       let postP = activePlayer g5
       check "PlayUnit: hand size decreased by 1"
         (length postP.hand == handBefore - 1)
@@ -140,8 +143,8 @@ main = do
             where _ = err :: String
       check "PlayUnit: unit controller = active player"
         (unitOk (\c _ _ -> c == g4cap.currentPlayer) "controller")
-      check "PlayUnit: unit zone = Kingdom"
-        (unitOk (\_ z _ -> z == KingdomZone) "zone")
+      check "PlayUnit: unit zone = chosen zone"
+        (unitOk (\_ z _ -> z == playZone) "zone")
       check "PlayUnit: card code carried through"
         (unitOk (\_ _ c -> c == cardCode) "code")
       check "PlayUnit: in-play unit reuses the in-hand card key"
@@ -199,9 +202,9 @@ main = do
       ]
   -- Drop a 1-HP unit into the active player's battlefield via PlayUnit
   -- if one is in hand. Otherwise skip the rest of this smoke.
-  case findPlayableUnit (activePlayer gB) of
+  case findBattlefieldUnit (activePlayer gB) of
     Nothing -> putStrLn "  skip combat smoke (no playable unit)"
-    Just (cardKey, _, _) -> do
+    Just (cardKey, _, _, _) -> do
       gC <- applyMessage gB (PlayUnit gB.currentPlayer cardKey BattlefieldZone)
       -- BeginCombat attacker against opponent's battlefield. Auto-pick
       -- the attacker we just placed.
@@ -297,7 +300,156 @@ main = do
         )
     _ -> putStrLn "  skip scripted-combat smoke (one side has no Unit in hand)"
 
+  -- ------------------------------------------------------------------
+  -- Rules-parity regressions. Single-card decks make hands (and
+  -- therefore the scenario) deterministic despite the shuffle.
+  -- ------------------------------------------------------------------
+  let mkMonoGame code race =
+        case newGame
+          (Deck {cards = replicate 40 code, race})
+          (Deck {cards = replicate 40 code, race})
+          defaultGameOptions of
+          Left err -> do
+            putStrLn $ "FAIL mono newGame(" <> show code <> "): " <> err
+            exitFailure
+          Right g -> applyMessage g Setup
+      firstHandKeys n g = take n (map (.key) (activePlayer g).hand)
+
+  -- Corruption only blocks attacking/defending — a corrupted unit in
+  -- the kingdom still produces resources (Rules of Play p17).
+  gCor1 <- (`applyMessage` BeginGame) =<< mkMonoGame "core-004" Dwarf
+  case firstHandKeys 1 gCor1 of
+    [uk] -> do
+      let pkC = gCor1.currentPlayer
+      gCor2 <- applyMessages gCor1
+        [PutUnitIntoPlay pkC uk KingdomZone, CorruptUnit uk]
+      check "corrupt: unit flagged corrupted"
+        (any (\u -> u.key == uk && u.corrupted) gCor2.units)
+      gCor3 <- applyMessage gCor2 (CollectResources pkC)
+      check "corrupt: corrupted kingdom unit still produces (3 base + 1)"
+        ((activePlayer gCor3).resources == Resources 4)
+    _ -> do
+      putStrLn "  FAIL mono deck dealt no hand"
+      exitFailure
+
+  -- A burning section cannot be assigned damage (FAQ): once burned,
+  -- further zone damage is wasted and never re-accumulates.
+  let oppC = gCor1.currentPlayer.next
+  gBz1 <- applyMessage gCor1 (DealDamageToZone oppC KingdomZone 8)
+  check "burn: zone burns at 8 damage"
+    ((inactivePlayer gBz1).capital.kingdom.burned)
+  check "burn: damage tokens cleared on burn"
+    ((inactivePlayer gBz1).capital.kingdom.damage == Damage 0)
+  gBz2 <- applyMessage gBz1 (DealDamageToZone oppC KingdomZone 3)
+  check "burn: damage to a burned zone is wasted"
+    ((inactivePlayer gBz2).capital.kingdom.damage == Damage 0)
+  check "burn: game not over from re-damaging one burned zone"
+    (not gBz2.over)
+
+  -- Zone-entry keywords are enforced server-side: a "Battlefield
+  -- only." unit is refused from the kingdom but accepted into the
+  -- battlefield.
+  gZe0 <- mkMonoGame "core-001" Dwarf
+  let fpZ = gZe0.firstPlayer
+  gZe1 <- applyMessages gZe0
+    [ BeginGame
+    , PassPriority fpZ, PassPriority fpZ.next -- phase 0
+    , PassPriority fpZ, PassPriority fpZ.next -- kingdom → capital (quest skipped T1)
+    ]
+  check "zone-entry: reached capital phase" (gZe1.phase == Just CapitalPhase)
+  case firstHandKeys 1 gZe1 of
+    [zk] -> do
+      gZe2 <- applyMessage gZe1 (PlayUnit fpZ zk KingdomZone)
+      check "zone-entry: Battlefield-only unit refused from kingdom"
+        (null gZe2.units)
+      gZe3 <- applyMessage gZe2 (PlayUnit fpZ zk BattlefieldZone)
+      check "zone-entry: Battlefield-only unit accepted into battlefield"
+        (length gZe3.units == 1)
+    _ -> do
+      putStrLn "  FAIL zone-entry deck dealt no hand"
+      exitFailure
+
+  -- "Limit one Hero per zone" vetoes moves into an occupied zone but
+  -- allows moves into a free one.
+  gH1 <- (`applyMessage` BeginGame) =<< mkMonoGame "core-006" Dwarf
+  case firstHandKeys 2 gH1 of
+    [h1, h2] -> do
+      let pkH = gH1.currentPlayer
+      gH2 <- applyMessages gH1
+        [ PutUnitIntoPlay pkH h1 KingdomZone
+        , PutUnitIntoPlay pkH h2 BattlefieldZone
+        ]
+      check "hero limit: setup put two heroes in play" (length gH2.units == 2)
+      gH3 <- applyMessage gH2 (MoveUnit h2 KingdomZone)
+      check "hero limit: move into occupied zone vetoed"
+        (any (\u -> u.key == h2 && u.zone == BattlefieldZone) gH3.units)
+      gH4 <- applyMessage gH3 (MoveUnit h2 QuestZone)
+      check "hero limit: move into free zone allowed"
+        (any (\u -> u.key == h2 && u.zone == QuestZone) gH4.units)
+    _ -> do
+      putStrLn "  FAIL hero deck dealt fewer than 2 cards"
+      exitFailure
+
+  -- Contested Fortress cancels 1 capital damage per turn — including
+  -- damage dealt outside the controller's own turn, and at most once.
+  gF1 <- mkMonoGame "core-112" Dwarf
+  let fpF = gF1.firstPlayer
+  gF2 <- applyMessages gF1
+    [ BeginGame
+    , PassPriority fpF, PassPriority fpF.next
+    , PassPriority fpF, PassPriority fpF.next
+    ]
+  check "fortress: reached capital phase" (gF2.phase == Just CapitalPhase)
+  case firstHandKeys 1 gF2 of
+    [fk] -> do
+      gF3 <- applyMessage gF2 (PlaySupport fpF fk KingdomZone)
+      check "fortress: support entered play" (length gF3.supports == 1)
+      gF4 <- applyMessage gF3 (DealDamageToZone fpF QuestZone 2)
+      check "fortress: first capital damage reduced by 1"
+        ((activePlayer gF4).capital.quest.damage == Damage 1)
+      gF5 <- applyMessage gF4 (DealDamageToZone fpF QuestZone 1)
+      check "fortress: shield only cancels once per turn"
+        ((activePlayer gF5).capital.quest.damage == Damage 2)
+    _ -> do
+      putStrLn "  FAIL fortress deck dealt no hand"
+      exitFailure
+
+  -- Wire redaction: hidden information must not reach the wrong
+  -- viewer. Player1's view keeps their own hand but sees only
+  -- key-stubs of Player2's hand; deck contents are hidden from
+  -- everyone (empty objects, count preserved).
+  do
+    let asView seat g = redactEngineFor seat (toJSON g)
+        playerField name v = case v of
+          Object o -> KM.lookup name o
+          _ -> Nothing
+        arrayLen (Just (Array xs)) = length (foldr (:) [] xs)
+        arrayLen _ = -1
+        cardFields (Just (Array xs)) = case foldr (:) [] xs of
+          (Object c : _) -> KM.keys c
+          _ -> []
+        cardFields _ = []
+        v1 = asView (Just "Player1") (toViewGame gCor1)
+        p1 = playerField "player1" v1
+        p2 = playerField "player2" v1
+        handOf mp = mp >>= playerField "hand"
+        deckOf mp = mp >>= playerField "deck"
+    check "redact: own hand keeps full card defs"
+      (("code" `elem` cardFields (handOf p1)) && ("key" `elem` cardFields (handOf p1)))
+    check "redact: opponent hand reduced to key-only stubs"
+      (cardFields (handOf p2) == ["key"])
+    check "redact: opponent hand count preserved"
+      (arrayLen (handOf p2) == length gCor1.player2.hand)
+    check "redact: decks hidden from everyone (empty objects)"
+      (cardFields (deckOf p1) == [] && cardFields (deckOf p2) == [])
+    check "redact: deck count preserved"
+      (arrayLen (deckOf p1) == length gCor1.player1.deck)
+
   putStrLn "Phase / turn smoke test: OK"
+
+-- Identity helper so the redaction block reads naturally.
+toViewGame :: Game -> Game
+toViewGame = id
 
 activePlayer :: Game -> Player
 activePlayer g = case g.currentPlayer of
@@ -329,10 +481,23 @@ windowTrigger = fmap (.trigger)
 -- loyalty surcharge, accounting for the player's capital race symbol)
 -- is within that player's current resources, and which doesn't carry
 -- Toughness (which would let the smoke's 1-damage test get cancelled
--- entirely). Returns the card's in-hand key, printed code, and total
--- effective cost.
-findPlayableUnit :: Player -> Maybe (UnitKey, CardCode, Int)
-findPlayableUnit p =
+-- entirely). Returns the card's in-hand key, printed code, total
+-- effective cost, and a zone the engine's zone-entry gate will accept
+-- for it ("Battlefield only." cards report the battlefield, everything
+-- else the kingdom).
+findPlayableUnit :: Player -> Maybe (UnitKey, CardCode, Int, ZoneKind)
+findPlayableUnit = findPlayableUnitWhere (const True)
+
+-- | 'findPlayableUnit' restricted to units the engine will let into
+-- the battlefield (for the combat smoke).
+findBattlefieldUnit :: Player -> Maybe (UnitKey, CardCode, Int, ZoneKind)
+findBattlefieldUnit =
+  findPlayableUnitWhere \cardDef ->
+    not (any (`elem` cardDef.keywords) [KingdomOnly, QuestOnly])
+
+findPlayableUnitWhere
+  :: (CardDef Unit -> Bool) -> Player -> Maybe (UnitKey, CardCode, Int, ZoneKind)
+findPlayableUnitWhere extraOk p =
   let Resources budget = p.resources
   in go p.hand budget
   where
@@ -341,10 +506,14 @@ findPlayableUnit p =
     isToughness = \case
       Toughness _ -> True
       _ -> False
+    legalZone cardDef
+      | BattlefieldOnly `elem` cardDef.keywords = BattlefieldZone
+      | QuestOnly `elem` cardDef.keywords = QuestZone
+      | otherwise = KingdomZone
     go [] _ = Nothing
     go (Card {key, def} : rest) budget = case def of
       UnitCardDef cardDef
-        | hasToughness cardDef -> go rest budget
+        | hasToughness cardDef || not (extraOk cardDef) -> go rest budget
         | otherwise ->
             let printed = case cardDef.cost of
                   Fixed n -> n
@@ -353,7 +522,7 @@ findPlayableUnit p =
                 loyaltySurcharge = max 0 (cardDef.loyalty - symbolMatch)
                 total = printed + loyaltySurcharge
              in if total <= budget
-                  then Just (key, cardDef.code, total)
+                  then Just (key, cardDef.code, total, legalZone cardDef)
                   else go rest budget
       _ -> go rest budget
 

@@ -334,6 +334,12 @@ data SupportExtras = SupportExtras
     -- (negative) from a unit while both are in play (Horrific
     -- Mutation: -1 HP to defenders while host attacks). Read by
     -- 'recomputeUnitStats' alongside 'attachmentHPBonus'.
+  , capitalShieldPerTurn :: Bool
+    -- ^ Marks "cancel 1 damage to your capital each turn" supports
+    -- (Contested Fortress). Evaluated at damage time by
+    -- 'DealDamageToZone'; the engine tracks per-source usage in
+    -- 'Game.capitalDefenseUsed' so the cancel fires at most once per
+    -- turn regardless of whose turn it is.
   }
 
 -- | Static metadata about a card that's currently being played, used
@@ -349,9 +355,16 @@ data CardCodeFilter = CardCodeFilter
   }
   deriving stock Show
 
--- | Quest-specific tunables. Empty for now — quest behavior is
--- entirely message-driven today.
+-- | Quest-specific tunables.
 data QuestExtras = QuestExtras
+  { capitalRedirectFirstDamage :: Game -> InPlay Quest -> Bool
+    -- ^ While 'True', the first point of damage dealt to the
+    -- controller's capital each turn is redirected to a target unit
+    -- or capital section of the controller's choice (Defend the
+    -- Border while it holds 3+ resource tokens). Evaluated at damage
+    -- time by 'DealDamageToZone'; once-per-turn usage is tracked in
+    -- 'Game.capitalDefenseUsed'.
+  }
 
 -- | Tactic-specific tunables. Empty for now.
 data TacticExtras = TacticExtras
@@ -393,10 +406,13 @@ instance HasDefaultExtras Support where
     , supportTargetTax = \_ _ _ _ -> 0
     , supportAuraHP = \_ _ _ -> 0
     , runeOfFortitudeTax = False
+    , capitalShieldPerTurn = False
     }
 
 instance HasDefaultExtras Quest where
   defaultExtras = QuestExtras
+    { capitalRedirectFirstDamage = \_ _ -> False
+    }
 
 instance HasDefaultExtras Tactic where
   defaultExtras = TacticExtras

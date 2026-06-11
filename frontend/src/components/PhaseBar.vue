@@ -257,4 +257,38 @@ function pass() {
   cursor: pointer;
 }
 .leave-btn:hover { color: var(--accent-strong); border-color: var(--accent-strong); }
+
+/* Narrow screens: idle phase pips collapse to dots so the bar stays a
+   single row; only the pip with an open window keeps its label. The
+   pass button grows to a full tap target. */
+@media (max-width: 880px) {
+  .phase-bar {
+    gap: 0.4rem;
+    padding: 0.25rem 0.6rem;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .phase-pip:not(.window-open):not(.active) .pip-label {
+    display: none;
+  }
+  .phase-pip:not(.window-open):not(.active) {
+    width: 10px;
+    height: 10px;
+    padding: 0;
+    border-radius: 50%;
+  }
+  .pip-pass {
+    min-height: 34px;
+    padding: 0 0.8rem;
+  }
+  .active-label {
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+  .turn-label { white-space: nowrap; }
+}
+@media (pointer: coarse) {
+  .pip-pass { min-height: 44px; }
+  .leave-btn { min-height: 44px; }
+}
 </style>

@@ -149,6 +149,14 @@ export interface EngineUnit {
   corrupted: boolean
   attachments: EngineSupport[]
   experiences: string[]
+  // Engine-cached effective stats: printed values plus attachments,
+  // modifiers, and auras. Recomputed server-side after every message.
+  effectivePower: number
+  effectiveMaxHP: number
+  // True while the unit is a declared attacker / defender in the
+  // in-flight combat. Cleared when combat ends.
+  attacking: boolean
+  defending: boolean
 }
 
 export interface EngineSupport {
@@ -237,19 +245,34 @@ export type Race =
   | 'Orc'
   | 'DarkElf'
 
+// A redacted card: the server strips everything but the stable `key`
+// from cards the viewer isn't allowed to see (the opponent's hand and
+// facedown developments). The key alone is enough to count cards and
+// keep animations continuous when a hidden card is later revealed.
+export interface HiddenCard {
+  key: number
+}
+
+export type HandCard = EngineCard | HiddenCard
+
+export function isVisibleCard(c: HandCard): c is EngineCard {
+  return (c as EngineCard).code !== undefined
+}
+
 export interface EnginePlayer {
   key: PlayerKey
   state: PlayerLifecycle
   capital: EngineCapital
   resources: number
-  // Hand cards carry the full card-def payload so the UI can render the
-  // art and decide what kind of "play" action to send. Deck/discard only
-  // need their lengths for piles, but the same payload arrives there too.
-  // Each card carries the stable `key` that the engine uses to identify
-  // this specific copy — pass it back in `GamePlayCard` to disambiguate
-  // duplicates in hand.
-  hand: EngineCard[]
-  deck: EngineCard[]
+  // Your own hand arrives with full card-def payloads; the opponent's
+  // hand is redacted to key-only stubs server-side. Each card carries
+  // the stable `key` the engine uses to identify the specific copy —
+  // pass it back in `GamePlayCard` to disambiguate duplicates in hand.
+  hand: HandCard[]
+  // Deck contents and order are hidden from everyone (including the
+  // owner): the server sends a list of empty objects so `.length`
+  // keeps working but nothing else survives.
+  deck: unknown[]
   discard: EngineCard[]
   race: Race
   // Map from hand card key (as a stringified integer — Aeson encodes
@@ -388,7 +411,9 @@ export type PromptKind =
   | { tag: 'ChooseYesNo'; description: string }
   | {
       tag: 'ChooseFromCards'
-      cards: EngineCardDef[]
+      // Full Card payloads (def fields + stable `key`) for the
+      // prompted player; redacted to an empty list for other viewers.
+      cards: EngineCard[]
       minPick: number
       maxPick: number
       description: string
@@ -408,6 +433,7 @@ export type PromptKind =
 export type TargetOption =
   | { tag: 'TargetUnitOption'; contents: number }
   | { tag: 'TargetZoneOption'; contents: [PlayerKey, ZoneKind] }
+  | { tag: 'TargetSupportOption'; contents: number }
 
 export type PromptFilter =
   | { tag: 'AnyOwnUnit' }

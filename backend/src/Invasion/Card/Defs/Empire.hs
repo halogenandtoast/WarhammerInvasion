@@ -302,14 +302,17 @@ templeOfShallya = supportCard "core-042" "Temple of Shallya" do
   power 2
   trait Building
   body "Kingdom. At the beginning of your kingdom phase, you may move one of your units from its current zone to one of your other zones."
-  -- Implemented as a free Kingdom action rather than the printed
-  -- "you may at the beginning of your kingdom phase". The action's
-  -- cost is 0 and there's no resource gate; the player picks a unit
-  -- they control and a destination zone.
-  kingdom $ action "Reposition a unit" 0 \usage ->
-    withTarget usage.user ownUnit \uk ->
-      withTarget usage.user MyAnyZone \zk ->
-        moveUnit uk zk
+  -- Printed timing: once, at the controller's kingdom phase begin,
+  -- optional, and only while this card sits in the kingdom zone.
+  onMyPhaseBegin KingdomPhase \_owner self ->
+    when (self.zone == KingdomZone) do
+      let pk = self.controller
+      g <- getGame
+      when (any (\u -> u.controller == pk) g.units) $
+        may pk "Temple of Shallya: move one of your units to another zone?" $
+          withTarget pk ownUnit \uk ->
+            withTarget pk MyAnyZone \zk ->
+              moveUnit uk zk
 
 defendTheBorder :: CardDef Quest
 defendTheBorder = questCard "core-043" "Defend the Border" do
@@ -318,17 +321,11 @@ defendTheBorder = questCard "core-043" "Defend the Border" do
   loyalty 2
   body "Quest. While Defend the Border has 3 or more resource tokens on it, redirect the first point of damage done to your capital each turn to another target unit or capital. Quest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here."
   forced accrueTokenWhileQuesting
-  -- Approximation: while the quest has 3+ tokens, schedule a
-  -- one-shot capital shield each turn. The shield CANCELS the
-  -- first damage rather than redirecting it; the redirect-to-
-  -- another-target wording is a follow-up requiring a pre-damage
-  -- hook.
-  onMyTurnBegin \_owner self -> do
-    g <- getGame
-    case findQuest self.key g of
-      Just q | q.tokens >= 3 ->
-        scheduleCapitalShield self.controller
-      _ -> pure ()
+  -- True redirect, evaluated live by the engine's capital-damage
+  -- pipeline: while the quest holds 3+ tokens, the first point of
+  -- capital damage each turn (on EITHER player's turn) is redirected
+  -- to a unit or capital section of the controller's choice.
+  redirectsFirstCapitalDamage \_g q -> q.tokens >= 3
 
 willOfTheElectors :: CardDef Tactic
 willOfTheElectors = tacticCard "core-044" "Will of the Electors" do
@@ -338,13 +335,22 @@ willOfTheElectors = tacticCard "core-044" "Will of the Electors" do
   body "Action: Move up to two target developments from one zone to another controlled by the same player."
   whenResolved \self -> do
     let pk = self.controller
-    -- Pick from zone and to zone in two prompts. We move 1 or 2
-    -- developments depending on whether the source zone has them.
-    withTarget pk MyAnyZone \fromZ ->
+    -- "Up to two": pick source and destination, then ask how many
+    -- (1..min 2 available) to move.
+    withTarget pk (CapitalMatching \me (owner, _) -> owner == me) \(_, fromZ) ->
       withTarget pk MyAnyZone \toZ ->
         when (fromZ /= toZ) do
-          moveDevelopment pk fromZ toZ
-          moveDevelopment pk fromZ toZ
+          g <- getGame
+          let me = playerOf pk g
+              zoneOf = \case
+                KingdomZone -> me.capital.kingdom
+                QuestZone -> me.capital.quest
+                BattlefieldZone -> me.capital.battlefield
+              Developments avail = (zoneOf fromZ).developments
+              cap = min 2 avail
+          when (cap > 0) do
+            n <- chooseAmount pk 1 cap "Move how many developments?"
+            replicateM_ n (moveDevelopment pk fromZ toZ)
 
 twinTailedComet :: CardDef Tactic
 twinTailedComet = tacticCard "core-045" "Twin-Tailed Comet" do

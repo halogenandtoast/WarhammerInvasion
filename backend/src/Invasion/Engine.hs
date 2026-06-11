@@ -483,8 +483,8 @@ instance Run Game where
           { currentPlayer = k
           , turn = g.turn + Turn 1
           , history = Map.insert ThisTurn mempty g.history
-          , -- Capital shields and one-shot play modifiers reset.
-            capitalShields = mempty
+          , -- Per-turn capital defenses and one-shot play modifiers reset.
+            capitalDefenseUsed = mempty
           , pendingUnitDiscount = mempty
           , pendingUnitOnPlayDamage = mempty
           , unitsRedirectedThisTurn = mempty
@@ -682,11 +682,18 @@ instance Run Game where
       let n = zonePower g k QuestZone
       logIt LogSystem "log.quest.draw" [("player", playerParam k)]
       replicateM_ n (send (Draw (Drawing StandardDraw k)))
-    PlayUnit pk cardKey zone ->
+    PlayUnit pk cardKey zone -> do
+      -- Server-side zone-entry gate: "Battlefield only."-style
+      -- keywords and the Hero-per-zone limit are enforced here, not
+      -- just in the client's zone picker.
+      gEntry <- get
+      let entryOk = case takeUnitFromHand cardKey (lookupPlayer pk gEntry) of
+            Just (cd, _) -> canEnterZone gEntry pk cd zone
+            Nothing -> False
       -- Reuse the card's existing key as its in-play UnitKey. This is
       -- what lets the frontend's view-transition map a hand card to its
       -- zone landing spot.
-      withPaidPlay
+      when entryOk $ withPaidPlay
         pk
         (takeUnitFromHand cardKey)
         (\g cd -> max 0 (effectiveTotalCost g pk cd - pendingDiscountFor pk g))
@@ -715,7 +722,7 @@ instance Run Game where
         (Just (cardDef, playerWithoutCard), Just q)
           | q.controller == pk
           , q.questingUnit == Nothing
-          , BattlefieldOnly `notElem` cardDef.keywords
+          , canEnterZone g pk cardDef QuestZone
           , canPlayCard pk cardDef g ->
               case cardDef.cost of
                 Variable -> pure ()
@@ -982,8 +989,12 @@ instance Run Game where
       -- 'dispatchToInPlayUnits' walks attachments via their host; any
       -- bespoke reaction lives in the support card's 'receive'.
       pure ()
-    PlaySupport pk cardKey zone ->
-      withPaidPlay pk (takeSupportFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
+    PlaySupport pk cardKey zone -> do
+      gEntry <- get
+      let entryOk = case takeSupportFromHand cardKey (lookupPlayer pk gEntry) of
+            Just (cd, _) -> canEnterZone gEntry pk cd zone
+            Nothing -> False
+      when entryOk $ withPaidPlay pk (takeSupportFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
         \cardDef paidPlayer n -> do
           let support = freshSupport cardKey pk zone Nothing cardDef
           modify \gx -> (setPlayer pk paidPlayer gx) {supports = support : gx.supports}
@@ -996,13 +1007,15 @@ instance Run Game where
             ]
           send $ SupportEnteredPlay pk cardKey
     PlaySupportFromDeck pk cardKey zone -> do
+      g <- get
       player <- getPlayerS pk
-      whenJust (takeSupportFromDeck cardKey player) \(cardDef, playerWithoutCard) -> do
-        let support = freshSupport cardKey pk zone Nothing cardDef
-        modify \gx -> (setPlayer pk playerWithoutCard gx) {supports = support : gx.supports}
-        logIt LogSystem "log.support.played_from_deck"
-          [("player", playerParam pk), ("card", T.pack cardDef.title)]
-        send $ SupportEnteredPlay pk cardKey
+      whenJust (takeSupportFromDeck cardKey player) \(cardDef, playerWithoutCard) ->
+        when (canEnterZone g pk cardDef zone) do
+          let support = freshSupport cardKey pk zone Nothing cardDef
+          modify \gx -> (setPlayer pk playerWithoutCard gx) {supports = support : gx.supports}
+          logIt LogSystem "log.support.played_from_deck"
+            [("player", playerParam pk), ("card", T.pack cardDef.title)]
+          send $ SupportEnteredPlay pk cardKey
     PlayQuest pk cardKey ->
       withPaidPlay pk (takeQuestFromHand cardKey) (\g cd -> effectiveTotalCost g pk cd)
         \cardDef paidPlayer n -> do
@@ -1053,12 +1066,33 @@ instance Run Game where
             ]
     DestroySupport skey -> do
       msupport <- gets (findSupport skey)
-      whenJust msupport \s -> do
-        discardToController s.controller $ mkCard s.key (SupportCardDef s.cardDef)
-        modify \gx -> gx {supports = removeById skey gx.supports}
-        logIt LogSystem "log.support.destroyed"
-          [("player", playerParam s.controller), ("card", T.pack s.cardDef.title)]
-        send $ SupportLeftPlay s.controller skey s.cardDef.code
+      case msupport of
+        Just s -> do
+          discardToController s.controller $ mkCard s.key (SupportCardDef s.cardDef)
+          modify \gx -> gx {supports = removeById skey gx.supports}
+          logIt LogSystem "log.support.destroyed"
+            [("player", playerParam s.controller), ("card", T.pack s.cardDef.title)]
+          send $ SupportLeftPlay s.controller skey s.cardDef.code
+        Nothing -> do
+          -- Attached supports live inside their host unit's
+          -- 'attachments'; "destroy one target support card" can hit
+          -- them too.
+          g <- get
+          let hosts =
+                [ (u, a)
+                | u <- g.units
+                , a <- u.attachments
+                , a.key == skey
+                ]
+          whenJust (listToMaybe hosts) \(host, a) -> do
+            discardToController a.controller $ mkCard a.key (SupportCardDef a.cardDef)
+            let host' =
+                  (host {attachments = filter ((/= skey) . (.key)) host.attachments})
+                    :: UnitDetails
+            modify \gx -> gx {units = replaceUnit host' gx.units}
+            logIt LogSystem "log.support.destroyed"
+              [("player", playerParam a.controller), ("card", T.pack a.cardDef.title)]
+            send $ SupportLeftPlay a.controller skey a.cardDef.code
     SupportLeftPlay _pk _skey _code -> pure ()
     DestroyQuest qkey -> do
       mquest <- gets (findQuest qkey)
@@ -1221,60 +1255,65 @@ instance Run Game where
         , ("trigger", "EndTurn")
         ]
     DealDamageToZone targetPlayer zoneKind raw -> do
-      -- Capital shields cancel the first 1 damage per turn each.
       g0 <- get
       let raised = max 0 raw
-          shields0 = Map.findWithDefault 0 targetPlayer g0.capitalShields
-          shieldsUsed = min shields0 raised
-          amount = raised - shieldsUsed
-      when (shieldsUsed > 0) do
-        modify \gx -> gx
-          { capitalShields =
-              Map.insert targetPlayer (shields0 - shieldsUsed) gx.capitalShields
-          }
-        logIt LogSystem
-          "log.capital.shielded"
-          [ ("player", playerParam targetPlayer)
-          , ("zone", zoneParam zoneKind)
-          , ("amount", tshow shieldsUsed)
-          ]
-      when (amount > 0) $ do
-        g <- get
-        let target = lookupPlayer targetPlayer g
-            zoneL = getZone zoneKind target
+          targetZone0 = getZone zoneKind (lookupPlayer targetPlayer g0)
+      if targetZone0.burned
+        then
+          -- FAQ: "A burning zone still functions normally except that
+          -- it cannot be assigned damage." Damage aimed at a burned
+          -- section is simply wasted.
+          when (raised > 0) $
+            logIt LogSystem
+              "log.zone.damage_wasted"
+              [ ("player", playerParam targetPlayer)
+              , ("zone", zoneParam zoneKind)
+              , ("amount", tshow raised)
+              ]
+        else do
+          -- Once-per-turn capital defenses, evaluated live at damage
+          -- time so they protect on the opponent's turn too:
+          --   1. redirect-first-damage quests (Defend the Border),
+          --   2. cancel-1 supports (Contested Fortress).
+          afterRedirect <- applyCapitalRedirects targetPlayer zoneKind raised
+          amount <- applyCapitalShields targetPlayer zoneKind afterRedirect
+          when (amount > 0) $ do
+            g <- get
             -- Add damage; burn if it now meets or exceeds HP, and if
             -- that's the second burn on this capital eliminate the
             -- player.
-            Damage existing = zoneL.damage
-            HitPoints zoneHp = zoneL.hitPoints
-            total = existing + amount
-            (newDmg, justBurned) =
-              if total >= zoneHp && not zoneL.burned
-                then (Damage 0, True)
-                else (Damage total, False)
-            zoneL' =
-              zoneL
-                { damage = newDmg
-                , burned = zoneL.burned || justBurned
-                }
-            target' = setZone zoneKind zoneL' target
-        modify (setPlayer targetPlayer target')
-        logIt LogSystem
-          "log.zone.damaged"
-          [ ("player", playerParam targetPlayer)
-          , ("zone", zoneParam zoneKind)
-          , ("amount", tshow amount)
-          ]
-        when justBurned $ do
-          logIt LogResult
-            "log.zone.burned"
-            [ ("player", playerParam targetPlayer)
-            , ("zone", zoneParam zoneKind)
-            ]
-          -- Check for elimination (two burned zones = lose).
-          let burnedNow = burnedZoneCount target'.capital
-          when (burnedNow >= 2) $
-            send $ Eliminate targetPlayer CapitalBurned
+            let target = lookupPlayer targetPlayer g
+                zoneL = getZone zoneKind target
+                Damage existing = zoneL.damage
+                HitPoints zoneHp = zoneL.hitPoints
+                total = existing + amount
+                (newDmg, justBurned) =
+                  if total >= zoneHp && not zoneL.burned
+                    then (Damage 0, True)
+                    else (Damage total, False)
+                zoneL' =
+                  zoneL
+                    { damage = newDmg
+                    , burned = zoneL.burned || justBurned
+                    }
+                target' = setZone zoneKind zoneL' target
+            modify (setPlayer targetPlayer target')
+            logIt LogSystem
+              "log.zone.damaged"
+              [ ("player", playerParam targetPlayer)
+              , ("zone", zoneParam zoneKind)
+              , ("amount", tshow amount)
+              ]
+            when justBurned $ do
+              logIt LogResult
+                "log.zone.burned"
+                [ ("player", playerParam targetPlayer)
+                , ("zone", zoneParam zoneKind)
+                ]
+              -- Check for elimination (two burned zones = lose).
+              let burnedNow = burnedZoneCount target'.capital
+              when (burnedNow >= 2) $
+                send $ Eliminate targetPlayer CapitalBurned
     HealCapital pk raw -> do
       -- Heal up to N total damage tokens off the capital, spending the
       -- budget greedily on the most-damaged unburned zone, then the
@@ -1392,14 +1431,6 @@ instance Run Game where
         Nothing -> pure ()
         Just cs ->
           traverse_ (\k -> send (DealDamageToUnit k (max 0 amount))) (cs.attackers <> cs.defenders)
-    CancelAllBattlefieldDamageThisTurn -> do
-      -- The crude version: drop the in-flight combat (cancels any
-      -- pending damage that would have been dealt) and clear the
-      -- attacker list. Subsequent attacks this phase are still allowed
-      -- per the card text — the engine doesn't yet expose a "this
-      -- turn" suppression flag, so this is a best-effort approximation.
-      modify \gx -> gx {combat = Nothing}
-      logIt LogSystem "log.combat.cancelled" []
     CancelAssignedDamageOnUnit ukey raw -> do
       let cap = max 0 raw
       modify \gx -> case gx.combat of
@@ -1806,14 +1837,43 @@ instance Run Game where
       g <- get
       whenJust (findUnit ukey g) \u ->
         when (u.zone /= newZone) do
-          let u' = (u {zone = newZone}) :: UnitDetails
-          modify \gx -> gx {units = replaceUnit u' gx.units}
-          logIt LogSystem
-            "log.unit.moved"
-            [ ("player", playerParam u.controller)
-            , ("card", T.pack u.cardDef.title)
-            , ("zone", zoneParam newZone)
-            ]
+          -- "Limit one Hero per zone" blocks moves as well as plays
+          -- (FAQ: cannot "play, take control of, move, or put into
+          -- play" another Hero into that zone).
+          if heroLimitBlocks g u.controller u.cardDef newZone (Just ukey)
+            then
+              logIt LogSystem
+                "log.unit.move_blocked_hero"
+                [ ("card", T.pack u.cardDef.title)
+                , ("zone", zoneParam newZone)
+                ]
+            else do
+              let u' = (u {zone = newZone}) :: UnitDetails
+              modify \gx -> gx {units = replaceUnit u' gx.units}
+              -- FAQ Quests v1.7: a questing unit that moves to another
+              -- zone is no longer questing; tokens on the quest are
+              -- discarded immediately.
+              let touched =
+                    [ (q {questingUnit = Nothing, tokens = 0}) :: QuestDetails
+                    | q <- g.quests
+                    , q.questingUnit == Just ukey
+                    ]
+              unless (null touched) do
+                modify \gx ->
+                  gx {quests = foldr replaceQuest gx.quests touched}
+                traverse_
+                  ( \q ->
+                      logIt LogSystem
+                        "log.quest.unit_left"
+                        [("quest", T.pack q.cardDef.title)]
+                  )
+                  touched
+              logIt LogSystem
+                "log.unit.moved"
+                [ ("player", playerParam u.controller)
+                , ("card", T.pack u.cardDef.title)
+                , ("zone", zoneParam newZone)
+                ]
     ReturnUnitToHand ukey -> do
       g <- get
       whenJust (findUnit ukey g) \u -> do
@@ -1936,14 +1996,6 @@ instance Run Game where
               [ ("attacker", playerParam cs.attackingPlayer)
               , ("zone", zoneParam newZone)
               ]
-    ScheduleCancelNextCapitalDamage pk -> do
-      modify \gx -> gx
-        { capitalShields =
-            Map.insertWith (+) pk 1 gx.capitalShields
-        }
-      logIt LogSystem
-        "log.capital.shield_scheduled"
-        [("player", playerParam pk)]
     ArmActionCancel pk -> do
       modify \gx -> gx
         { pendingActionCancel =
@@ -2152,7 +2204,7 @@ newGame deck1 deck2 opts = do
       , pendingEndOfPhase = []
       , history = emptyHistory
       , autoSkipActionWindows = opts.autoSkipActionWindows
-      , capitalShields = mempty
+      , capitalDefenseUsed = mempty
       , pendingUnitDiscount = mempty
       , pendingUnitOnPlayDamage = mempty
       , unitsRedirectedThisTurn = mempty
@@ -2482,6 +2534,104 @@ collectIndirect pk remaining acc
                   bump zk
             _ -> pure acc
 
+-- | Once-per-turn "redirect the first point of damage done to your
+-- capital each turn" defenses (Defend the Border with 3+ tokens).
+-- For each eligible quest the damaged player controls that hasn't
+-- fired this turn, 1 point of the incoming damage is redirected to a
+-- unit or capital section of the defender's choice. Eligibility is
+-- evaluated live (not pre-armed at turn start) so the defense works
+-- on the opponent's turn — when attacks actually happen. Returns the
+-- damage remaining after redirects.
+applyCapitalRedirects
+  :: PlayerKey -> ZoneKind -> Int -> StateT Game GameT Int
+applyCapitalRedirects pk zoneKind = go
+  where
+    go remaining
+      | remaining <= 0 = pure remaining
+      | otherwise = do
+          g <- get
+          let used k = Map.findWithDefault 0 k g.capitalDefenseUsed > 0
+              eligible =
+                [ q
+                | q <- g.quests
+                , q.controller == pk
+                , q.cardDef.extras.capitalRedirectFirstDamage g q
+                , not (used q.key)
+                ]
+              unitOpts = [TargetUnitOption u.key | u <- g.units]
+              zoneOpts =
+                [ TargetZoneOption p.key z.kind
+                | p <- [g.player1, g.player2]
+                , z <- p.capital.zones
+                , not z.burned
+                , not (p.key == pk && z.kind == zoneKind)
+                ]
+              opts = unitOpts <> zoneOpts
+          case (eligible, opts) of
+            (q : _, _ : _) -> do
+              modify \gx -> gx
+                { capitalDefenseUsed =
+                    Map.insertWith (+) q.key 1 gx.capitalDefenseUsed
+                }
+              ans <- askPrompt Prompt
+                { player = pk
+                , kind = ChooseTargetOption
+                    { options = opts
+                    , description =
+                        "Redirect 1 damage from your capital to a unit or capital section."
+                    }
+                , callback = CallbackInlinePrompt
+                }
+              let chosen = case ans of
+                    PickTargetOption c | c `elem` opts -> c
+                    _ -> head opts
+              case chosen of
+                TargetUnitOption uk -> send (DealDamageToUnit uk 1)
+                TargetZoneOption owner zk -> send (DealDamageToZone owner zk 1)
+                TargetSupportOption _ -> pure ()
+              logIt LogSystem
+                "log.capital.redirected"
+                [ ("player", playerParam pk)
+                , ("card", T.pack q.cardDef.title)
+                ]
+              go (remaining - 1)
+            _ -> pure remaining
+
+-- | Once-per-turn "cancel 1 damage to your capital each turn"
+-- defenses (Contested Fortress). Each eligible support the damaged
+-- player controls absorbs 1 point per turn. Returns the damage
+-- remaining after cancellation.
+applyCapitalShields
+  :: PlayerKey -> ZoneKind -> Int -> StateT Game GameT Int
+applyCapitalShields pk zoneKind = go
+  where
+    go remaining
+      | remaining <= 0 = pure remaining
+      | otherwise = do
+          g <- get
+          let used k = Map.findWithDefault 0 k g.capitalDefenseUsed > 0
+              eligible =
+                [ s
+                | s <- allInPlaySupports g
+                , s.controller == pk
+                , s.cardDef.extras.capitalShieldPerTurn
+                , not (used s.key)
+                ]
+          case eligible of
+            [] -> pure remaining
+            (s : _) -> do
+              modify \gx -> gx
+                { capitalDefenseUsed =
+                    Map.insertWith (+) s.key 1 gx.capitalDefenseUsed
+                }
+              logIt LogSystem
+                "log.capital.shielded"
+                [ ("player", playerParam pk)
+                , ("zone", zoneParam zoneKind)
+                , ("amount", tshow (1 :: Int))
+                ]
+              go (remaining - 1)
+
 -- | Units the named player may legally declare as defenders of the
 -- given zone right now. Excludes corrupt units and anything carrying
 -- a 'CannotDefend' modifier.
@@ -2810,7 +2960,10 @@ zonePower g pk zone =
            )
         => [a] -> [a]
       mine = filter \x -> x.controller == pk && x.zone == zone
-      unitPow = sum $ map (.effectivePower) $ filter (not . (.corrupted)) $ mine g.units
+      -- Corruption does NOT suppress power: per the rulebook, corrupt
+      -- cards "cannot be declared as attackers or defenders" and
+      -- nothing more — they still produce resources and draw.
+      unitPow = sum $ map (.effectivePower) $ mine g.units
       supportPow = sum $ map (.cardDef.power) $ mine g.supports
       legendPow = sum $ map (.cardDef.power) $ mine g.legends
    in base + unitPow + supportPow + legendPow + zoneAuraBonus g pk zone
@@ -2893,15 +3046,20 @@ assignCombatDamage g cs defenderOrder attackerOrder = do
                   ]
                 else []
         _ ->
-          if defenderSpillover > 0
-            then
-              [ PendingDamage
-                  { target = PDZone cs.defendingPlayer cs.targetZone
-                  , cancellable = defenderSpillover
-                  , uncancellable = 0
-                  }
-              ]
-            else []
+          -- A burning section cannot be assigned damage (FAQ); the
+          -- attack itself is still legal — units there can be fought
+          -- — but any overflow past the defenders is wasted.
+          let sectionBurned =
+                (getZone cs.targetZone (lookupPlayer cs.defendingPlayer g)).burned
+           in if defenderSpillover > 0 && not sectionBurned
+                then
+                  [ PendingDamage
+                      { target = PDZone cs.defendingPlayer cs.targetZone
+                      , cancellable = defenderSpillover
+                      , uncancellable = 0
+                      }
+                  ]
+                else []
       pendings =
         spilloverEntry
           <> map toPending defenderUnitAssignments
@@ -3144,6 +3302,41 @@ canPlayCard pk cd g =
     && (not (isLimitedCard cd) || (historyOfScope ThisTurn g).limitedPlayed == 0)
     && cd.canPlay g pk
 
+-- | Zone-entry restriction keywords ("Battlefield only." etc.). These
+-- gate ENTERING play only; once in play, card effects may move the
+-- card to any zone.
+zoneEntryAllowed :: CardDef k -> ZoneKind -> Bool
+zoneEntryAllowed cd zone = all ok cd.keywords
+  where
+    ok BattlefieldOnly = zone == BattlefieldZone
+    ok KingdomOnly = zone == KingdomZone
+    ok QuestOnly = zone == QuestZone
+    ok _ = True
+
+-- | "Limit one Hero per zone": while a unit carrying the keyword sits
+-- in a (player, zone) location, no other unit carrying the keyword may
+-- be played into, moved into, or put into that same location — by
+-- either player. @exclude@ lets move-checks ignore the moving unit
+-- itself.
+heroLimitBlocks
+  :: Game -> PlayerKey -> CardDef k -> ZoneKind -> Maybe UnitKey -> Bool
+heroLimitBlocks g controller cd zone exclude =
+  LimitOneHeroPerZone `elem` cd.keywords
+    && any
+      ( \u ->
+          u.controller == controller
+            && u.zone == zone
+            && Just u.key /= exclude
+            && LimitOneHeroPerZone `elem` u.cardDef.keywords
+      )
+      g.units
+
+-- | Combined entry gate for a unit/support/quest going into a zone:
+-- zone-restriction keywords plus the Hero-per-zone limit.
+canEnterZone :: Game -> PlayerKey -> CardDef k -> ZoneKind -> Bool
+canEnterZone g pk cd zone =
+  zoneEntryAllowed cd zone && not (heroLimitBlocks g pk cd zone Nothing)
+
 -- | Decide whether a hand card is currently unplayable, and why.
 -- 'Nothing' = playable; 'Just issue' = surface @issue@ to the client
 -- (dimmed card, tap-for-reason).
@@ -3343,6 +3536,10 @@ recomputeUnitStats g = g {units = map update g.units}
   where
     combatAttackers = maybe [] (.attackers) g.combat
     combatDefenders = maybe [] (.defenders) g.combat
+    -- Computed ONCE per recompute pass instead of once per unit:
+    -- recompute runs after every message, so the per-unit walks here
+    -- were the engine's main O(units × supports) hot spot.
+    inPlaySupports = allInPlaySupports g
     update u =
       u
         { effectivePower = computePower u
@@ -3355,7 +3552,8 @@ recomputeUnitStats g = g {units = map update g.units}
       u.cardDef.power
         + sum (map (attachmentPowerBonus u) u.attachments)
         + modifierPowerBonus u
-        + auraPowerBonus g u
+        + sum [v.cardDef.extras.unitAuraPower g v u | v <- g.units]
+        + sum [s.cardDef.extras.supportAuraPower g s u | s <- inPlaySupports]
         + selfScalingPowerBonus g u
         + runtimeEffectsPowerBonus g u
     computeMaxHP u =
@@ -3363,7 +3561,7 @@ recomputeUnitStats g = g {units = map update g.units}
             + sum (map (attachmentHPBonus u) u.attachments)
           minus = modifierHPPenalty u
           supportAura =
-            sum [s.cardDef.extras.supportAuraHP g s u | s <- allInPlaySupports g]
+            sum [s.cardDef.extras.supportAuraHP g s u | s <- inPlaySupports]
        in max 1 (base + supportAura - minus)
     modifierPowerBonus u =
       let mods = fromMaybe [] (Map.lookup (UnitRef u.key) g.modifiers)

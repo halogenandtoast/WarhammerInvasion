@@ -283,8 +283,16 @@ totemOfGork = supportCard "core-070" "Totem of Gork" do
   power 1
   trait Siege
   body "Units in this zone gain {power} while attacking or defending."
-  zonePowerAura \_g self zk ->
-    if zk == self.zone then 1 else 0
+  -- Combat-only bonus for units sharing the Totem's zone — NOT a
+  -- zone-income aura. 'supportCombat' contributions flow into
+  -- 'combatDamageOf', which only runs for declared attackers and
+  -- defenders, and the attacking/defending flags pin it further.
+  supportCombat \_g self u ->
+    if u.controller == self.controller
+      && u.zone == self.zone
+      && (u.attacking || u.defending)
+      then 1
+      else 0
 
 bannaOfDaRedSunz :: CardDef Support
 bannaOfDaRedSunz = supportCard "core-071" "Banna of Da Red Sunz" do

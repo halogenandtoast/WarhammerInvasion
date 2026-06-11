@@ -5,106 +5,96 @@
 // elements in a sibling overlay, positioned in % of the container so
 // they line up with the SVG-coordinate slots.
 //
-// Why the HTML overlay? `view-transition-name` is only reliably
-// applied to elements with a CSS layout box. SVG <g> elements don't
-// have one (they're laid out in SVG user space), so wrapping each card
-// in a plain <div> is what makes the View Transitions API morph a card
-// between hand, zones, and the discard pile.
+// Card MOVEMENT is animated with a manual GSAP FLIP pass: before each
+// re-render we snapshot every card's on-screen rect keyed by its
+// stable engine key; after the patch, any card whose rect changed (or
+// that re-appeared under a new element, e.g. hand → zone) animates
+// from its old position. Transient effects (damage floats, destroy
+// ghosts, burn flashes) ride the boardFx bus.
 //
 // Each side is three rows stacked top → bottom:
 //   self:     [battlefield] [capital row] [combined zone]
 //   opponent: [combined zone] [capital row] [battlefield]
-//
-// The combined zone fills the full "below-capital" area and contains
-// the player-info chip + resources, the hand, and the deck-on-discard
-// pile (stacked vertically). The pile column lives on the outer side
-// and the player chip + resources on the inner side; for the opponent
-// these are mirrored.
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onBeforeUpdate,
+  onMounted,
+  onUpdated,
+  ref,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
+import gsap from 'gsap'
 import type {
   EngineCard,
+  EngineCardDef,
   EngineLegend,
   EnginePlayer,
   EngineQuest,
   EngineSupport,
   EngineUnit,
   EngineZone,
+  HandCard,
   PlayerKey,
   ZoneKind,
 } from '../api/protocol'
-import { zoneBurning, zoneHitPoints } from '../api/protocol'
+import { isVisibleCard, zoneBurning, zoneHitPoints } from '../api/protocol'
+import { onBoardFx, type FxEvent } from '../stores/boardFx'
 import { capitalImageFor, raceLabel } from '../lib/race'
 import { CARD_SM } from '../lib/cardSize'
+import { cardHover } from '../stores/cardHover'
+import { getCachedSize } from '../lib/cardImage'
 import CardArt from './CardArt.vue'
 
 const props = defineProps<{
   player: EnginePlayer
   units: EngineUnit[]
   // Free-standing (non-attached) supports controlled by this player.
-  // Attached supports live inside their host unit's `attachments` and
-  // are rendered through that path; this list is just the floating
-  // ones (Kingdom / Battlefield / Quest supports like Keystone Forge,
-  // Grudge Thrower).
   supports: EngineSupport[]
   quests: EngineQuest[]
   legend: EngineLegend | null
   perspective: 'self' | 'opponent'
   seatName: string
-  // Lookup of seat display names for both players. Used to label
-  // controller-overlay badges on quests whose controller differs from
-  // their zoneOwner (e.g. Dominion of Chaos played into the opponent's
-  // play area).
   seatNames: Record<PlayerKey, string>
   isActive: boolean
   isFirstPlayer: boolean
   canPlayCard?: (card: EngineCard) => boolean
-  // Tags a hand card as currently unplayable. Such cards stay
-  // clickable (so the popover can explain why) but render dimmed so
-  // the player sees at a glance which choices are unavailable.
   cardIsUnplayable?: (card: EngineCard) => boolean
+  // The zone of THIS side currently under attack (null outside
+  // combat / when the other side is the target). Renders the
+  // crossed-swords marker on the zone plate.
+  combatTargetZone?: ZoneKind | null
 }>()
 
 const emit = defineEmits<{
   (e: 'hand-card-click', payload: { card: EngineCard | null; rect: DOMRect }): void
+  (e: 'play-to-zone', payload: { card: EngineCard; zone: ZoneKind }): void
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
 
+const reducedMotion =
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
 // ---- viewBox sizing ----
-// Height is fixed (so card sizes etc. stay constant across resizes).
-// Width is reactive: a ResizeObserver measures the container's actual
-// aspect after mount and we set viewBox width to match so the SVG
-// content fills horizontally without letterbox.
 const VB_H = 570
 const VB_W_FALLBACK = 1600
 
 const PAD = 12
 const ROW_GAP = 8
-// Battlefield is wide and short, but tall enough to seat a portrait
-// card. Battlefield cards must NOT be rotated unless the engine
-// reports them rotated for a rules reason (exhaust / kneel) — the
-// row's height is what gives the renderer room to keep them upright.
 const BATTLE_H = 130
 const CAP_H = 240
 const COMBINED_H = 170
 
-// Capital board: width fixed to preserve the printed ~0.72 portrait
-// aspect at 240 tall.
 const CAP_BOARD_W = 175
 
-// Combined-row pile dimensions.
 const PILE_W = CARD_SM.h // 100 — rotated card width
 const PILE_H = CARD_SM.w // 72 — rotated card height
-// Enough room between piles to seat the lower label without colliding
-// with either card. Top label sits above the top pile; bottom label
-// sits in this gap above the bottom pile (rather than below it, which
-// would push past the SVG's viewBox on the self perspective).
 const PILE_VERT_GAP = 18
 
-// Width of the player-chip / resources column (the inner side of the
-// combined zone for each player).
 const PLAYER_COL_W = 130
 
 // ---- reactive width ----
@@ -112,19 +102,26 @@ const containerEl = ref<HTMLDivElement | null>(null)
 const vbW = ref(VB_W_FALLBACK)
 
 let ro: ResizeObserver | null = null
+let roFrame = 0
 
 onMounted(() => {
   const el = containerEl.value
   if (!el) return
+  // rAF-debounced: resize streams dozens of entries per second while
+  // dragging a window edge; one layout pass per frame is plenty.
   ro = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      const cw = entry.contentRect.width
-      const ch = entry.contentRect.height
-      if (cw > 0 && ch > 0) {
-        const w = Math.max(900, Math.round((cw / ch) * VB_H))
-        if (w !== vbW.value) vbW.value = w
+    if (roFrame) return
+    roFrame = requestAnimationFrame(() => {
+      roFrame = 0
+      for (const entry of entries) {
+        const cw = entry.contentRect.width
+        const ch = entry.contentRect.height
+        if (cw > 0 && ch > 0) {
+          const w = Math.max(minVbW(), Math.round((cw / ch) * VB_H))
+          if (w !== vbW.value) vbW.value = w
+        }
       }
-    }
+    })
   })
   ro.observe(el)
 })
@@ -132,7 +129,19 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   ro = null
+  if (roFrame) cancelAnimationFrame(roFrame)
+  fxUnsub?.()
+  clearLongPress()
 })
+
+// Coarse-pointer devices get a tighter minimum viewBox width so cards
+// render physically larger (≈ 44px tap targets at 390px wide).
+function minVbW(): number {
+  const coarse =
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(pointer: coarse)').matches
+  return coarse ? 700 : 900
+}
 
 // ---- per-perspective y offsets ----
 const layout = computed(() => {
@@ -148,14 +157,6 @@ const layout = computed(() => {
   return { battleY, capY, combinedY }
 })
 
-// ---- positions derived from vbW (perspective-aware) ----
-//
-// Combined-row x-layout:
-//   self     (L→R): [ player col | hand | pile col ]
-//   opponent (L→R, mirrored): [ pile col | hand | player col ]
-//
-// Pile column holds the deck stacked on the discard for self, and the
-// opposite for the opponent.
 const xs = computed(() => {
   const W = vbW.value
   const capBoardX = Math.round((W - CAP_BOARD_W) / 2)
@@ -199,7 +200,6 @@ const xs = computed(() => {
 })
 
 // ---- piles (deck + discard stacked vertically) ----
-// Centered vertically inside the combined row.
 const PILES_STACK_H = PILE_H * 2 + PILE_VERT_GAP
 const pilesLayout = computed(() => {
   const cy = layout.value.combinedY
@@ -210,7 +210,6 @@ const pilesLayout = computed(() => {
   return {
     topY,
     bottomY,
-    // Self: deck on top, discard below. Opponent: inverted.
     topKind: isOpp ? 'discard' : 'deck',
     bottomKind: isOpp ? 'deck' : 'discard',
   }
@@ -232,26 +231,19 @@ const topDiscard = computed<EngineCard | null>(() => {
   return d.length ? d[d.length - 1] : null
 })
 
-// ---- player chip + resources layout (inside the player column) ----
-//
-// The chip is a single horizontal pill on the top edge of the player
-// column with the player's name, race, optional first-player tag, and
-// optional active dot. The big resources counter sits below the chip.
-// Both elements are anchored to the inner side of the column (start
-// for self, end for opponent).
+// ---- player chip + resources ----
 const chip = computed(() => {
   const isOpp = props.perspective === 'opponent'
   return {
     anchor: isOpp ? ('end' as const) : ('start' as const),
-    // Local X origin inside the player-column group.
     nameX: isOpp ? PLAYER_COL_W : 0,
     raceX: isOpp ? PLAYER_COL_W : 0,
     activeCx: isOpp ? 8 : PLAYER_COL_W - 8,
     firstPipX: isOpp ? 0 : PLAYER_COL_W - 50,
   }
 })
-const chipLocalY = 12 // baseline of the seat-name text inside the column
-const raceLocalY = chipLocalY + 16 // race tag baseline
+const chipLocalY = 12
+const raceLocalY = chipLocalY + 16
 const activeLocalY = chipLocalY - 4
 const firstPipLocalY = chipLocalY + 22
 
@@ -259,24 +251,12 @@ const resourcesLocalY = chipLocalY + 50
 const RESOURCE_ICON_W = 40
 
 // ---- units in this zone ----
-// Attachments cascade behind their host unit with a small per-attachment
-// offset so each one shows a thin strip of card art beneath / beside the
-// unit. The unit is drawn last so it stays fully visible on top.
 const ATTACHMENT_OFFSET = 16
 const zoneUnits = (z: EngineZone): EngineUnit[] =>
-  props.units.filter((u) => u.zone === zoneToZoneKind(z))
+  props.units.filter((u) => u.zone === z.kind)
 
-// Free-standing supports in this zone for this player. Attached
-// supports show up under their host unit's render path, so we exclude
-// anything with a non-null 'attachedTo'.
 const zoneSupports = (z: EngineZone): EngineSupport[] =>
-  props.supports.filter(
-    (s) => s.attachedTo === null && s.zone === zoneToZoneKind(z),
-  )
-
-function zoneToZoneKind(z: EngineZone): ZoneKind {
-  return z.kind
-}
+  props.supports.filter((s) => s.attachedTo === null && s.zone === z.kind)
 
 function evenSpread(n: number, areaX: number, areaW: number, cardW: number): number[] {
   if (n === 0) return []
@@ -357,23 +337,28 @@ const zones = computed<ZoneRender[]>(() => {
 const capY = computed(() => layout.value.capY)
 const combinedY = computed(() => layout.value.combinedY)
 
-// Centered Y for hand cards inside the combined row.
+// ---- hand ----
 const handCardY = computed(
   () => combinedY.value + (COMBINED_H - CARD_SM.h) / 2,
 )
 
-const handCards = computed<Array<EngineCard | null>>(() => {
-  if (props.perspective === 'opponent') {
-    return new Array(props.player.hand.length).fill(null)
-  }
-  return props.player.hand
-})
+// Hand entries: the viewer's own hand is fully visible; the
+// opponent's arrives as key-only stubs. Keeping the stub keys lets
+// the FLIP pass animate an opponent's play from their hand position
+// to the board (the reveal happens at the destination).
+interface HandEntry {
+  key: number
+  card: EngineCard | null
+}
+const handCards = computed<HandEntry[]>(() =>
+  props.player.hand.map((c: HandCard, i) => ({
+    key: typeof c.key === 'number' ? c.key : -(i + 1),
+    card:
+      props.perspective === 'self' && isVisibleCard(c) ? c : null,
+  })),
+)
 
 function isCardClickable(card: EngineCard | null): boolean {
-  // Any face-up card in our own hand is clickable: a playable card
-  // opens the play picker, an unplayable one opens the reason panel.
-  // Both routes go through the same `hand-card-click` emit; PlayView
-  // decides which popover to render.
   if (!card || props.perspective !== 'self') return false
   return true
 }
@@ -388,12 +373,20 @@ const handXs = computed(() =>
   evenSpread(handCards.value.length, xs.value.handX, xs.value.handW, CARD_SM.w),
 )
 
+// Fan parameters: cards rotate around their bottom edge and arc
+// slightly, like a hand held at the table edge. The opponent's backs
+// stay flat (they're compressed and unreadable anyway).
+function fanFor(i: number, n: number): { rot: number; lift: number } {
+  if (props.perspective !== 'self' || n <= 1) return { rot: 0, lift: 0 }
+  const mid = (n - 1) / 2
+  const off = (i - mid) / Math.max(mid, 1) // -1 .. 1
+  const maxRot = Math.min(8, 2 + n * 0.8)
+  return { rot: off * maxRot, lift: Math.abs(off) * 6 }
+}
+
 const capitalSrc = computed(() => capitalImageFor(props.player.race))
 const raceText = computed(() => raceLabel(props.player.race))
 
-// Legend slot: a portrait card-sized region centered on the capital
-// board. Legend cards are printed portrait like every other unit card,
-// so we use the standard CARD_SM dims (72 × 100) and don't rotate.
 const legendSlot = computed(() => {
   const w = CARD_SM.w
   const h = CARD_SM.h
@@ -410,14 +403,6 @@ const legendSlot = computed(() => {
 })
 
 // ---- flat card-slot list for the HTML overlay ----
-//
-// Every visible card (hand, in-play unit, attached support, legend,
-// deck top, discard top) becomes one entry here. Each slot has a
-// position in SVG-viewBox units that we convert to a percentage of
-// the container; the card-slot <div> uses that as `left`/`top`/etc.
-// so it lines up exactly with where the SVG would have drawn the
-// card. The `cardKey` field is what gets fed into
-// `view-transition-name`.
 interface CardSlot {
   key: string
   cardKey: number | null
@@ -425,26 +410,25 @@ interface CardSlot {
   faceDown: boolean
   rotated: boolean
   clickable: boolean
-  // Hand-only: the engine has flagged this card as not playable right
-  // now (insufficient resources, wrong window, …). Slot still
-  // 'clickable' so a tap can show the reason. Non-hand slots leave
-  // this 'undefined' — only the hand-card branch sets it.
   unplayable?: boolean
-  // Position in SVG viewBox units.
   x: number
   y: number
   w: number
   h: number
   zIndex: number
-  // Original EngineCard (only present for hand cards so the click
-  // handler can pass it back up).
   handCard?: EngineCard | null
-  // Quest-only: when this slot belongs to a quest whose controller
-  // differs from the zoneOwner (i.e. Dominion of Chaos sitting in the
-  // opponent's area), render an overlay tagging the real controller.
   controllerLabel?: string
-  // Quest-only: damage / counter tokens currently sitting on the quest.
   tokens?: number
+  // Fan rotation (deg) — hand cards only.
+  rot?: number
+  // Unit state for on-card badges and styling.
+  damage?: number
+  power?: number
+  corrupted?: boolean
+  attacking?: boolean
+  defending?: boolean
+  // Self hand cards that may be drag-played.
+  draggable?: boolean
 }
 
 const cardSlots = computed<CardSlot[]>(() => {
@@ -453,21 +437,28 @@ const cardSlots = computed<CardSlot[]>(() => {
   // Hand
   const hxs = handXs.value
   const hy = handCardY.value
-  handCards.value.forEach((c, i) => {
+  const n = handCards.value.length
+  handCards.value.forEach((entry, i) => {
+    const c = entry.card
+    const fan = fanFor(i, n)
     slots.push({
-      key: c ? `hand-${c.key}` : `hand-opp-${i}`,
-      cardKey: c?.key ?? null,
+      key: `hand-${entry.key}`,
+      cardKey: entry.key,
       card: c ? { code: c.code, title: c.title } : null,
-      faceDown: props.perspective === 'opponent',
+      // Redacted cards (opponent's hand; both hands for spectators)
+      // render as backs.
+      faceDown: props.perspective === 'opponent' || !c,
       rotated: false,
       clickable: isCardClickable(c),
       unplayable: isCardUnplayable(c),
       x: hxs[i],
-      y: hy,
+      y: hy + fan.lift,
       w: CARD_SM.w,
       h: CARD_SM.h,
-      zIndex: 10,
+      zIndex: 10 + i,
       handCard: c,
+      rot: fan.rot,
+      draggable: !!c && props.perspective === 'self',
     })
   })
 
@@ -486,18 +477,34 @@ const cardSlots = computed<CardSlot[]>(() => {
       w: ls.w,
       h: ls.h,
       zIndex: 20,
+      damage: props.legend.damage > 0 ? props.legend.damage : undefined,
     })
   }
 
-  // Zone units + their attachments. Attachments first (so they render
-  // BEHIND the unit they're attached to), unit on top. Free-standing
-  // supports (Buildings, Siege weapons, Runes) sit in the same lane
-  // after the units.
+  const unitSlot = (u: EngineUnit, x: number, y: number, zIndex: number): CardSlot => ({
+    key: `unit-${u.key}`,
+    cardKey: u.key,
+    card: { code: u.cardDef.code, title: u.cardDef.title },
+    faceDown: false,
+    rotated: false,
+    clickable: false,
+    x,
+    y,
+    w: CARD_SM.w,
+    h: CARD_SM.h,
+    zIndex,
+    damage: u.damage > 0 ? u.damage : undefined,
+    power: u.effectivePower,
+    corrupted: u.corrupted,
+    attacking: u.attacking,
+    defending: u.defending,
+  })
+
   for (const zr of zones.value) {
     const units = zoneUnits(zr.z)
     const supports = zoneSupports(zr.z)
     if (zr.w > zr.h) {
-      // Landscape zone — battlefield. Cards spread horizontally.
+      // Landscape zone — battlefield.
       const xsLane = evenSpread(
         units.length + supports.length,
         zr.x + 12,
@@ -521,19 +528,7 @@ const cardSlots = computed<CardSlot[]>(() => {
             zIndex: 30 + ai,
           })
         })
-        slots.push({
-          key: `unit-${u.key}`,
-          cardKey: u.key,
-          card: { code: u.cardDef.code, title: u.cardDef.title },
-          faceDown: false,
-          rotated: false,
-          clickable: false,
-          x: xsLane[i],
-          y: ySlot,
-          w: CARD_SM.w,
-          h: CARD_SM.h,
-          zIndex: 30 + u.attachments.length + 1,
-        })
+        slots.push(unitSlot(u, xsLane[i], ySlot, 30 + u.attachments.length + 1))
       })
       supports.forEach((s, j) => {
         slots.push({
@@ -552,9 +547,7 @@ const cardSlots = computed<CardSlot[]>(() => {
         })
       })
     } else {
-      // Portrait zone — kingdom / quest. Cards stack vertically. The
-      // quest zone also hosts any in-play quest cards whose zoneOwner
-      // is this player; we stack the quests above the units.
+      // Portrait zone — kingdom / quest.
       const xSlot = tallStackX(zr.x, zr.w)
       const zoneQuests =
         zr.z.kind === 'QuestZone'
@@ -604,19 +597,7 @@ const cardSlots = computed<CardSlot[]>(() => {
             zIndex: 30 + ai,
           })
         })
-        slots.push({
-          key: `unit-${u.key}`,
-          cardKey: u.key,
-          card: { code: u.cardDef.code, title: u.cardDef.title },
-          faceDown: false,
-          rotated: false,
-          clickable: false,
-          x: xSlot,
-          y: yBase,
-          w: CARD_SM.w,
-          h: CARD_SM.h,
-          zIndex: 30 + u.attachments.length + 1,
-        })
+        slots.push(unitSlot(u, xSlot, yBase, 30 + u.attachments.length + 1))
       })
 
       supports.forEach((s, j) => {
@@ -639,13 +620,10 @@ const cardSlots = computed<CardSlot[]>(() => {
     }
   }
 
-  // Deck pile top: face-down card if the deck has anything in it.
+  // Deck pile top.
   if (props.player.deck.length > 0) {
     slots.push({
       key: 'deck-top',
-      // Face-down deck cards don't morph — picking one specific
-      // back-image to morph to/from the next state would be wrong (any
-      // card could come off the deck) and the visual is identical.
       cardKey: null,
       card: null,
       faceDown: true,
@@ -688,22 +666,478 @@ function slotStyle(slot: CardSlot): Record<string, string | number | undefined> 
     width: `${(slot.w / W) * 100}%`,
     height: `${(slot.h / H) * 100}%`,
     zIndex: slot.zIndex,
-    // `view-transition-name` lives on the HTML slot wrapper (not the
-    // inner SVG) so the browser captures a proper layout box.
-    viewTransitionName:
-      slot.cardKey != null ? `card-${slot.cardKey}` : undefined,
   }
 }
 
-function onSlotClick(slot: CardSlot, ev: MouseEvent) {
-  if (!slot.clickable) return
-  if (!slot.handCard) return
+// Inner-wrapper rotation: fan rotation for hand cards, 90° for
+// corrupted units (the physical game turns the card sideways). Kept
+// on a child element so GSAP's x/y transforms on the slot itself
+// never fight it.
+function rotStyle(slot: CardSlot): Record<string, string> | undefined {
+  const parts: string[] = []
+  if (slot.rot) parts.push(`rotate(${slot.rot}deg)`)
+  if (slot.corrupted) parts.push('rotate(90deg) scale(0.82)')
+  if (parts.length === 0) return undefined
+  return { transform: parts.join(' '), transformOrigin: '50% 80%' }
+}
+
+// ---------------------------------------------------------------
+// GSAP FLIP: animate card movement across re-renders.
+// ---------------------------------------------------------------
+const overlayEl = ref<HTMLDivElement | null>(null)
+let prevRects = new Map<string, DOMRect>()
+
+function captureRects(): Map<string, DOMRect> {
+  const m = new Map<string, DOMRect>()
+  const root = overlayEl.value
+  if (!root) return m
+  for (const el of root.querySelectorAll<HTMLElement>('[data-flip-id]')) {
+    const id = el.dataset.flipId
+    if (id) m.set(id, el.getBoundingClientRect())
+  }
+  return m
+}
+
+onBeforeUpdate(() => {
+  prevRects = captureRects()
+})
+
+onUpdated(() => {
+  if (reducedMotion) return
+  const root = overlayEl.value
+  if (!root) return
+  const deckEl = root.querySelector<HTMLElement>('[data-pile="deck"]')
+  const deckRect = deckEl?.getBoundingClientRect() ?? null
+  for (const el of root.querySelectorAll<HTMLElement>('[data-flip-id]')) {
+    const id = el.dataset.flipId
+    if (!id) continue
+    const now = el.getBoundingClientRect()
+    const before = prevRects.get(id)
+    if (before) {
+      const dx = before.left - now.left
+      const dy = before.top - now.top
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        const scale = before.width > 0 && now.width > 0 ? before.width / now.width : 1
+        gsap.set(el, { zIndex: 60 })
+        gsap.fromTo(
+          el,
+          { x: dx, y: dy, scale },
+          {
+            x: 0,
+            y: 0,
+            scale: 1,
+            duration: 0.45,
+            ease: 'power3.out',
+            clearProps: 'zIndex',
+            overwrite: 'auto',
+          },
+        )
+      }
+    } else if (id.startsWith('hand-') && deckRect) {
+      // Fresh hand card: deal it from the deck pile.
+      const dx = deckRect.left - now.left
+      const dy = deckRect.top - now.top
+      gsap.fromTo(
+        el,
+        { x: dx, y: dy, rotation: -8, opacity: 0.4 },
+        { x: 0, y: 0, rotation: 0, opacity: 1, duration: 0.45, ease: 'power3.out', overwrite: 'auto' },
+      )
+    } else {
+      // Anything else new on the board: gentle pop-in.
+      gsap.fromTo(
+        el,
+        { scale: 0.7, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.3, ease: 'back.out(1.6)', overwrite: 'auto' },
+      )
+    }
+  }
+})
+
+// ---------------------------------------------------------------
+// Board FX: damage floats, destroy ghosts, burn flashes.
+// ---------------------------------------------------------------
+interface FloatFx {
+  id: number
+  text: string
+  cls: string
+  left: number
+  top: number
+}
+interface GhostFx {
+  id: number
+  code: string
+  title: string
+  left: number
+  top: number
+  width: number
+  height: number
+}
+const floats = ref<FloatFx[]>([])
+const ghosts = ref<GhostFx[]>([])
+let fxSeq = 1
+
+function containerPoint(rect: DOMRect): { left: number; top: number } | null {
+  const host = containerEl.value
+  if (!host) return null
+  const hr = host.getBoundingClientRect()
+  return { left: rect.left - hr.left + rect.width / 2, top: rect.top - hr.top }
+}
+
+function spawnFloat(rect: DOMRect, text: string, cls: string) {
+  const pt = containerPoint(rect)
+  if (!pt) return
+  const fx: FloatFx = { id: fxSeq++, text, cls, left: pt.left, top: pt.top }
+  floats.value = [...floats.value, fx]
+  nextTick(() => {
+    const el = containerEl.value?.querySelector<HTMLElement>(`[data-fx-float="${fx.id}"]`)
+    if (!el) {
+      floats.value = floats.value.filter((f) => f.id !== fx.id)
+      return
+    }
+    gsap.fromTo(
+      el,
+      { y: 6, opacity: 0, scale: 0.8 },
+      {
+        y: -34,
+        opacity: 1,
+        scale: 1.05,
+        duration: 0.55,
+        ease: 'power2.out',
+        onComplete: () => {
+          gsap.to(el, {
+            opacity: 0,
+            y: -52,
+            duration: 0.4,
+            ease: 'power1.in',
+            onComplete: () => {
+              floats.value = floats.value.filter((f) => f.id !== fx.id)
+            },
+          })
+        },
+      },
+    )
+  })
+}
+
+function flashSlot(el: HTMLElement, color: string) {
+  gsap.fromTo(
+    el,
+    { boxShadow: `0 0 0 3px ${color}`, filter: 'brightness(1.6)' },
+    { boxShadow: '0 0 0 0px rgba(0,0,0,0)', filter: 'brightness(1)', duration: 0.55, ease: 'power2.out', clearProps: 'boxShadow,filter' },
+  )
+  gsap.fromTo(el, { x: -3 }, { x: 0, duration: 0.3, ease: 'elastic.out(1, 0.3)' })
+}
+
+function slotElFor(unitKey: number): HTMLElement | null {
+  return (
+    overlayEl.value?.querySelector<HTMLElement>(`[data-card-key="${unitKey}"]`) ?? null
+  )
+}
+
+function handleFx(events: FxEvent[]) {
+  if (reducedMotion) return
+  const mine = new Set(props.units.map((u) => u.key))
+  for (const ev of events) {
+    switch (ev.kind) {
+      case 'unit-damaged': {
+        if (!mine.has(ev.unitKey)) break
+        const el = slotElFor(ev.unitKey)
+        if (!el) break
+        spawnFloat(el.getBoundingClientRect(), `-${ev.amount}`, 'dmg')
+        flashSlot(el, 'rgba(220, 70, 50, 0.85)')
+        break
+      }
+      case 'unit-healed': {
+        if (!mine.has(ev.unitKey)) break
+        const el = slotElFor(ev.unitKey)
+        if (!el) break
+        spawnFloat(el.getBoundingClientRect(), `+${ev.amount}`, 'heal')
+        break
+      }
+      case 'unit-corrupted': {
+        if (!mine.has(ev.unitKey)) break
+        const el = slotElFor(ev.unitKey)
+        if (el) flashSlot(el, 'rgba(150, 80, 200, 0.85)')
+        break
+      }
+      case 'unit-destroyed': {
+        if (ev.controller !== props.player.key) break
+        // The event fires BEFORE the snapshot swap, so the unit's
+        // element is still on screen — capture its rect now and fly a
+        // ghost to the discard pile after the DOM patches.
+        const el = slotElFor(ev.unitKey)
+        const host = containerEl.value
+        if (!el || !host) break
+        const rect = el.getBoundingClientRect()
+        const hr = host.getBoundingClientRect()
+        const ghost: GhostFx = {
+          id: fxSeq++,
+          code: ev.code,
+          title: ev.title,
+          left: rect.left - hr.left,
+          top: rect.top - hr.top,
+          width: rect.width,
+          height: rect.height,
+        }
+        ghosts.value = [...ghosts.value, ghost]
+        nextTick(() => {
+          const gEl = host.querySelector<HTMLElement>(`[data-fx-ghost="${ghost.id}"]`)
+          const pileEl = host.querySelector<HTMLElement>('[data-pile="discard"]')
+          if (!gEl) {
+            ghosts.value = ghosts.value.filter((g) => g.id !== ghost.id)
+            return
+          }
+          const target = pileEl?.getBoundingClientRect()
+          const dx = target ? target.left - rect.left : 0
+          const dy = target ? target.top - rect.top : 40
+          gsap
+            .timeline({
+              onComplete: () => {
+                ghosts.value = ghosts.value.filter((g) => g.id !== ghost.id)
+              },
+            })
+            .to(gEl, { rotation: 6, x: -4, duration: 0.1, ease: 'power1.in' })
+            .to(gEl, { rotation: -6, x: 4, duration: 0.1 })
+            .to(gEl, {
+              x: dx,
+              y: dy,
+              rotation: 90,
+              scale: target ? target.width / Math.max(rect.width, 1) : 0.6,
+              opacity: 0.15,
+              duration: 0.5,
+              ease: 'power2.in',
+            })
+        })
+        break
+      }
+      case 'zone-damaged': {
+        if (ev.player !== props.player.key) break
+        const plate = containerEl.value?.querySelector<SVGGraphicsElement>(
+          `[data-zone-plate="${ev.zone}"]`,
+        )
+        if (!plate) break
+        spawnFloat(plate.getBoundingClientRect(), `-${ev.amount}`, 'dmg zone')
+        break
+      }
+      case 'zone-burned': {
+        if (ev.player !== props.player.key) break
+        const plate = containerEl.value?.querySelector<SVGGraphicsElement>(
+          `[data-zone-plate="${ev.zone}"]`,
+        )
+        if (!plate) break
+        spawnFloat(plate.getBoundingClientRect(), t('game.play.fx.burned'), 'burn')
+        const host = containerEl.value
+        if (host) {
+          gsap.fromTo(host, { x: -5 }, { x: 0, duration: 0.5, ease: 'elastic.out(1, 0.25)' })
+        }
+        break
+      }
+      case 'legend-damaged': {
+        if (!props.legend || props.legend.key !== ev.legendKey) break
+        const el = slotElFor(ev.legendKey)
+        if (!el) break
+        spawnFloat(el.getBoundingClientRect(), `-${ev.amount}`, 'dmg')
+        flashSlot(el, 'rgba(220, 70, 50, 0.85)')
+        break
+      }
+      case 'resources-changed': {
+        if (ev.player !== props.player.key || ev.delta === 0) break
+        const el = containerEl.value?.querySelector<SVGGraphicsElement>('[data-resources]')
+        if (!el) break
+        spawnFloat(
+          el.getBoundingClientRect(),
+          ev.delta > 0 ? `+${ev.delta}` : `${ev.delta}`,
+          ev.delta > 0 ? 'gain' : 'dmg',
+        )
+        break
+      }
+      default:
+        break
+    }
+  }
+}
+
+const fxUnsub = onBoardFx(handleFx)
+
+// ---------------------------------------------------------------
+// Pointer interaction: tap, long-press inspect, drag-to-play.
+// ---------------------------------------------------------------
+interface DragState {
+  card: EngineCard
+  startX: number
+  startY: number
+  pointerId: number
+  sourceEl: HTMLElement
+  dragging: boolean
+  ghostX: number
+  ghostY: number
+  legal: ZoneKind[]
+  over: ZoneKind | null
+  widthPx: number
+  heightPx: number
+}
+const drag = ref<DragState | null>(null)
+
+function keywordTags(card: EngineCardDef): string[] {
+  return card.keywords
+    .map((k) =>
+      k && typeof k === 'object' ? ((k as { tag?: string }).tag ?? '') : String(k),
+    )
+    .filter(Boolean)
+}
+
+// Zones this card may be drag-played into. Empty array = not
+// drag-playable (attachments, tactics, legends keep the tap flow).
+function dragZonesFor(card: EngineCard): ZoneKind[] {
+  if (props.cardIsUnplayable?.(card)) return []
+  const tags = keywordTags(card)
+  if (card.kind === 'Unit' || (card.kind === 'Support' && !card.traits.includes('Attachment'))) {
+    if (tags.includes('BattlefieldOnly')) return ['BattlefieldZone']
+    if (tags.includes('KingdomOnly')) return ['KingdomZone']
+    if (tags.includes('QuestOnly')) return ['QuestZone']
+    return ['KingdomZone', 'QuestZone', 'BattlefieldZone']
+  }
+  if (card.kind === 'Quest') return ['QuestZone']
+  return []
+}
+
+const DRAG_THRESHOLD = 9
+
+function onSlotPointerDown(slot: CardSlot, ev: PointerEvent) {
+  if (!slot.clickable || !slot.handCard) return
+  const el = ev.currentTarget as HTMLElement
+  startLongPress(slot, ev)
+  if (!slot.draggable) return
+  const card = slot.handCard
+  const rect = el.getBoundingClientRect()
+  drag.value = {
+    card,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    pointerId: ev.pointerId,
+    sourceEl: el,
+    dragging: false,
+    ghostX: ev.clientX,
+    ghostY: ev.clientY,
+    legal: dragZonesFor(card),
+    over: null,
+    widthPx: rect.width,
+    heightPx: rect.height,
+  }
+  el.setPointerCapture(ev.pointerId)
+}
+
+function onSlotPointerMove(ev: PointerEvent) {
+  const d = drag.value
+  if (!d || ev.pointerId !== d.pointerId) {
+    if (longPress && distanceFrom(ev, longPress.x, longPress.y) > 10) clearLongPress()
+    return
+  }
+  const dist = distanceFrom(ev, d.startX, d.startY)
+  if (!d.dragging) {
+    if (dist <= DRAG_THRESHOLD) return
+    if (d.legal.length === 0) return
+    d.dragging = true
+    clearLongPress()
+    cardHover.clear()
+  }
+  d.ghostX = ev.clientX
+  d.ghostY = ev.clientY
+  d.over = zoneAtPoint(ev.clientX, ev.clientY, d.legal)
+  drag.value = { ...d }
+}
+
+function onSlotPointerUp(slot: CardSlot, ev: PointerEvent) {
+  clearLongPress()
+  const d = drag.value
+  if (d && ev.pointerId === d.pointerId) {
+    drag.value = null
+    if (d.dragging) {
+      if (d.over) emit('play-to-zone', { card: d.card, zone: d.over })
+      return
+    }
+  }
+  // Plain tap — open the action popover.
+  if (!slot.clickable || !slot.handCard) return
   ev.stopPropagation()
   const el = ev.currentTarget as HTMLElement
   emit('hand-card-click', {
     card: slot.handCard,
     rect: el.getBoundingClientRect(),
   })
+}
+
+function onSlotPointerCancel() {
+  clearLongPress()
+  drag.value = null
+}
+
+function distanceFrom(ev: PointerEvent, x: number, y: number): number {
+  return Math.hypot(ev.clientX - x, ev.clientY - y)
+}
+
+// Convert a viewport point to viewBox coords and hit-test the legal
+// drop zones.
+function zoneAtPoint(cx: number, cy: number, legal: ZoneKind[]): ZoneKind | null {
+  const host = containerEl.value
+  if (!host) return null
+  const hr = host.getBoundingClientRect()
+  if (cx < hr.left || cx > hr.right || cy < hr.top || cy > hr.bottom) return null
+  const vx = ((cx - hr.left) / hr.width) * vbW.value
+  const vy = ((cy - hr.top) / hr.height) * VB_H
+  for (const zr of zones.value) {
+    if (!legal.includes(zr.z.kind)) continue
+    if (vx >= zr.x && vx <= zr.x + zr.w && vy >= zr.y && vy <= zr.y + zr.h) {
+      return zr.z.kind
+    }
+  }
+  return null
+}
+
+const dragGhostStyle = computed<Record<string, string>>(() => {
+  const d = drag.value
+  if (!d || !d.dragging) return { display: 'none' } as Record<string, string>
+  return {
+    left: `${d.ghostX - d.widthPx / 2}px`,
+    top: `${d.ghostY - d.heightPx * 0.85}px`,
+    width: `${d.widthPx}px`,
+    height: `${d.heightPx}px`,
+  } as Record<string, string>
+})
+
+// Long-press inspect (touch): hold a face-up card to open the zoom
+// overlay without triggering the tap action.
+let longPress: { timer: number; x: number; y: number } | null = null
+
+function startLongPress(slot: CardSlot, ev: PointerEvent) {
+  if (ev.pointerType === 'mouse') return
+  if (!slot.card || slot.faceDown) return
+  clearLongPress()
+  const el = ev.currentTarget as HTMLElement
+  const code = slot.card.code
+  const title = slot.card.title
+  longPress = {
+    x: ev.clientX,
+    y: ev.clientY,
+    timer: window.setTimeout(() => {
+      longPress = null
+      const r = el.getBoundingClientRect()
+      const src = `/cards/${code}.jpg`
+      cardHover.show({
+        src,
+        alt: title,
+        anchor: { x: r.left, y: r.top, width: r.width, height: r.height },
+        natural: getCachedSize(src),
+      })
+    }, 420),
+  }
+}
+
+function clearLongPress() {
+  if (longPress) {
+    clearTimeout(longPress.timer)
+    longPress = null
+  }
 }
 </script>
 
@@ -712,6 +1146,7 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
     ref="containerEl"
     class="play-side"
     :class="[perspective, { active: isActive }]"
+    :data-side-player="player.key"
   >
     <svg
       class="play-side-svg"
@@ -741,9 +1176,7 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
         />
       </g>
 
-      <!-- Legend slot: label + empty-state outline. The legend CARD
-           itself lives in the HTML overlay so it can carry a
-           view-transition-name. -->
+      <!-- Legend slot -->
       <g class="legend-area">
         <text
           :x="legendSlot.labelX"
@@ -762,27 +1195,30 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
           rx="6"
           class="legend-empty"
         />
-        <text
-          v-if="legend && legend.damage > 0"
-          :x="legendSlot.x + legendSlot.w - 6"
-          :y="legendSlot.y + legendSlot.h - 6"
-          text-anchor="end"
-          class="legend-damage"
-        >
-          {{ legend.damage }}
-        </text>
       </g>
 
-      <!-- Zone slots (kingdom, quest, battlefield): backings, labels,
-           HP, and tokens. Cards inside each zone live in the HTML
-           overlay. -->
+      <!-- Zone slots -->
       <g
         v-for="zr in zones"
         :key="zr.label"
         class="zone-slot"
-        :class="{ burning: zr.burning, burned: zr.burned }"
+        :class="{
+          burning: zr.burning,
+          burned: zr.burned,
+          'drop-legal': drag?.dragging && drag.legal.includes(zr.z.kind),
+          'drop-over': drag?.dragging && drag.over === zr.z.kind,
+          'under-attack': combatTargetZone === zr.z.kind,
+        }"
       >
-        <rect :x="zr.x" :y="zr.y" :width="zr.w" :height="zr.h" rx="6" class="zone-bg" />
+        <rect
+          :x="zr.x"
+          :y="zr.y"
+          :width="zr.w"
+          :height="zr.h"
+          rx="6"
+          class="zone-bg"
+          :data-zone-plate="zr.z.kind"
+        />
         <text :x="zr.x + 10" :y="zr.y + 16" class="zone-label">{{ zr.label.toUpperCase() }}</text>
         <text
           :x="zr.x + zr.w - 10"
@@ -792,6 +1228,33 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
           :class="{ critical: zr.burning }"
         >
           {{ zr.z.damage }}/{{ zr.hp }}
+        </text>
+        <!-- Damage meter: thin bar under the header line. -->
+        <rect
+          :x="zr.x + 10"
+          :y="zr.y + 21"
+          :width="zr.w - 20"
+          height="3"
+          rx="1.5"
+          class="zone-meter-track"
+        />
+        <rect
+          v-if="!zr.burned"
+          :x="zr.x + 10"
+          :y="zr.y + 21"
+          :width="Math.max(0, (zr.w - 20) * Math.min(1, zr.z.damage / Math.max(zr.hp, 1)))"
+          height="3"
+          rx="1.5"
+          class="zone-meter-fill"
+        />
+        <text
+          v-if="combatTargetZone === zr.z.kind"
+          :x="zr.x + zr.w / 2"
+          :y="zr.y + 16"
+          text-anchor="middle"
+          class="zone-attack-marker"
+        >
+          ⚔ {{ t('game.play.under_attack').toUpperCase() }} ⚔
         </text>
 
         <g
@@ -806,8 +1269,7 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
         </g>
       </g>
 
-      <!-- Combined zone: player chip + resources + pile labels.
-           Cards (hand, deck top, discard top) live in the overlay. -->
+      <!-- Combined zone: player chip + resources + pile labels. -->
       <g class="combined-row">
         <g :transform="`translate(${xs.playerColX}, ${combinedY})`" class="player-col">
           <text
@@ -844,7 +1306,11 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
             </text>
           </g>
 
-          <g :transform="`translate(${chip.anchor === 'start' ? 0 : PLAYER_COL_W - RESOURCE_ICON_W - 50}, ${resourcesLocalY})`" class="resources">
+          <g
+            :transform="`translate(${chip.anchor === 'start' ? 0 : PLAYER_COL_W - RESOURCE_ICON_W - 50}, ${resourcesLocalY})`"
+            class="resources"
+            data-resources
+          >
             <image
               href="/tokens/resource.png"
               x="0"
@@ -858,8 +1324,6 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
           </g>
         </g>
 
-        <!-- Empty-pile rects sit underneath the overlay cards so the
-             dashed outline shows through when a pile is exhausted. -->
         <rect
           v-if="player.deck.length === 0"
           :x="xs.pilesX"
@@ -899,9 +1363,6 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
             : `${t('game.play.seat.discard').toUpperCase()} · ${player.discard.length}` }}
         </text>
 
-        <!-- "Hand: 0" placeholder when the player's hand is empty.
-             Skipping the overlay for this case keeps the no-cards
-             state inside the SVG so it's centred predictably. -->
         <text
           v-if="handCards.length === 0"
           :x="xs.handX + xs.handW / 2"
@@ -914,39 +1375,103 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
       </g>
     </svg>
 
-    <!-- HTML card-slot overlay. Lives over the SVG so each card has a
-         real CSS layout box for `view-transition-name` to anchor to.
-         Cards are positioned in % relative to the SVG viewBox, so they
-         line up regardless of the actual rendered size. -->
-    <div class="cards-overlay" aria-hidden="false">
+    <!-- HTML card-slot overlay. -->
+    <div ref="overlayEl" class="cards-overlay" aria-hidden="false">
       <div
         v-for="slot in cardSlots"
         :key="slot.key"
         class="card-slot"
-        :class="{ clickable: slot.clickable, unplayable: slot.unplayable }"
+        :class="{
+          clickable: slot.clickable,
+          unplayable: slot.unplayable,
+          attacking: slot.attacking,
+          defending: slot.defending,
+          corrupted: slot.corrupted,
+          'drag-source': drag?.dragging && slot.handCard === drag.card,
+          'hand-card': slot.key.startsWith('hand-') && perspective === 'self',
+        }"
         :style="slotStyle(slot)"
-        @click="onSlotClick(slot, $event)"
+        :data-flip-id="slot.cardKey != null ? `card-${slot.cardKey}` : slot.key"
+        :data-card-key="slot.cardKey ?? undefined"
+        :data-pile="slot.key === 'deck-top' ? 'deck' : slot.key.startsWith('discard-top') ? 'discard' : undefined"
+        @pointerdown="onSlotPointerDown(slot, $event)"
+        @pointermove="onSlotPointerMove($event)"
+        @pointerup="onSlotPointerUp(slot, $event)"
+        @pointercancel="onSlotPointerCancel()"
       >
-        <CardArt
-          :card="slot.card"
-          :face-down="slot.faceDown"
-          :rotated="slot.rotated"
-        />
-        <!-- Controller-overlay banner: shown on quests whose controller
-             differs from the player whose zone visually houses them. -->
-        <div
-          v-if="slot.controllerLabel"
-          class="card-controller-banner"
-          :title="t('game.play.quest.controlled_by', { name: slot.controllerLabel })"
-        >
-          {{ t('game.play.quest.controlled_by', { name: slot.controllerLabel }) }}
-        </div>
-        <!-- Quest token counter (corruption / resource accumulator). -->
-        <div v-if="slot.tokens" class="card-token-badge">
-          {{ slot.tokens }}
+        <div class="card-rot" :style="rotStyle(slot)">
+          <CardArt
+            :card="slot.card"
+            :face-down="slot.faceDown"
+            :rotated="slot.rotated"
+          />
+          <div
+            v-if="slot.controllerLabel"
+            class="card-controller-banner"
+            :title="t('game.play.quest.controlled_by', { name: slot.controllerLabel })"
+          >
+            {{ t('game.play.quest.controlled_by', { name: slot.controllerLabel }) }}
+          </div>
+          <div v-if="slot.tokens" class="card-token-badge">
+            {{ slot.tokens }}
+          </div>
+          <!-- Unit stat chips: power bottom-left, damage top-right. -->
+          <div v-if="typeof slot.power === 'number'" class="card-stat power">
+            {{ slot.power }}
+          </div>
+          <div v-if="slot.damage" class="card-stat damage">
+            {{ slot.damage }}
+          </div>
+          <div v-if="slot.corrupted" class="card-corrupt-tag">
+            {{ t('game.play.corrupted_tag') }}
+          </div>
         </div>
       </div>
+
+      <!-- Destroy ghosts: cards mid-flight to the discard pile. -->
+      <div
+        v-for="g in ghosts"
+        :key="`ghost-${g.id}`"
+        class="fx-ghost"
+        :data-fx-ghost="g.id"
+        :style="{
+          left: `${g.left}px`,
+          top: `${g.top}px`,
+          width: `${g.width}px`,
+          height: `${g.height}px`,
+        }"
+      >
+        <CardArt :card="{ code: g.code, title: g.title }" :face-down="false" :rotated="false" />
+      </div>
+
+      <!-- Floating damage / heal / resource numbers. -->
+      <div
+        v-for="f in floats"
+        :key="`float-${f.id}`"
+        class="fx-float"
+        :class="f.cls"
+        :data-fx-float="f.id"
+        :style="{ left: `${f.left}px`, top: `${f.top}px` }"
+      >
+        {{ f.text }}
+      </div>
     </div>
+
+    <!-- Drag ghost: follows the pointer while drag-playing. -->
+    <Teleport to="body">
+      <div v-if="drag?.dragging" class="drag-ghost" :style="dragGhostStyle">
+        <CardArt
+          :card="{ code: drag.card.code, title: drag.card.title }"
+          :face-down="false"
+          :rotated="false"
+        />
+        <p class="drag-hint" :class="{ ok: drag.over }">
+          {{ drag.over
+            ? t('game.play.drag.release_to_play')
+            : t('game.play.drag.aim_at_zone') }}
+        </p>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -973,18 +1498,32 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
 .card-slot {
   position: absolute;
   pointer-events: auto;
+  border-radius: var(--card-radius);
+  /* GSAP animates transform on this element; keep transitions off so
+     they never fight. */
+  touch-action: none;
+}
+
+.card-rot {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transition: transform 0.18s ease;
 }
 
 .card-slot.clickable {
-  cursor: pointer;
+  cursor: grab;
+}
+.card-slot.clickable:active {
+  cursor: grabbing;
+}
+.card-slot.hand-card.clickable:hover .card-rot {
+  transform: translateY(-10px) scale(1.06) !important;
 }
 .card-slot.clickable:hover {
   filter: drop-shadow(0 0 6px var(--accent, #c4634a));
+  z-index: 50 !important;
 }
-/* Unplayable hand cards stay clickable (tap to learn why) but render
-   dimmed and desaturated so the player sees the available choices at a
-   glance. Hover hint shifts to a warning tint instead of the regular
-   "you can play this" glow. */
 .card-slot.unplayable {
   opacity: 0.55;
   filter: grayscale(0.4);
@@ -992,6 +1531,45 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
 .card-slot.unplayable.clickable:hover {
   filter: grayscale(0.4) drop-shadow(0 0 6px rgba(180, 60, 60, 0.55));
   opacity: 0.75;
+}
+
+.card-slot.drag-source {
+  opacity: 0.25;
+}
+
+/* Combat roles: attackers glow red and lean toward the enemy,
+   defenders glow blue. */
+.card-slot.attacking {
+  filter: drop-shadow(0 0 8px rgba(224, 90, 60, 0.9));
+}
+.card-slot.attacking .card-rot {
+  outline: 2px solid rgba(224, 90, 60, 0.85);
+  outline-offset: 1px;
+  border-radius: var(--card-radius);
+}
+.card-slot.defending {
+  filter: drop-shadow(0 0 8px rgba(95, 160, 214, 0.9));
+}
+.card-slot.defending .card-rot {
+  outline: 2px solid rgba(95, 160, 214, 0.85);
+  outline-offset: 1px;
+  border-radius: var(--card-radius);
+}
+
+.card-corrupt-tag {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  padding: 1px 6px;
+  background: rgba(90, 40, 130, 0.85);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  pointer-events: none;
 }
 
 .card-controller-banner {
@@ -1035,6 +1613,69 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
   pointer-events: none;
 }
 
+/* Unit stat chips. */
+.card-stat {
+  position: absolute;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  border-radius: 50%;
+  pointer-events: none;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.card-stat.power {
+  left: 3px;
+  bottom: 3px;
+  background: radial-gradient(circle at 30% 30%, #e9c963, #9a7a1f);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+.card-stat.damage {
+  right: 3px;
+  top: 3px;
+  background: radial-gradient(circle at 30% 30%, #e0604a, #8a2418);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+/* ── transient FX ── */
+.fx-float {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 18px;
+  font-weight: 800;
+  pointer-events: none;
+  z-index: 80;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+.fx-float.dmg { color: #ff6a4d; }
+.fx-float.heal { color: #6fd086; }
+.fx-float.gain { color: #e9c963; }
+.fx-float.burn {
+  color: #ffae42;
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.fx-float.zone { font-size: 22px; }
+
+.fx-ghost {
+  position: absolute;
+  pointer-events: none;
+  z-index: 70;
+}
+
+/* ── SVG board styling ── */
+
 .seat-name {
   fill: var(--fg);
   font-size: 14px;
@@ -1050,7 +1691,17 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
   font-family: var(--font-sans);
 }
 
-.active-dot { fill: #5da46a; }
+.active-dot {
+  fill: #5da46a;
+  animation: active-pulse 2s ease-in-out infinite;
+}
+@keyframes active-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .active-dot { animation: none; }
+}
 
 .first-pip rect {
   fill: rgba(212, 179, 87, 0.18);
@@ -1075,6 +1726,7 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
   fill: rgba(0, 0, 0, 0.3);
   stroke: rgba(255, 255, 255, 0.1);
   stroke-width: 1;
+  transition: fill 0.2s ease, stroke 0.2s ease;
 }
 .zone-slot.burning .zone-bg {
   stroke: var(--accent-strong);
@@ -1083,6 +1735,40 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
 .zone-slot.burned .zone-bg {
   fill: rgba(80, 30, 20, 0.55);
   stroke: var(--accent-strong);
+}
+
+/* Drag-play affordances. */
+.zone-slot.drop-legal .zone-bg {
+  stroke: rgba(110, 190, 130, 0.85);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  fill: rgba(60, 120, 75, 0.18);
+}
+.zone-slot.drop-over .zone-bg {
+  stroke: #7fdc9a;
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+  fill: rgba(75, 160, 95, 0.3);
+}
+
+.zone-slot.under-attack .zone-bg {
+  stroke: rgba(224, 90, 60, 0.9);
+  stroke-width: 2;
+  animation: under-attack-pulse 1.2s ease-in-out infinite;
+}
+@keyframes under-attack-pulse {
+  0%, 100% { fill: rgba(0, 0, 0, 0.3); }
+  50% { fill: rgba(120, 40, 25, 0.4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zone-slot.under-attack .zone-bg { animation: none; }
+}
+.zone-attack-marker {
+  fill: #ff8a6a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  font-family: var(--font-sans);
 }
 
 .zone-label {
@@ -1100,6 +1786,14 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
   font-family: var(--font-sans);
 }
 .zone-hp.critical { fill: var(--accent-strong); }
+
+.zone-meter-track {
+  fill: rgba(255, 255, 255, 0.08);
+}
+.zone-meter-fill {
+  fill: var(--accent-strong, #e0775e);
+  transition: width 0.4s ease;
+}
 
 .token-count {
   fill: var(--fg);
@@ -1152,11 +1846,32 @@ function onSlotClick(slot: CardSlot, ev: MouseEvent) {
   stroke-width: 1;
   stroke-dasharray: 4 4;
 }
-.legend-damage {
-  fill: var(--accent-strong);
+</style>
+
+<style>
+/* Unscoped — the drag ghost is teleported to <body>. */
+.drag-ghost {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.65));
+  transform: rotate(3deg) scale(1.08);
+}
+.drag-ghost .drag-hint {
+  position: absolute;
+  left: 50%;
+  bottom: -26px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.8);
+  color: var(--fg-dim, #ccc);
   font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+.drag-ghost .drag-hint.ok {
+  background: rgba(58, 122, 76, 0.95);
+  color: #fff;
 }
 </style>

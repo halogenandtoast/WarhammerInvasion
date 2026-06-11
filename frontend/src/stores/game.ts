@@ -17,6 +17,7 @@ import type {
   ZoneKind,
 } from '../api/protocol'
 import { auth } from './auth'
+import { diffSnapshots } from './boardFx'
 
 const _status = ref<SocketStatus>('idle')
 const _gameId = ref<string | null>(null)
@@ -38,51 +39,21 @@ function reset() {
   _closed.value = null
 }
 
-// View Transitions: each engine snapshot update runs inside
-// `document.startViewTransition` so the browser captures the
-// before/after DOM and morphs elements that share a
-// `view-transition-name` (every visible card carries
-// `card-<key>` via its HTML wrapper in PlaySide.vue).
-//
-// The callback is intentionally synchronous: Vue's component update
-// for the ref assignment schedules a microtask, which fires before
-// the browser's next-paint snapshot, so by the time the browser
-// captures the new state the DOM is already patched. Awaiting
-// nextTick() here is unnecessary and actively interferes on browsers
-// that interpret the returned promise as "wait for me before
-// snapshotting" — the snapshot then happens too late and the morph
-// degenerates.
-//
-// `prefers-reduced-motion: reduce` and missing-API browsers (Firefox
-// today) fall back to a plain assignment.
-type ViewTransitionDoc = Document & {
-  startViewTransition?: (cb: () => Promise<void> | void) => unknown
-}
-function withViewTransition(update: () => void) {
-  const reduce =
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  const d = document as ViewTransitionDoc
-  if (reduce || typeof d.startViewTransition !== 'function') {
-    update()
-    return
-  }
-  d.startViewTransition(update)
-}
-
 function handle(msg: GameOut) {
   switch (msg.tag) {
     case 'GameWelcome':
       _you.value = msg.you
-      // First frame — no prior state to animate from, so skip the
-      // transition wrapper.
       _view.value = msg.game
       _maintenance.value = msg.maintenance
       break
     case 'GameUpdate':
-      withViewTransition(() => {
-        _view.value = msg.game
-      })
+      // Publish semantic diffs BEFORE the snapshot swap so board-FX
+      // subscribers can still measure the old DOM (e.g. the final
+      // position of a unit that's about to leave play). Card movement
+      // itself is animated by PlaySide's GSAP FLIP pass during the
+      // re-render that follows this assignment.
+      diffSnapshots(_view.value?.engine ?? null, msg.game.engine ?? null)
+      _view.value = msg.game
       break
     case 'GameChatNew':
       if (_view.value) {

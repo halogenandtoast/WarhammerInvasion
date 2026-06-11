@@ -5,7 +5,8 @@
 // "waiting for opponent" notice so spectators / the other player
 // know what's happening.
 
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type {
   EngineCard,
   EngineGame,
@@ -16,6 +17,7 @@ import type {
   TargetOption,
   ZoneKind,
 } from '../api/protocol'
+import { isVisibleCard } from '../api/protocol'
 import { game } from '../stores/game'
 
 const props = defineProps<{
@@ -23,15 +25,15 @@ const props = defineProps<{
   seat: PlayerKey | null
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const prompt = computed<EnginePrompt | null>(() => props.engine.pendingPrompt)
 
 const itsMine = computed(
   () => !!prompt.value && !!props.seat && prompt.value.player === props.seat,
 )
 
-// Selected unit keys for ChooseUnits-style prompts. We keep them
-// local; the parent submits via `submitUnits` when the user confirms.
-import { ref, watch } from 'vue'
+// Selected unit keys for ChooseUnits-style prompts.
 const picks = ref<number[]>([])
 watch(prompt, () => {
   picks.value = []
@@ -42,9 +44,6 @@ const me = computed(() => {
   return props.seat === 'Player1' ? props.engine.player1 : props.engine.player2
 })
 
-// Convert a PromptFilter into the list of selectable cards (hand /
-// discard / in-play units). Each entry has its UnitKey + a short
-// label for display.
 interface PickOption {
   key: number
   label: string
@@ -66,6 +65,11 @@ const options = computed<PickOption[]>(() => {
       })
       .map((c) => ({ key: c.key, label: c.title }))
 
+  // The viewer's own hand is always fully visible; the type allows
+  // redacted stubs only because the OPPONENT's hand uses the same
+  // shape.
+  const myHand = (): EngineCard[] => m.hand.filter(isVisibleCard)
+
   const fromUnits = (units: EngineUnit[]): PickOption[] =>
     units
       .filter((u) => u.controller === props.seat)
@@ -83,24 +87,43 @@ const options = computed<PickOption[]>(() => {
         .map((u) => ({ key: u.key, label: u.cardDef.title }))
     }
     case 'OwnUnitsFromHandByRace':
-      return fromCardList(m.hand, filter.contents)
+      return fromCardList(myHand(), filter.contents)
     case 'OwnUnitsFromDiscardByRace':
       return fromCardList(m.discard, filter.contents)
     case 'OwnUnitsFromHandOrDiscardByRace':
-      return [...fromCardList(m.hand, filter.contents), ...fromCardList(m.discard, filter.contents)]
+      return [
+        ...fromCardList(myHand(), filter.contents),
+        ...fromCardList(m.discard, filter.contents),
+      ]
   }
+})
+
+// ChooseFromCards: the engine embeds the candidate cards (search
+// results, reveals) directly on the prompt. On the wire each entry is
+// a full Card (def fields + `key`).
+const cardChoices = computed<PickOption[]>(() => {
+  if (!prompt.value || prompt.value.kind.tag !== 'ChooseFromCards') return []
+  return prompt.value.kind.cards.map((c, i) => ({
+    key: (c as EngineCard & { key?: number }).key ?? i,
+    label: c.title,
+  }))
+})
+
+const pickBounds = computed<{ min: number; max: number } | null>(() => {
+  const k = prompt.value?.kind
+  if (!k) return null
+  if (k.tag === 'ChooseUnits' || k.tag === 'ChooseFromCards') {
+    return { min: k.minPick, max: k.maxPick }
+  }
+  return null
 })
 
 function togglePick(key: number) {
   const i = picks.value.indexOf(key)
   if (i >= 0) {
     picks.value.splice(i, 1)
-  } else if (
-    prompt.value?.kind.tag === 'ChooseUnits' &&
-    picks.value.length >= prompt.value.kind.maxPick
-  ) {
-    // Already at max — silently ignore additional clicks rather than
-    // booting an existing pick. Player can deselect first.
+  } else if (pickBounds.value && picks.value.length >= pickBounds.value.max) {
+    // Already at max — ignore further clicks; deselect first.
   } else {
     picks.value.push(key)
   }
@@ -122,7 +145,6 @@ function submitNo() {
   game.resolvePromptBool(false)
 }
 
-// Sacrifice prompt: list the player's own units in the named zone.
 const sacrificeOptions = computed<PickOption[]>(() => {
   if (!prompt.value || prompt.value.kind.tag !== 'ChooseSacrifice') return []
   const zone = prompt.value.kind.zone
@@ -132,11 +154,11 @@ const sacrificeOptions = computed<PickOption[]>(() => {
 })
 
 const minOk = computed(() => {
-  if (!prompt.value || prompt.value.kind.tag !== 'ChooseUnits') return true
-  return picks.value.length >= prompt.value.kind.minPick
+  const b = pickBounds.value
+  if (!b) return true
+  return picks.value.length >= b.min
 })
 
-// ChooseAmount: integer slider/input bounded by [minAmount, maxAmount].
 const amountPick = ref<number>(0)
 watch(prompt, () => {
   if (prompt.value?.kind.tag === 'ChooseAmount') {
@@ -148,40 +170,61 @@ function submitAmount() {
   game.resolvePromptAmount(amountPick.value)
 }
 
-// ChooseTargetOption: the engine has already pre-filtered the legal
-// picks into `options`. Render one button per option, resolving unit
-// keys to titles and zone tags to a "{player}'s {zone}" label.
 const unitTitleByKey = computed<Map<number, string>>(() => {
   const m = new Map<number, string>()
   for (const u of props.engine.units) m.set(u.key, u.cardDef.title)
   return m
 })
 
+// Support titles: free-standing supports plus every attachment.
+const supportTitleByKey = computed<Map<number, string>>(() => {
+  const m = new Map<number, string>()
+  for (const s of props.engine.supports) m.set(s.key, s.cardDef.title)
+  for (const u of props.engine.units)
+    for (const a of u.attachments) m.set(a.key, a.cardDef.title)
+  return m
+})
+
 function zoneLabel(z: ZoneKind): string {
   switch (z) {
-    case 'KingdomZone': return 'Kingdom'
-    case 'QuestZone': return 'Quest zone'
-    case 'BattlefieldZone': return 'Battlefield'
+    case 'KingdomZone':
+      return t('game.play.capital.kingdom')
+    case 'QuestZone':
+      return t('game.play.capital.quest')
+    case 'BattlefieldZone':
+      return t('game.play.capital.battlefield')
   }
 }
 
 function playerLabel(p: PlayerKey): string {
-  if (props.seat && p === props.seat) return 'Your'
-  return "Opponent's"
+  if (props.seat && p === props.seat) return t('game.prompt.yours')
+  return t('game.prompt.opponents')
 }
 
 function targetOptionLabel(o: TargetOption): string {
-  if (o.tag === 'TargetUnitOption') {
-    return unitTitleByKey.value.get(o.contents) ?? `Unit #${o.contents}`
+  switch (o.tag) {
+    case 'TargetUnitOption':
+      return unitTitleByKey.value.get(o.contents) ?? `Unit #${o.contents}`
+    case 'TargetSupportOption':
+      return supportTitleByKey.value.get(o.contents) ?? `Support #${o.contents}`
+    case 'TargetZoneOption': {
+      const [owner, zone] = o.contents
+      return `${playerLabel(owner)} ${zoneLabel(zone).toLowerCase()}`
+    }
   }
-  const [owner, zone] = o.contents
-  return `${playerLabel(owner)} ${zoneLabel(zone).toLowerCase()}`
 }
 
 function targetOptionKey(o: TargetOption): string {
-  if (o.tag === 'TargetUnitOption') return `u:${o.contents}`
-  const [owner, zone] = o.contents
-  return `z:${owner}:${zone}`
+  switch (o.tag) {
+    case 'TargetUnitOption':
+      return `u:${o.contents}`
+    case 'TargetSupportOption':
+      return `s:${o.contents}`
+    case 'TargetZoneOption': {
+      const [owner, zone] = o.contents
+      return `z:${owner}:${zone}`
+    }
+  }
 }
 
 function submitTargetOption(o: TargetOption) {
@@ -192,7 +235,7 @@ function submitTargetOption(o: TargetOption) {
 <template>
   <aside v-if="prompt" class="prompt-panel" :class="{ 'is-mine': itsMine }">
     <header>
-      <strong>{{ itsMine ? 'Your choice' : 'Waiting on opponent' }}</strong>
+      <strong>{{ itsMine ? t('game.prompt.your_choice') : t('game.prompt.waiting_on_opponent') }}</strong>
     </header>
 
     <p class="prompt-desc">{{ prompt.kind.description }}</p>
@@ -200,11 +243,11 @@ function submitTargetOption(o: TargetOption) {
     <!-- ChooseYesNo -->
     <div v-if="prompt.kind.tag === 'ChooseYesNo'" class="actions">
       <template v-if="itsMine">
-        <button type="button" @click="submitYes">Yes</button>
-        <button type="button" @click="submitNo">No</button>
+        <button type="button" @click="submitYes">{{ t('game.prompt.yes') }}</button>
+        <button type="button" @click="submitNo">{{ t('game.prompt.no') }}</button>
       </template>
       <template v-else>
-        <em>Waiting…</em>
+        <em>{{ t('game.prompt.waiting') }}</em>
       </template>
     </div>
 
@@ -222,17 +265,49 @@ function submitTargetOption(o: TargetOption) {
           >
             {{ o.label }}
           </button>
-          <p v-if="options.length === 0" class="empty">No eligible cards.</p>
+          <p v-if="options.length === 0" class="empty">{{ t('game.prompt.no_eligible') }}</p>
         </div>
         <div class="confirm">
           <button type="button" :disabled="!minOk" @click="submitUnits">
-            Confirm ({{ picks.length }}/{{ prompt.kind.maxPick }})
+            {{ t('game.prompt.confirm_n', { n: picks.length, max: prompt.kind.maxPick }) }}
           </button>
-          <button v-if="prompt.kind.minPick === 0" type="button" @click="submitNone">Skip</button>
+          <button v-if="prompt.kind.minPick === 0" type="button" @click="submitNone">
+            {{ t('game.prompt.skip') }}
+          </button>
         </div>
       </template>
       <template v-else>
-        <em>Waiting…</em>
+        <em>{{ t('game.prompt.waiting') }}</em>
+      </template>
+    </div>
+
+    <!-- ChooseFromCards: search results / reveals. -->
+    <div v-else-if="prompt.kind.tag === 'ChooseFromCards'" class="actions">
+      <template v-if="itsMine">
+        <div class="picks">
+          <button
+            v-for="o in cardChoices"
+            :key="o.key"
+            type="button"
+            class="pick"
+            :class="{ selected: picks.includes(o.key) }"
+            @click="togglePick(o.key)"
+          >
+            {{ o.label }}
+          </button>
+          <p v-if="cardChoices.length === 0" class="empty">{{ t('game.prompt.no_eligible') }}</p>
+        </div>
+        <div class="confirm">
+          <button type="button" :disabled="!minOk" @click="submitUnits">
+            {{ t('game.prompt.confirm_n', { n: picks.length, max: prompt.kind.maxPick }) }}
+          </button>
+          <button v-if="prompt.kind.minPick === 0" type="button" @click="submitNone">
+            {{ t('game.prompt.skip') }}
+          </button>
+        </div>
+      </template>
+      <template v-else>
+        <em>{{ t('game.prompt.waiting') }}</em>
       </template>
     </div>
 
@@ -260,12 +335,12 @@ function submitTargetOption(o: TargetOption) {
             "
             @click="submitAmount"
           >
-            Confirm
+            {{ t('game.prompt.confirm') }}
           </button>
         </div>
       </template>
       <template v-else>
-        <em>Waiting…</em>
+        <em>{{ t('game.prompt.waiting') }}</em>
       </template>
     </div>
 
@@ -282,11 +357,13 @@ function submitTargetOption(o: TargetOption) {
           >
             {{ targetOptionLabel(o) }}
           </button>
-          <p v-if="prompt.kind.options.length === 0" class="empty">No valid targets.</p>
+          <p v-if="prompt.kind.options.length === 0" class="empty">
+            {{ t('game.prompt.no_targets') }}
+          </p>
         </div>
       </template>
       <template v-else>
-        <em>Waiting…</em>
+        <em>{{ t('game.prompt.waiting') }}</em>
       </template>
     </div>
 
@@ -304,7 +381,7 @@ function submitTargetOption(o: TargetOption) {
           >
             {{ o.label }}
           </button>
-          <p v-if="sacrificeOptions.length === 0" class="empty">No eligible units.</p>
+          <p v-if="sacrificeOptions.length === 0" class="empty">{{ t('game.prompt.no_eligible') }}</p>
         </div>
         <div class="confirm">
           <button
@@ -312,12 +389,12 @@ function submitTargetOption(o: TargetOption) {
             :disabled="picks.length === 0 && !prompt.kind.optional && sacrificeOptions.length > 0"
             @click="picks.length > 0 ? submitUnits() : submitNone()"
           >
-            {{ picks.length > 0 ? 'Sacrifice' : 'Skip' }}
+            {{ picks.length > 0 ? t('game.prompt.sacrifice') : t('game.prompt.skip') }}
           </button>
         </div>
       </template>
       <template v-else>
-        <em>Waiting…</em>
+        <em>{{ t('game.prompt.waiting') }}</em>
       </template>
     </div>
   </aside>
@@ -325,15 +402,15 @@ function submitTargetOption(o: TargetOption) {
 
 <style scoped>
 .prompt-panel {
-  background: #2a2a32;
-  border: 2px solid #555;
-  border-radius: 6px;
+  background: var(--bg-elev-2, #2a2a32);
+  border: 1px solid var(--border, #555);
+  border-radius: var(--radius-md, 6px);
   padding: 0.75rem 1rem;
-  color: #f5f5f5;
+  color: var(--fg, #f5f5f5);
 }
 .prompt-panel.is-mine {
-  border-color: #f6b04c;
-  box-shadow: 0 0 8px rgba(246, 176, 76, 0.45);
+  border-color: var(--accent-strong, #f6b04c);
+  box-shadow: 0 0 8px rgba(224, 119, 94, 0.4);
 }
 .prompt-desc {
   margin: 0.25rem 0 0.5rem;
@@ -343,20 +420,22 @@ function submitTargetOption(o: TargetOption) {
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-bottom: 0.5rem;
+  max-height: 40dvh;
+  overflow-y: auto;
 }
 .pick {
-  background: #3a3a44;
-  color: #f5f5f5;
-  border: 1px solid #555;
+  background: var(--bg, #3a3a44);
+  color: var(--fg, #f5f5f5);
+  border: 1px solid var(--border, #555);
   padding: 0.25rem 0.55rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm, 4px);
   cursor: pointer;
   min-height: 44px;
 }
 .pick.selected {
-  background: #f6b04c;
-  color: #1c1c20;
-  border-color: #f6b04c;
+  background: var(--accent, #f6b04c);
+  color: var(--on-accent, #1c1c20);
+  border-color: var(--accent, #f6b04c);
 }
 .confirm {
   display: flex;
@@ -371,33 +450,33 @@ function submitTargetOption(o: TargetOption) {
 .amount-input {
   width: 5rem;
   min-height: 44px;
-  background: #3a3a44;
-  color: #f5f5f5;
-  border: 1px solid #555;
-  border-radius: 4px;
+  background: var(--bg, #3a3a44);
+  color: var(--fg, #f5f5f5);
+  border: 1px solid var(--border, #555);
+  border-radius: var(--radius-sm, 4px);
   padding: 0 0.6rem;
   font-size: 1rem;
 }
 .amount-bounds {
-  color: #aaa;
+  color: var(--fg-faint, #aaa);
   font-size: 0.85rem;
 }
 .confirm button {
   min-height: 44px;
   padding: 0 1rem;
-  background: #f6b04c;
-  color: #1c1c20;
+  background: var(--accent, #f6b04c);
+  color: var(--on-accent, #1c1c20);
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm, 4px);
   cursor: pointer;
 }
 .confirm button:disabled {
-  background: #555;
-  color: #999;
+  background: var(--bg, #555);
+  color: var(--fg-faint, #999);
   cursor: not-allowed;
 }
 .empty {
-  color: #888;
+  color: var(--fg-faint, #888);
   font-style: italic;
   margin: 0;
 }

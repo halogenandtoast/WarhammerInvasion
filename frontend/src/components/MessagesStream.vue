@@ -6,7 +6,7 @@
 // The parent passes already-merged + sorted messages and the
 // race-class lookup so this component stays pure-render.
 
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ChatLine, LogEntry } from '../api/protocol'
 import { formatTime } from '../lib/format'
@@ -31,6 +31,20 @@ const { t } = useI18n({ useScope: 'global' })
 
 const scrollEl = useAutoScroll(() => props.messages.length)
 const isEmpty = computed(() => props.messages.length === 0)
+
+// Cap the DOM at the most recent entries — long games accumulate
+// hundreds of log lines and rendering them all makes every snapshot
+// re-render slower. "Show earlier" reveals the rest on demand.
+const RENDER_CAP = 120
+const showAll = ref(false)
+const visibleMessages = computed(() =>
+  showAll.value || props.messages.length <= RENDER_CAP
+    ? props.messages
+    : props.messages.slice(-RENDER_CAP),
+)
+const hiddenCount = computed(() =>
+  showAll.value ? 0 : Math.max(0, props.messages.length - RENDER_CAP),
+)
 </script>
 
 <template>
@@ -39,7 +53,12 @@ const isEmpty = computed(() => props.messages.length === 0)
       {{ t('game.messages.empty') }}
     </div>
     <ol v-else class="messages-list" role="log" aria-live="polite">
-      <template v-for="(msg, i) in messages" :key="`${msg.at}-${i}`">
+      <li v-if="hiddenCount > 0" class="messages-more">
+        <button type="button" @click="showAll = true">
+          {{ t('game.messages.show_earlier', { n: hiddenCount }) }}
+        </button>
+      </li>
+      <template v-for="(msg, i) in visibleMessages" :key="`${msg.at}-${i}`">
         <li
           v-if="msg.kind === 'log'"
           class="log-line"
@@ -87,6 +106,25 @@ const isEmpty = computed(() => props.messages.length === 0)
   gap: 0.3rem;
   font-size: 0.82rem;
   line-height: 1.35;
+}
+
+.messages-more {
+  display: flex;
+  justify-content: center;
+  padding: 0.15rem 0;
+}
+.messages-more button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-dim);
+  font-size: 0.72rem;
+  padding: 0.2rem 0.7rem;
+  cursor: pointer;
+}
+.messages-more button:hover {
+  color: var(--fg);
+  border-color: var(--fg-faint);
 }
 
 /* ─── log entries (engine transcript) ─── */

@@ -40,7 +40,11 @@ contestedFortress = supportCard "core-112" "Contested Fortress" do
   trait Building
   limited
   body "Limited (you cannot play more than one limited card per turn). Cancel 1 damage to your capital each turn."
-  onMyTurnBegin \_owner self -> scheduleCapitalShield self.controller
+  -- Evaluated live by the engine's capital-damage pipeline: cancels 1
+  -- point per turn on EITHER player's turn (the old turn-begin token
+  -- was wiped at the opponent's BeginTurn, so it never protected
+  -- against actual attacks).
+  capitalShieldEachTurn
 
 contestedStronghold :: CardDef Support
 contestedStronghold = supportCard "core-113" "Contested Stronghold" do

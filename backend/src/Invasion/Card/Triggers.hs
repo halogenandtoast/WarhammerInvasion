@@ -185,8 +185,30 @@ onMyPhaseEnd
   -> CardBuilder k ()
 onMyPhaseEnd phase handler = onReceive $ Receive \msg owner self -> case msg of
   EndPhase p
-    | p == phase, owner.key == self.controller ->
-        handler owner self
+    | p == phase -> do
+        -- 'EndPhase' carries no player; phases belong to the player
+        -- whose turn it is, so gate on the current player. (The
+        -- 'owner' record passed by dispatch is always the
+        -- controller's, so comparing it to 'self.controller' would
+        -- be vacuous and the trigger would also fire on the
+        -- opponent's phases.)
+        g <- getGame
+        when (g.currentPlayer == self.controller) $ handler owner self
+  _ -> pure ()
+
+-- | "At the beginning of phase P on my controller's turn." Used by
+-- Temple of Shallya ("at the beginning of your kingdom phase…").
+onMyPhaseBegin
+  :: forall k
+   . HasField "controller" (InPlay k) PlayerKey
+  => Phase
+  -> (forall m. TriggerM m => Player -> InPlay k -> m ())
+  -> CardBuilder k ()
+onMyPhaseBegin phase handler = onReceive $ Receive \msg owner self -> case msg of
+  BeginPhase p
+    | p == phase -> do
+        g <- getGame
+        when (g.currentPlayer == self.controller) $ handler owner self
   _ -> pure ()
 
 -- | "When ANY 'BeginTurn' fires." The handler receives the turn owner

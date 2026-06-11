@@ -43,11 +43,11 @@ zhufbarEngineers = unitCard "core-002" "Zhufbar Engineers" do
   hitPoints 3
   trait Engineer
   body "Forced: After this unit leaves play, each opponent must sacrifice a unit in this corresponding zone."
-  onSelfLeavesPlay \_owner self -> do
-    let opp = self.controller.next
-    withTarget opp
-      (UnitMatching \_ _ u -> u.controller == opp && u.zone == self.zone)
-      destroyUnit
+  onSelfLeavesPlay \_owner self ->
+    -- Forced: the opponent MUST sacrifice (their choice of which
+    -- unit); a declinable target prompt would let them skip it.
+    mustSacrificeInZone self.controller.next self.zone
+      "Zhufbar Engineers: sacrifice a unit in this zone."
 
 hammererOfKarakAzul :: CardDef Unit
 hammererOfKarakAzul = unitCard "core-003" "Hammerer of Karak Azul" do
@@ -294,7 +294,17 @@ grudgeThrowerAssault = tacticCard "core-022" "Grudge Thrower Assault" do
   cost 2
   loyalty 3
   body "Play during combat, after damage has been assigned. Action: Destroy one target attacking unit."
-  playableWhen hasEnemyAttacker
+  -- "After damage has been assigned": only the assign-response and
+  -- post-apply windows qualify. Without the window gate this could
+  -- kill an attacker before its damage was pooled, which is strictly
+  -- stronger than the printed timing.
+  playableWhen \g pk ->
+    hasEnemyAttacker g pk
+      && case g.actionWindow of
+        Just aw ->
+          aw.trigger
+            `elem` [AfterAssignCombatDamage, AfterApplyCombatDamage]
+        Nothing -> False
   whenResolved \self ->
     withTarget self.controller attackingUnit \k -> destroyUnit k
 
@@ -304,33 +314,18 @@ demolition = tacticCard "core-023" "Demolition!" do
   cost 2
   loyalty 1
   body "Action: Destroy one target support card or development."
-  -- Two-prong: if an enemy support exists we route through the
-  -- existing tactic-targets pipeline (which pre-prompts at play
-  -- time). Otherwise resolve a development pick. Each resolution
-  -- path destroys the right kind; together they cover the printed
-  -- "support or development" choice without needing a unified
-  -- mixed-target picker.
-  playableWhen \g pk -> hasEnemySupport g pk || hasAnyDevelopment g
-  tacticTargets SupportTargetSchema
-  onResolveEnemySupport \_pk s -> destroySupport s.key
-  whenResolved \self -> do
-    g <- getGame
-    let pk = self.controller
-    -- Only fire the development path if the support path didn't
-    -- claim the resolution. The engine fires both handlers for the
-    -- same TacticResolved; harmless because destroySupport just
-    -- runs once on its enemy pick. To avoid a double development
-    -- destroy, gate this branch on "no enemy supports in play".
-    unless (hasEnemySupport g pk) $
-      withTarget pk AnyDevelopmentZone \(owner, zk) ->
-        destroyDevelopment owner zk
-
--- | True if any zone (either player's) has at least one development.
-hasAnyDevelopment :: Game -> Bool
-hasAnyDevelopment g =
-  let withDev :: [Zone] -> Bool
-      withDev zs = any (\z -> case z.developments of Developments n -> n > 0) zs
-   in withDev g.player1.capital.zones || withDev g.player2.capital.zones
+  -- One unified picker over both prongs: any in-play support card
+  -- (friendly or enemy, free-standing or attached) or any development
+  -- (either player's). The printed text has no "enemy" restriction
+  -- and the player must be free to pick a development even when
+  -- supports exist.
+  playableWhen \g pk ->
+    hasTarget (AnySupportCard `Or` AnyDevelopmentZone) g pk
+  whenResolved \self ->
+    withTarget self.controller (AnySupportCard `Or` AnyDevelopmentZone) \case
+      TargetSupportOption k -> destroySupport k
+      TargetZoneOption owner zk -> destroyDevelopment owner zk
+      _ -> pure ()
 
 wakeTheMountain :: CardDef Tactic
 wakeTheMountain = tacticCard "core-024" "Wake the Mountain" do
@@ -351,6 +346,9 @@ masterRuneOfValaya = tacticCard "core-025" "Master Rune of Valaya" do
   loyalty 1
   traits [Spell, Rune]
   body "Action: Cancel all damage assigned during the battlefield phase this turn."
-  whenResolved \_ -> do
+  -- Clears every pending combat assignment (units and zone spillover)
+  -- but leaves the combat itself in flight: the apply step then
+  -- commits nothing, and Scout / end-of-combat hooks still run as
+  -- normal.
+  whenResolved \_ ->
     push CancelAllAssignedDamage
-    push CancelAllBattlefieldDamageThisTurn

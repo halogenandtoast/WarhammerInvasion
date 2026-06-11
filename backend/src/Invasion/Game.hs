@@ -184,6 +184,10 @@ data PromptKind
 data TargetOption
   = TargetUnitOption UnitKey
   | TargetZoneOption PlayerKey ZoneKind
+  | TargetSupportOption UnitKey
+    -- ^ An in-play support card (free-standing or attached),
+    -- identified by its support key. Used by "destroy one target
+    -- support card or development"-style unified pickers.
   deriving stock (Show, Eq)
 
 -- | Predicate describing which units a 'ChooseUnits' prompt accepts.
@@ -447,12 +451,16 @@ data Game = Game
     -- action window has neither a Tactic card in hand nor an in-play
     -- own card carrying an action ability. Combat sub-step windows
     -- already auto-pass regardless of this flag.
-  , capitalShields :: Map PlayerKey Int
-    -- ^ Per-player count of "cancel the next 1 capital damage this
-    -- turn" tokens. Decremented when 'DealDamageToZone' fires and
-    -- reset to 0 at 'BeginTurn'. Today only Contested Fortress
-    -- writes to this; future cards that cancel capital damage add
-    -- to the same pool.
+  , capitalDefenseUsed :: Map UnitKey Int
+    -- ^ Per-source-card usage counter for once-per-turn capital
+    -- defenses ("cancel 1 damage to your capital each turn",
+    -- "redirect the first point of damage done to your capital each
+    -- turn"). Keyed by the in-play support / quest key supplying the
+    -- defense; bumped when 'DealDamageToZone' consumes it and reset
+    -- at 'BeginTurn'. Evaluating eligibility live at damage time
+    -- (instead of arming tokens at turn start) is what makes these
+    -- defenses work on the opponent's turn, when attacks actually
+    -- happen.
   , pendingUnitDiscount :: Map PlayerKey Int
     -- ^ Per-player "next unit you play costs N less". Decremented
     -- to 0 on first 'PlayUnit'. Reset at 'BeginTurn'. Written by

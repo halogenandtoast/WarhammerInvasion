@@ -2,10 +2,12 @@
 module Invasion.Types (module Invasion.Types) where
 
 import Data.String (IsString)
+import Data.Text qualified as T
 import GHC.Records
 import Invasion.Prelude
 import Data.Aeson
 import Data.Aeson.TH
+import Data.Aeson.Types (toJSONKeyText)
 
 newtype CardCode = CardCode String
   deriving newtype (Eq, Ord, Show, IsString, ToJSON, FromJSON)
@@ -75,6 +77,15 @@ mconcat
   ]
 
 instance ToJSONKey (Ref k)
-instance ToJSONKey ZoneKind
-instance ToJSONKey UnitKey
-instance ToJSONKey PlayerKey
+
+-- Text-keyed map encodings: the empty-body default is
+-- 'ToJSONKeyValue', which serializes a @Map k v@ as an ARRAY of
+-- [key, value] pairs. The frontend indexes 'handPlayability' (and the
+-- wire redaction layer walks 'developmentCards') as JSON OBJECTS, so
+-- these keys must encode as text.
+instance ToJSONKey ZoneKind where
+  toJSONKey = toJSONKeyText (T.pack . show)
+instance ToJSONKey UnitKey where
+  toJSONKey = toJSONKeyText \(UnitKey n) -> T.pack (show n)
+instance ToJSONKey PlayerKey where
+  toJSONKey = toJSONKeyText (T.pack . show)

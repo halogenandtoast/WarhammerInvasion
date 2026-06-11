@@ -25,9 +25,13 @@ import type {
 } from '../api/protocol'
 import PlaySide from '../components/PlaySide.vue'
 import CardOverlay from '../components/CardOverlay.vue'
+import AttackArrows from '../components/AttackArrows.vue'
 import { cardHover } from '../stores/cardHover'
 
 onBeforeUnmount(() => cardHover.clear())
+
+// Root element of the table — the coordinate space for combat arrows.
+const tableEl = ref<HTMLElement | null>(null)
 
 const props = defineProps<{
   engine: EngineGame
@@ -44,8 +48,14 @@ const mySeatKey = computed<PlayerKey | null>(() => {
   return row.seat === 'Player1' ? 'Player1' : 'Player2'
 })
 
-const opponentSeatKey = computed<PlayerKey | null>(() =>
-  mySeatKey.value === 'Player1' ? 'Player2' : mySeatKey.value === 'Player2' ? 'Player1' : null,
+// Spectators (and guests) get Player1's side of the table at the
+// bottom with all interactions disabled — both hands arrive redacted
+// from the server anyway.
+const isSeated = computed(() => mySeatKey.value !== null)
+const viewSeatKey = computed<PlayerKey>(() => mySeatKey.value ?? 'Player1')
+
+const opponentSeatKey = computed<PlayerKey>(() =>
+  viewSeatKey.value === 'Player1' ? 'Player2' : 'Player1',
 )
 
 function playerFor(k: PlayerKey | null): EnginePlayer | null {
@@ -53,7 +63,7 @@ function playerFor(k: PlayerKey | null): EnginePlayer | null {
   return k === 'Player1' ? props.engine.player1 : props.engine.player2
 }
 
-const me = computed(() => playerFor(mySeatKey.value))
+const me = computed(() => playerFor(viewSeatKey.value))
 const opponent = computed(() => playerFor(opponentSeatKey.value))
 
 function seatName(k: PlayerKey): string {
@@ -78,14 +88,12 @@ const finished = computed(() => {
 // ---- in-play units (split per player so each PlaySide gets only its own) ----
 
 const myUnits = computed<EngineUnit[]>(() => {
-  const k = mySeatKey.value
-  if (!k) return []
+  const k = viewSeatKey.value
   return props.engine.units.filter((u) => u.controller === k)
 })
 
 const opponentUnits = computed<EngineUnit[]>(() => {
   const k = opponentSeatKey.value
-  if (!k) return []
   return props.engine.units.filter((u) => u.controller === k)
 })
 
@@ -93,8 +101,7 @@ const opponentUnits = computed<EngineUnit[]>(() => {
 // host unit (rendered by PlaySide via `u.attachments`), so we filter
 // them out here.
 const mySupports = computed<EngineSupport[]>(() => {
-  const k = mySeatKey.value
-  if (!k) return []
+  const k = viewSeatKey.value
   return props.engine.supports.filter(
     (s) => s.controller === k && s.attachedTo === null,
   )
@@ -102,7 +109,6 @@ const mySupports = computed<EngineSupport[]>(() => {
 
 const opponentSupports = computed<EngineSupport[]>(() => {
   const k = opponentSeatKey.value
-  if (!k) return []
   return props.engine.supports.filter(
     (s) => s.controller === k && s.attachedTo === null,
   )
@@ -113,7 +119,7 @@ function legendFor(k: PlayerKey | null): EngineLegend | null {
   if (!k) return null
   return props.engine.legends.find((l) => l.controller === k) ?? null
 }
-const myLegend = computed(() => legendFor(mySeatKey.value))
+const myLegend = computed(() => legendFor(viewSeatKey.value))
 const opponentLegend = computed(() => legendFor(opponentSeatKey.value))
 
 // In-play quests, split by zoneOwner (visual placement). A quest's
@@ -121,14 +127,12 @@ const opponentLegend = computed(() => legendFor(opponentSeatKey.value))
 // the opponent's play area while staying under its controller's
 // control. PlaySide renders an overlay banner in that case.
 const myQuests = computed<EngineQuest[]>(() => {
-  const k = mySeatKey.value
-  if (!k) return []
+  const k = viewSeatKey.value
   return props.engine.quests.filter((q) => q.zoneOwner === k)
 })
 
 const opponentQuests = computed<EngineQuest[]>(() => {
   const k = opponentSeatKey.value
-  if (!k) return []
   return props.engine.quests.filter((q) => q.zoneOwner === k)
 })
 
@@ -155,12 +159,6 @@ interface OpenPlay {
 }
 const openPlay = ref<OpenPlay | null>(null)
 
-function isBattlefieldOnly(card: EngineCardDef): boolean {
-  return card.keywords.some(
-    (k) => k && typeof k === 'object' && (k as { tag?: string }).tag === 'BattlefieldOnly',
-  )
-}
-
 function isAttachment(card: EngineCardDef): boolean {
   return card.traits.includes('Attachment')
 }
@@ -175,15 +173,17 @@ function issueFor(card: EngineCard): PlayabilityIssue | null {
   return map[String(card.key)] ?? null
 }
 
-const canPlayCard = (card: EngineCard): boolean => issueFor(card) === null
+const canPlayCard = (card: EngineCard): boolean =>
+  isSeated.value && issueFor(card) === null
 
 // Allow clicking ANY card in our hand so an unplayable card can still
 // surface "here's why". PlaySide's `cardIsUnplayable` controls the
 // dimmed visual style.
-const cardIsUnplayable = (card: EngineCard): boolean => issueFor(card) !== null
+const cardIsUnplayable = (card: EngineCard): boolean =>
+  isSeated.value && issueFor(card) !== null
 
 function onHandCardClick(payload: { card: EngineCard | null; rect: DOMRect }) {
-  if (!payload.card) return
+  if (!payload.card || !isSeated.value) return
   openPlay.value = {
     card: payload.card,
     anchor: payload.rect,
@@ -205,11 +205,33 @@ function unplayableReason(issue: PlayabilityIssue): string {
   return t(base)
 }
 
-// Zones a unit/support card may legally enter. BattlefieldOnly cards
-// can only go into the battlefield; everything else can enter any zone.
+// Zones a unit/support card may legally enter, mirroring the engine's
+// zone-entry keywords.
 function legalZones(card: EngineCardDef): ZoneKind[] {
-  if (isBattlefieldOnly(card)) return ['BattlefieldZone']
+  const tags = card.keywords
+    .map((k) =>
+      k && typeof k === 'object' ? ((k as { tag?: string }).tag ?? '') : String(k),
+    )
+    .filter(Boolean)
+  if (tags.includes('BattlefieldOnly')) return ['BattlefieldZone']
+  if (tags.includes('KingdomOnly')) return ['KingdomZone']
+  if (tags.includes('QuestOnly')) return ['QuestZone']
   return ['KingdomZone', 'QuestZone', 'BattlefieldZone']
+}
+
+// Drag-to-play drop from PlaySide: same wire frame as the popover's
+// zone buttons.
+function onPlayToZone(payload: { card: EngineCard; zone: ZoneKind }) {
+  if (!isSeated.value) return
+  game.playCard(payload.card.key, payload.zone, null)
+  closePopover()
+}
+
+// The zone marker shown on whichever side is being attacked.
+function combatTargetZoneFor(k: PlayerKey | null): ZoneKind | null {
+  const c = props.engine.combat
+  if (!c || !k) return null
+  return c.defendingPlayer === k ? c.targetZone : null
 }
 
 function zoneLabel(z: ZoneKind): string {
@@ -304,10 +326,10 @@ const popoverStyle = computed<Record<string, string>>(() => {
 </script>
 
 <template>
-  <div class="play-table">
+  <div ref="tableEl" class="play-table">
     <div class="half top">
       <PlaySide
-        v-if="opponent && opponentSeatKey"
+        v-if="opponent"
         :player="opponent"
         :units="opponentUnits"
         :supports="opponentSupports"
@@ -318,27 +340,33 @@ const popoverStyle = computed<Record<string, string>>(() => {
         :seat-names="seatNames"
         :is-active="engine.currentPlayer === opponentSeatKey"
         :is-first-player="engine.firstPlayer === opponentSeatKey"
+        :combat-target-zone="combatTargetZoneFor(opponentSeatKey)"
       />
     </div>
 
     <div class="half bottom">
       <PlaySide
-        v-if="me && mySeatKey"
+        v-if="me"
         :player="me"
         :units="myUnits"
         :supports="mySupports"
         :quests="myQuests"
         :legend="myLegend"
         perspective="self"
-        :seat-name="seatName(mySeatKey)"
+        :seat-name="seatName(viewSeatKey)"
         :seat-names="seatNames"
-        :is-active="engine.currentPlayer === mySeatKey"
-        :is-first-player="engine.firstPlayer === mySeatKey"
+        :is-active="engine.currentPlayer === viewSeatKey"
+        :is-first-player="engine.firstPlayer === viewSeatKey"
         :can-play-card="canPlayCard"
         :card-is-unplayable="cardIsUnplayable"
+        :combat-target-zone="combatTargetZoneFor(viewSeatKey)"
         @hand-card-click="onHandCardClick"
+        @play-to-zone="onPlayToZone"
       />
     </div>
+
+    <!-- Combat arrows: attackers → attacked zone / legend. -->
+    <AttackArrows :engine="engine" :root="tableEl" />
 
     <!-- Hover-zoom preview for face-up cards. Teleports to <body> so
          the enlarged image isn't clipped by the play-table container. -->

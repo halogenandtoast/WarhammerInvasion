@@ -257,17 +257,12 @@ data Message where
     -- ^ Add one "next card action this player fires has its
     -- effect cancelled" token. Cost is still paid; only the body
     -- is suppressed. Bright Wizard Apprentice writes to this.
-  -- Capital damage cancellation (per turn, once)
-  ScheduleCancelNextCapitalDamage :: PlayerKey -> Message
   -- One-shot next-unit modifiers (We'z Bigga!)
   ScheduleNextUnitDiscount :: PlayerKey -> Int -> Message
     -- ^ Add N to this player's "next unit costs N less" budget.
     -- Resets at end of turn or as soon as the player plays a unit.
   ScheduleNextUnitDamage :: PlayerKey -> Int -> Message
     -- ^ The next unit this player plays enters with N damage.
-    -- ^ Contested Fortress. Arms a one-shot cancel of the next
-    -- damage point about to land on the named player's capital
-    -- this turn. Reset at start of each turn.
   -- Legends
   PlayLegend :: PlayerKey -> UnitKey -> Message
     -- ^ Play a legend from hand directly onto the controller's capital
@@ -310,9 +305,6 @@ data Message where
     -- ^ N damage to every unit currently engaged in combat (attackers
     -- and defenders). No-op outside combat.
   -- Cancellation
-  CancelAllBattlefieldDamageThisTurn :: Message
-    -- ^ Master Rune of Valaya. Suppress all subsequent damage assigned
-    -- during this battlefield phase by clearing combat resolution.
   CancelAssignedDamageOnUnit :: UnitKey -> Int -> Message
     -- ^ Defenders of the Faith. Reduce cancellable damage staged
     -- against the named unit by up to N (floor 0). No-op outside
