@@ -10,9 +10,11 @@ module Main (main) where
 
 import Data.Aeson (Value (..), toJSON)
 import Data.Aeson.KeyMap qualified as KM
+import Data.Map.Strict qualified as Map
 import Invasion.Capital (Capital (..), Damage (..), Zone (..))
-import Invasion.Card (Card (..), SomeCardDef (..))
+import Invasion.Card (Card (..), SomeCardDef (..), allCards)
 import Invasion.CardDef (CardDef (..), Keyword (..))
+import Invasion.Modifier
 import Invasion.Engine
 import Invasion.Entity (UnitDetails (..))
 import Invasion.Game
@@ -412,6 +414,109 @@ main = do
         ((activePlayer gF5).capital.quest.damage == Damage 2)
     _ -> do
       putStrLn "  FAIL fortress deck dealt no hand"
+      exitFailure
+
+  -- ------------------------------------------------------------------
+  -- Corruption cycle smoke tests.
+  -- ------------------------------------------------------------------
+
+  -- Registry: every battle-pack code in the cycle resolves in allCards.
+  let pad3 n = let str = show (n :: Int) in replicate (3 - length str) '0' <> str
+      corruptionCodes =
+        [ CardCode (pre <> "-" <> pad3 n)
+        | (pre, lo, hi) <-
+            [ ("the-skavenblight-threat", 1, 20)
+            , ("path-of-the-zealot", 21, 40)
+            , ("tooth-and-claw", 41, 60)
+            , ("the-deathmaster-s-dance", 61, 80)
+            , ("the-warpstone-chronicles", 81, 100)
+            , ("arcane-fire", 101, 120)
+            ]
+        , n <- [lo .. hi]
+        ]
+      missingCodes = [c | c <- corruptionCodes, Map.notMember c allCards]
+  check
+    ( "corruption cycle: all 120 cards registered"
+        <> (if null missingCodes then "" else " — missing " <> show missingCodes)
+    )
+    (null missingCodes)
+
+  -- Unit resource tokens: Silver Helm Detachment enters play with 3.
+  gT1 <- (`applyMessage` BeginGame) =<< mkMonoGame "the-deathmaster-s-dance-067" HighElf
+  case firstHandKeys 1 gT1 of
+    [tk] -> do
+      gT2 <- applyMessage gT1 (PutUnitIntoPlay gT1.currentPlayer tk KingdomZone)
+      check "tokens: Silver Helm Detachment enters with 3 resource tokens"
+        (any (\u -> u.key == tk && u.tokens == 3) gT2.units)
+    _ -> do
+      putStrLn "  FAIL token deck dealt no hand"
+      exitFailure
+
+  -- Control changes: TakeControlOfUnit flips the controller while the
+  -- unit stays in the same zone kind (Veteran Sellswords).
+  gTC1 <- (`applyMessage` BeginGame) =<< mkMonoGame "path-of-the-zealot-038" Dwarf
+  case firstHandKeys 1 gTC1 of
+    [vk] -> do
+      let pkV = gTC1.currentPlayer
+      gTC2 <- applyMessages gTC1
+        [PutUnitIntoPlay pkV vk BattlefieldZone, TakeControlOfUnit pkV.next vk]
+      check "control: TakeControlOfUnit flips the controller"
+        ( any
+            (\u -> u.key == vk && u.controller == pkV.next && u.zone == BattlefieldZone)
+            gTC2.units
+        )
+    _ -> do
+      putStrLn "  FAIL control deck dealt no hand"
+      exitFailure
+
+  -- Draw caps (Infiltrate): with a cap of 1, the second standard draw
+  -- this turn whiffs.
+  gDC1 <- (`applyMessage` BeginGame) =<< mkMonoGame "core-001" Dwarf
+  let pkD = gDC1.currentPlayer
+      handD0 = length (activePlayer gDC1).hand
+  gDC2 <- applyMessages gDC1
+    [ SetDrawCap pkD 1
+    , Draw (Drawing StandardDraw pkD)
+    , Draw (Drawing StandardDraw pkD)
+    ]
+  check "draw cap: only one of two draws lands"
+    (length (activePlayer gDC2).hand == handD0 + 1)
+
+  -- Damage shields (Steel's Bane): the modifier soaks damage and
+  -- carries its remaining budget forward.
+  gDS1 <- (`applyMessage` BeginGame) =<< mkMonoGame "core-011" Dwarf
+  case firstHandKeys 1 gDS1 of
+    [sk] -> do
+      let pkS = gDS1.currentPlayer
+      gDS2 <- applyMessages gDS1
+        [ PutUnitIntoPlay pkS sk KingdomZone
+        , InstallModifier (UnitRef sk) (Modifier (DamageShield 10) EndOfTurn)
+        , DealDamageToUnit sk 3
+        ]
+      check "shield: damage fully cancelled"
+        (any (\u -> u.key == sk && u.damage == Damage 0) gDS2.units)
+      gDS3 <- applyMessage gDS2 (DealDamageToUnit sk 8)
+      check "shield: depleted budget lets the overflow through"
+        (any (\u -> u.key == sk && u.damage == Damage 1) gDS3.units)
+    _ -> do
+      putStrLn "  FAIL shield deck dealt no hand"
+      exitFailure
+
+  -- X hit points (Cold One Chariot): HP tracks developments in the
+  -- zone, and the stat sweep clears a chariot whose X collapsed.
+  gCC1 <- (`applyMessage` BeginGame) =<< mkMonoGame "tooth-and-claw-053" DarkElf
+  let pkCC = gCC1.currentPlayer
+  gCC2 <- applyMessage gCC1 (AddDevelopment pkCC KingdomZone)
+  case firstHandKeys 1 gCC2 of
+    [ck] -> do
+      gCC3 <- applyMessage gCC2 (PutUnitIntoPlay pkCC ck KingdomZone)
+      check "chariot: X hit points = developments in its zone"
+        (any (\u -> u.key == ck && u.effectiveMaxHP == 1) gCC3.units)
+      gCC4 <- applyMessage gCC3 (DestroyDevelopment pkCC KingdomZone)
+      check "chariot: destroyed when its last development goes"
+        (not (any (\u -> u.key == ck) gCC4.units))
+    _ -> do
+      putStrLn "  FAIL chariot deck dealt no hand"
       exitFailure
 
   -- Wire redaction: hidden information must not reach the wrong

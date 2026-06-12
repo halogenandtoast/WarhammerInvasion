@@ -382,6 +382,40 @@ sacrificeOwnUnit pk desc cont = do
       cont chosen
     _ -> pure ()
 
+-- | "Pick exactly one of these units" — a FORCED choice (the player
+-- cannot decline while candidates exist). Used by effects whose text
+-- compels a pick: "he must return one of his attacking units"
+-- (Tyriel), "destroy a unit that does not share …" (Zealot Hunter),
+-- "the unit with the lowest printed cost must be sacrificed" (Easy
+-- Pickin's). Silently a no-op with no candidates.
+forcePickUnit
+  :: (HasPromptIO m, HasGame m)
+  => PlayerKey -> [UnitKey] -> Text -> (UnitKey -> m ()) -> m ()
+forcePickUnit _ [] _ _ = pure ()
+forcePickUnit pk candidates desc k = do
+  answer <- askPrompt Prompt
+    { player = pk
+    , kind = ChooseUnits
+        { filterSpec = UnitsFromList candidates
+        , minPick = 1
+        , maxPick = 1
+        , description = desc
+        }
+    , callback = CallbackInlinePrompt
+    }
+  case answer of
+    PickUnits (chosen : _) | chosen `elem` candidates -> k chosen
+    -- Declined / illegal answer on a forced pick: fall back to the
+    -- first candidate so the printed "must" still resolves.
+    _ -> k (head candidates)
+
+-- | @hasTrait t x@ — does the in-play card (or hand card def) carry
+-- the printed trait? Works across kinds via the @cardDef@ field.
+hasTrait
+  :: forall k a. HasField "cardDef" a (CardDef k)
+  => Trait -> a -> Bool
+hasTrait t x = t `elem` x.cardDef.traits
+
 -- | "Pick up to N from these specific units." Fires a prompt
 -- restricted to the supplied candidate list (typically computed by
 -- the card — e.g. "the attacking units" / "the units in this
@@ -494,14 +528,23 @@ onFindSupport pred cards action =
 -- (today: always; future: gated on interrupt state once we model
 -- "cannot search" effects), so any statement after the find verbs
 -- inside the body is the card text's "Then …" chain.
+--
+-- The depth is widened by in-play 'searchDepthBonus' supports the
+-- searching player controls (Scout Camp: +1 per copy).
 searchTopOfDeck
   :: HasGame m
   => PlayerKey -> Int -> (SearchResult -> m ()) -> m ()
 searchTopOfDeck pk n body = do
   let resolved = True  -- TODO: gate on interrupt state once we have it
   when resolved $ do
+    g <- getGame
+    let bonus =
+          sum
+            [ s.cardDef.extras.searchDepthBonus g s pk
+            | s <- g.supports
+            ]
     player <- getPlayer pk
-    body SearchResult {cards = take n player.deck}
+    body SearchResult {cards = take (n + bonus) player.deck}
 
 -- | "Put that support card into play [in the given zone]." Plays the
 -- named support directly from the player's deck.
@@ -567,6 +610,38 @@ buffPower target n = PendingBuff target (GainPower n)
 -- in the engine. Vile Sorceress, Horrific Mutation.
 debuffHP :: UnitKey -> Int -> PendingBuff
 debuffHP target n = PendingBuff target (LoseHitPoints n)
+
+-- | "Target unit gets +N hit points." We Need Your Blood.
+buffHP :: UnitKey -> Int -> PendingBuff
+buffHP target n = PendingBuff target (GainHitPoints n)
+
+-- | "Cancel the next N damage that would be dealt to target unit."
+-- Steel's Bane.
+damageShield :: UnitKey -> Int -> PendingBuff
+damageShield target n = PendingBuff target (DamageShield n)
+
+-- | "The next N damage dealt to [target] are redirected to [dst]."
+-- Blessing of Valaya.
+redirectNextDamage :: UnitKey -> Int -> UnitKey -> PendingBuff
+redirectNextDamage target n dst = PendingBuff target (RedirectShield n dst)
+
+-- | "This unit loses all Toughness." Morathi's Pegasus.
+loseAllToughness :: UnitKey -> PendingBuff
+loseAllToughness target = PendingBuff target LoseAllToughness
+
+-- | "Actions targeting this unit cost an additional N resources."
+-- Iron Discipline.
+imposeTargetTax :: UnitKey -> Int -> PendingBuff
+imposeTargetTax target n = PendingBuff target (TargetTaxBonus n)
+
+-- | "This unit deals +N damage in combat." Naggaroth Spearmen.
+buffCombatDamage :: UnitKey -> Int -> PendingBuff
+buffCombatDamage target n = PendingBuff target (GainCombatDamage n)
+
+-- | "Target unit must defend this turn, if able." Animosity,
+-- Alluring Daemonettes.
+mustDefend :: UnitKey -> PendingBuff
+mustDefend target = PendingBuff target MustDefend
 
 -- | "Target unit cannot attack." Franz's Decree.
 disableAttack :: UnitKey -> PendingBuff
@@ -895,6 +970,12 @@ data Target a where
     -- ^ Any in-play support card — free-standing or attached, either
     -- controller's. Used by "destroy one target support card"
     -- effects (Demolition!).
+  SupportMatching
+    :: (PlayerKey -> Game -> SupportDetails -> Bool) -> Target UnitKey
+    -- ^ An in-play support card (free-standing or attached)
+    -- satisfying the predicate. First arg is the picking player.
+    -- Used by "destroy one target Attachment card" effects (Vaul's
+    -- Unmaking).
   CapitalMatching
     :: (PlayerKey -> (PlayerKey, ZoneKind) -> Bool)
     -> Target (PlayerKey, ZoneKind)
@@ -999,6 +1080,11 @@ pickTarget pk = \case
     promptForOption pk opts >>= \case
       Just (TargetSupportOption k) -> pure (Just k)
       _ -> pure Nothing
+  SupportMatching p -> do
+    opts <- enumerateOptions pk (SupportMatching p)
+    promptForOption pk opts >>= \case
+      Just (TargetSupportOption k) -> pure (Just k)
+      _ -> pure Nothing
   CapitalMatching p -> do
     opts <- enumerateOptions pk (CapitalMatching p)
     promptForOption pk opts >>= \case
@@ -1086,6 +1172,8 @@ enumerateOptionsPure pk g = \case
   AnySupportCard ->
     [TargetSupportOption s.key | s <- g.supports]
       <> [TargetSupportOption a.key | u <- g.units, a <- u.attachments]
+  SupportMatching p ->
+    [TargetSupportOption s.key | s <- allInPlaySupports g, p pk g s]
   CapitalMatching p ->
     let zonesOf player =
           [ (player.key, z.kind)

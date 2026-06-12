@@ -458,6 +458,7 @@ tacticTargets schema = actionDef ActionDef
   , actionExtraCosts = []
   , actionTarget = schema
   , availableInZone = Nothing
+  , actionOpponentOnly = False
   , actionEffect = ActionEffect \_usage -> pure ()
   }
 
@@ -579,6 +580,7 @@ action name cost effect = actionDef ActionDef
   , actionExtraCosts = []
   , actionTarget = NoTargetSchema
   , availableInZone = Nothing
+  , actionOpponentOnly = False
   , actionEffect = ActionEffect effect
   }
 
@@ -605,6 +607,28 @@ actionWith name cost extras effect = actionDef ActionDef
   , actionExtraCosts = extras
   , actionTarget = NoTargetSchema
   , availableInZone = Nothing
+  , actionOpponentOnly = False
+  , actionEffect = ActionEffect effect
+  }
+
+-- | "Only an opponent may trigger this ability." (Morathi's Pegasus.)
+-- The opponent of the host's controller pays the cost and fires the
+-- effect; the engine refuses the controller's own trigger.
+actionOpponent
+  :: Text
+  -> Int
+  -> ( forall m
+      . (HasGame m, MonadIO m, HasQueue Message m, HasPromptIO m)
+     => ActionUsage k -> m ()
+     )
+  -> CardBuilder k ()
+actionOpponent name cost effect = actionDef ActionDef
+  { actionName = name
+  , actionCost = cost
+  , actionExtraCosts = []
+  , actionTarget = NoTargetSchema
+  , availableInZone = Nothing
+  , actionOpponentOnly = True
   , actionEffect = ActionEffect effect
   }
 
@@ -646,6 +670,7 @@ actionUnitSchema name cost schema body = actionDef ActionDef
   , actionCost = cost
   , actionTarget = schema
   , availableInZone = Nothing
+  , actionOpponentOnly = False
   , actionExtraCosts = []
   , actionEffect = ActionEffect \u -> case u.target of
       TargetUnit k -> body u k
@@ -668,6 +693,7 @@ actionEnemyZone name cost body = actionDef ActionDef
   , actionCost = cost
   , actionTarget = EnemyZoneTargetSchema
   , availableInZone = Nothing
+  , actionOpponentOnly = False
   , actionExtraCosts = []
   , actionEffect = ActionEffect \u -> case u.target of
       TargetZone owner z -> body u (owner, z)
@@ -708,6 +734,7 @@ spendTokens name n body = actionDef ActionDef
   , actionCost = 0
   , actionTarget = NoTargetSchema
   , availableInZone = Nothing
+  , actionOpponentOnly = False
   , actionExtraCosts = []
   , actionEffect = ActionEffect \u ->
       withQuest u.self.key \q -> when (q.tokens >= n) do

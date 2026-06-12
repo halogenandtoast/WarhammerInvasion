@@ -9,6 +9,7 @@
 -- printed with loyalty 0.
 module Invasion.Card.Defs.Neutral (module Invasion.Card.Defs.Neutral) where
 
+import Data.Map.Strict qualified as Map
 import Invasion.Capital
 import Invasion.Card.Builder
 import Invasion.Card.Effects
@@ -18,6 +19,7 @@ import Invasion.CardDef
 import Invasion.Entity (QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Game hiding (battlefield)
 import Invasion.Message
+import Invasion.Modifier
 import Invasion.Player
 import Invasion.Prelude
 import Invasion.Types
@@ -233,6 +235,439 @@ allianceOrcDarkElf = supportCard "core-127" "Alliance - Orc and Dark Elf" do
   trait Banner
   destructionOnly
   body "Destruction only. (This Alliance provides both an Orc and a Dark Elf loyalty symbol.)"
+
+-- The Corruption cycle ------------------------------------------------
+
+greyseerThanquol :: CardDef Unit
+greyseerThanquol = unitCard "the-skavenblight-threat-015" "Greyseer Thanquol" do
+  hero
+  trait Skaven
+  destructionOnly
+  cost 3
+  loyalty 0
+  power 1
+  hitPoints 1
+  body
+    "Limit one Hero per zone. Destruction only. This unit may attack from any zone. While \
+    \attacking, this unit gains {power} for each Skaven unit you control."
+  attacksFromZones [KingdomZone, QuestZone, BattlefieldZone]
+  effects \self owner -> do
+    g <- getGame
+    let skaven =
+          length
+            [ u
+            | u <- g.units
+            , u.controller == owner.key
+            , hasTrait Skaven u
+            ]
+    when (self.attacking && skaven > 0) $ gainPower self skaven
+
+clanRats :: CardDef Unit
+clanRats = unitCard "the-skavenblight-threat-016" "Clan Rats" do
+  trait Skaven
+  destructionOnly
+  cost 2
+  loyalty 0
+  power 1
+  hitPoints 1
+  body
+    "Destruction only. Action: Corrupt this unit to have one other target Skaven unit \
+    \gain {power} until the end of the turn."
+  actionWith "You go first" 0 [CorruptSelf] \usage ->
+    withTarget usage.user
+      (unitWhere \u -> hasTrait Skaven u && u.key /= usage.self.key)
+      \k -> until EndOfTurn $ buffPower k 1
+
+warpLightningCannon :: CardDef Support
+warpLightningCannon = supportCard "the-skavenblight-threat-017" "Warp Lightning Cannon" do
+  traits [Attachment, Weapon, Skaven]
+  destructionOnly
+  cost 2
+  loyalty 0
+  body
+    "Destruction only. Attach to a target unit. Corrupt that unit. Attached unit gains \
+    \{power}{power}{power} while attacking or defending."
+  onEnterPlay \_owner self -> for_ self.attachedTo corrupt
+  attachedTo \_self unit ->
+    when (unit.attacking || unit.defending) $ gainPower unit 3
+
+mariusTheRighteous :: CardDef Unit
+mariusTheRighteous = unitCard "the-skavenblight-threat-018" "Marius the Righteous" do
+  hero
+  trait WitchHunter
+  orderOnly
+  cost 4
+  loyalty 0
+  power 2
+  hitPoints 4
+  body
+    "Limit one Hero per zone. Order only. Quest. Action: Spend 1 resource to deal 1 damage \
+    \to one target corrupted unit in the battlefield."
+  quest $ action "Purge the unclean" 1 \usage ->
+    withTarget usage.user
+      (unitWhere \u -> u.corrupted && u.zone == BattlefieldZone)
+      \k -> dealDamage k 1
+
+abandonedMine :: CardDef Support
+abandonedMine = supportCard "the-skavenblight-threat-019" "Abandoned Mine" do
+  cost 4
+  loyalty 0
+  power 2
+  trait Building
+  body "Kingdom. Action: At the beginning of your turn, you may return one of your developments to its owner's hand."
+  kingdom $ onMyTurnBegin \_owner self -> do
+    g <- getGame
+    let pk = self.controller
+        me = playerOf pk g
+        devZones =
+          [ zk
+          | zk <- [KingdomZone, QuestZone, BattlefieldZone]
+          , not (null (Map.findWithDefault [] zk me.developmentCards))
+          ]
+    unless (null devZones) $
+      may pk "Abandoned Mine: return one of your developments to hand?" $
+        withTarget pk
+          (CapitalMatching \me' (owner, zk) -> owner == me' && zk `elem` devZones)
+          \(owner, zk) -> push (ReturnDevelopmentToHand owner zk)
+
+forge :: CardDef Support
+forge = supportCard "the-skavenblight-threat-020" "Forge" do
+  cost 2
+  loyalty 0
+  power 1
+  trait Building
+  body
+    "Kingdom. While you control two or more developments in this zone, lower the cost for \
+    \you to play Attachment cards by 1."
+  globalCostAdjust \g s pk filt ->
+    let me = playerOf s.controller g
+        Developments n = me.capital.kingdom.developments
+     in if pk == s.controller
+          && s.zone == KingdomZone
+          && n >= 2
+          && Attachment `elem` filt.cfTraits
+          then -1
+          else 0
+
+poisonWindGlobadiers :: CardDef Unit
+poisonWindGlobadiers = unitCard "path-of-the-zealot-035" "Poison Wind Globadiers" do
+  trait Skaven
+  destructionOnly
+  cost 3
+  loyalty 0
+  power 1
+  hitPoints 2
+  body
+    "Destruction only. Battlefield. Action: Corrupt this unit to deal 1 damage to one \
+    \target attacking or defending unit."
+  battlefield $ actionWith "Hurl the globes" 0 [CorruptSelf] \usage ->
+    withTarget usage.user (attackingUnit `Or` defendingUnit) \case
+      TargetUnitOption k -> dealDamage k 1
+      _ -> pure ()
+
+chitteringHorde :: CardDef Tactic
+chitteringHorde = tacticCard "path-of-the-zealot-036" "Chittering Horde" do
+  trait Skaven
+  destructionOnly
+  cost 1
+  loyalty 0
+  body
+    "Destruction only. Action: Search the top five cards of your deck. You may reveal any \
+    \number of Skaven cards found and put them into your hand. Shuffle the rest of the \
+    \searched cards into your deck."
+  playableWhen \g pk -> hasDeckSize 1 g pk
+  whenResolved \self -> do
+    let pk = self.controller
+    searchTopOfDeck pk 5 \result -> do
+      let skaven = [c | c <- result.cards, Skaven `elem` someCardTraits c.def]
+      chooseFromCards pk 0 (length skaven) skaven
+        "Reveal any number of Skaven cards to take into hand." \chosen -> do
+          unless (null chosen) $
+            push (TakeCardsFromDeckToHand pk (map (.key) chosen))
+          shuffleDeck pk
+
+zealotHunter :: CardDef Unit
+zealotHunter = unitCard "path-of-the-zealot-037" "Zealot Hunter" do
+  trait WitchHunter
+  orderOnly
+  cost 3
+  loyalty 0
+  power 1
+  hitPoints 2
+  body
+    "Order only. Forced: After this unit enters play, destroy a unit that does not share \
+    \the racial affiliation of its controller's capital."
+  onEnterPlay \_owner self -> do
+    g <- getGame
+    let strangers =
+          [ u.key
+          | u <- g.units
+          , (playerOf u.controller g).race `notElem` u.cardDef.races
+          ]
+    forcePickUnit self.controller strangers
+      "Zealot Hunter: destroy a unit that does not match its controller's capital."
+      destroyUnit
+
+veteranSellswords :: CardDef Unit
+veteranSellswords = unitCard "path-of-the-zealot-038" "Veteran Sellswords" do
+  cost 0
+  loyalty 0
+  power 1
+  hitPoints 1
+  trait Warrior
+  battlefieldOnly
+  body
+    "Battlefield only. Forced: At the end of your turn, target opponent gains control of \
+    \this unit and moves it to his corresponding zone."
+  onMyTurnEnd \_owner self ->
+    push (TakeControlOfUnit self.controller.next self.key)
+
+surpriseAssault :: CardDef Tactic
+surpriseAssault = tacticCard "path-of-the-zealot-039" "Surprise Assault" do
+  cost 2
+  loyalty 0
+  body
+    "Action: Deal X indirect damage to one target player. X is the number of developments \
+    \in your battlefield. (Players assign their own indirect damage.)"
+  whenResolved \self -> do
+    g <- getGame
+    let me = playerOf self.controller g
+        Developments x = me.capital.battlefield.developments
+    when (x > 0) $ indirectDamage self.controller.next x
+
+animosity :: CardDef Tactic
+animosity = tacticCard "path-of-the-zealot-040" "Animosity" do
+  cost 2
+  loyalty 0
+  body "Play after a zone is attacked. Action: Target unit must defend this turn, if able."
+  playableWhen \g _pk -> isJust g.combat
+  whenResolved \self ->
+    withTarget self.controller
+      (UnitMatching \_ g u -> case g.combat of
+        Just cs -> u.controller == cs.defendingPlayer && u.zone == cs.targetZone
+        Nothing -> False)
+      \k -> until EndOfTurn $ mustDefend k
+
+ratOgres :: CardDef Unit
+ratOgres = unitCard "tooth-and-claw-055" "Rat Ogres" do
+  trait Skaven
+  destructionOnly
+  cost 4
+  loyalty 0
+  power 2
+  hitPoints 3
+  body "Destruction only. Action: At the beginning of your turn, uncorrupt all Skaven units."
+  onMyTurnBegin \_owner self -> do
+    g <- getGame
+    let corrupted = [u.key | u <- g.units, hasTrait Skaven u, u.corrupted]
+    unless (null corrupted) $
+      may self.controller "Rat Ogres: uncorrupt all Skaven units?" $
+        for_ corrupted \k -> push (CleanseUnit k)
+
+gutterRunners :: CardDef Unit
+gutterRunners = unitCard "tooth-and-claw-056" "Gutter Runners" do
+  trait Skaven
+  destructionOnly
+  battlefieldOnly
+  scout
+  cost 2
+  loyalty 0
+  power 1
+  hitPoints 2
+  body "Destruction only. Battlefield only. Scout. This unit enters play corrupted."
+  onEnterPlay \_owner self -> corrupt self.key
+
+clanMouldersElite :: CardDef Unit
+clanMouldersElite = unitCard "tooth-and-claw-057" "Clan Moulder's Elite" do
+  traits [Warrior, Skaven]
+  destructionOnly
+  battlefieldOnly
+  cost 2
+  loyalty 0
+  power 2
+  hitPoints 5
+  body "Destruction only. Battlefield only. This unit cannot defend."
+  neverDefends
+
+errantWolf :: CardDef Unit
+errantWolf = unitCard "tooth-and-claw-058" "Errant Wolf" do
+  trait Knight
+  orderOnly
+  questOnly
+  limited
+  cost 2
+  loyalty 0
+  power 2
+  hitPoints 1
+  body "Order only. Quest zone only. Limited (you cannot play more than one Limited card per turn)."
+
+reapWhatsSown :: CardDef Tactic
+reapWhatsSown = tacticCard "tooth-and-claw-059" "Reap What's Sown" do
+  costVariable
+  loyalty 0
+  body "Action: Each player with X or more total developments may discard his hand and draw X cards."
+  whenResolved \self -> do
+    let x = self.xValue
+    g <- getGame
+    when (x > 0) $
+      eachPlayer \pk -> do
+        let me = playerOf pk g
+            total = sum [n | z <- me.capital.zones, let Developments n = z.developments]
+        when (total >= x) $
+          may pk ("Reap What's Sown: discard your hand and draw " <> tshow x <> " cards?") do
+            discardHand pk
+            drawCards pk x
+
+scoutCamp :: CardDef Support
+scoutCamp = supportCard "tooth-and-claw-060" "Scout Camp" do
+  cost 2
+  loyalty 0
+  power 1
+  trait Building
+  body "Kingdom. Whenever you search your deck, you may search an additional card."
+  searchBonus \_g s pk ->
+    if pk == s.controller && s.zone == KingdomZone then 1 else 0
+
+deathmasterSniktch :: CardDef Unit
+deathmasterSniktch = unitCard "the-deathmaster-s-dance-079" "Deathmaster Sniktch" do
+  hero
+  trait Skaven
+  destructionOnly
+  cost 4
+  loyalty 0
+  power 2
+  hitPoints 2
+  body
+    "Limit one Hero per zone. Destruction only. Action: Corrupt this unit to destroy one \
+    \target unit with fewer remaining hit points than the number of Skaven cards in play."
+  actionWith "Slay-kill" 0 [CorruptSelf] \usage -> do
+    g <- getGame
+    let skavenCount =
+          length [u | u <- g.units, hasTrait Skaven u]
+            + length [s | s <- allInPlaySupports g, hasTrait Skaven s]
+            + length [q | q <- g.quests, hasTrait Skaven q]
+        remaining u = let Damage d = u.damage in u.effectiveMaxHP - d
+    withTarget usage.user
+      (unitWhere \u -> remaining u < skavenCount)
+      destroyUnit
+
+juvenileWyvern :: CardDef Unit
+juvenileWyvern = unitCard "the-deathmaster-s-dance-080" "Juvenile Wyvern" do
+  trait Creature
+  destructionOnly
+  cost 4
+  loyalty 0
+  power 1
+  hitPoints 2
+  body "Destruction only. When Juvenile Wyvern defends, it deals its combat damage to all attacking units."
+  defenderHitsAllAttackers
+
+ancientWaystone :: CardDef Support
+ancientWaystone = supportCard "the-warpstone-chronicles-099" "Ancient Waystone" do
+  cost 2
+  loyalty 0
+  power 1
+  body
+    "Action: Spend 1 resource to deal 1 damage to any target unit in this corresponding \
+    \zone. Use this ability only once per turn, and only if any player has played a Spell \
+    \card this turn."
+  action "Discharge" 1 \usage -> do
+    g <- getGame
+    whenJust (findSupport usage.self.key g) \s -> do
+      let used =
+            any (\m -> m.details == ActionUsedThisTurn)
+              (Map.findWithDefault [] (UnitRef s.key) g.modifiers)
+          h = Map.findWithDefault mempty ThisTurn g.history
+          spellPlayed =
+            any (any (\cf -> Spell `elem` cf.cfTraits)) (Map.elems h.playedBy)
+      when (not used && spellPlayed) do
+        until EndOfTurn (PendingBuff s.key ActionUsedThisTurn)
+        withTarget usage.user (unitWhere \u -> u.zone == s.zone) \k ->
+          dealDamage k 1
+
+fellblade :: CardDef Support
+fellblade = supportCard "the-warpstone-chronicles-100" "Fellblade" do
+  unique
+  traits [Attachment, Relic, Skaven]
+  cost 2
+  loyalty 0
+  body
+    "Attach to a target Skaven unit. Corrupt that unit. Whenever a unit is corrupted, \
+    \place 1 resource token on this card. Attached unit deals +X damage in combat, where \
+    \X is the number of resource tokens on this card."
+  onEnterPlay \_owner self -> for_ self.attachedTo corrupt
+  supportCombat \_g s u ->
+    if s.attachedTo == Just u.key then s.tokens else 0
+  onReceive $ Receive \msg _owner self -> case msg of
+    CorruptUnit uk -> do
+      g <- getGame
+      case findUnit uk g of
+        Just u
+          | not u.corrupted
+          , all
+              (\m -> m.details /= CannotBeCorrupted)
+              (Map.findWithDefault [] (UnitRef uk) g.modifiers) ->
+              push (AdjustSupportTokens self.key 1)
+        _ -> pure ()
+    _ -> pure ()
+
+greyseersLair :: CardDef Support
+greyseersLair = supportCard "arcane-fire-119" "Greyseer's Lair" do
+  traits [Warpstone, Skaven]
+  destructionOnly
+  cost 4
+  loyalty 0
+  power 2
+  body "Destruction only. Kingdom. Lower the cost of the first Skaven card you play each turn by 1."
+  globalCostAdjust \g s pk filt ->
+    let h = Map.findWithDefault mempty ThisTurn g.history
+        skavenPlayed =
+          length
+            [ cf
+            | cf <- Map.findWithDefault [] pk h.playedBy
+            , Skaven `elem` cf.cfTraits
+            ]
+     in if pk == s.controller
+          && s.zone == KingdomZone
+          && Skaven `elem` filt.cfTraits
+          && skavenPlayed == 0
+          then -1
+          else 0
+
+plagueMonk :: CardDef Unit
+plagueMonk = unitCard "arcane-fire-120" "Plague Monk" do
+  trait Skaven
+  destructionOnly
+  cost 2
+  loyalty 0
+  power 1
+  hitPoints 2
+  body
+    "Destruction only. Kingdom. Action: Whenever you play a Spell, look at the top two \
+    \cards of any player's deck. Discard any number of those cards and place the rest \
+    \back on top of the deck in any order."
+  kingdom $ onReceive $ Receive \msg _owner self -> case msg of
+    TacticResolved pk _code _target _x
+      | pk == self.controller -> do
+          g <- getGame
+          let h = Map.findWithDefault mempty ThisTurn g.history
+              lastPlay = listToMaybe (Map.findWithDefault [] pk h.playedBy)
+              wasSpell = maybe False (\cf -> Spell `elem` cf.cfTraits) lastPlay
+          when wasSpell $
+            -- Approximation: the printed "place the rest back on top
+            -- of the deck in any order" reorder choice isn't offered;
+            -- undiscarded cards keep their order.
+            may pk "Plague Monk: look at the top two cards of a deck?" do
+              mine <- askYesNo pk "Look at YOUR deck? (No looks at the opponent's.)"
+              let target = if mine then pk else pk.next
+              tp <- playerOf target <$> getGame
+              let top2 = take 2 tp.deck
+              unless (null top2) $
+                chooseFromCards pk 0 (length top2) top2
+                  "Discard any of these; the rest stay on top of the deck." \chosen ->
+                    unless (null chosen) $
+                      push (DiscardCardsFromDeck target (map (.key) chosen))
+    _ -> pure ()
 
 -- | Helper: developments count in the named zone of a capital.
 zoneDevs :: Capital -> ZoneKind -> Developments

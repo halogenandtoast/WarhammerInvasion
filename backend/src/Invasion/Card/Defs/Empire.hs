@@ -460,3 +460,237 @@ sigmarsIntervention = tacticCard "core-050" "Sigmar's Intervention" do
   whenResolved \self -> do
     let pk = self.controller
     withTarget pk MyAnyZone \zk -> redirectAttackZone zk
+
+-- The Corruption cycle ------------------------------------------------
+
+nordlandHalberdiers :: CardDef Unit
+nordlandHalberdiers = unitCard "the-skavenblight-threat-003" "Nordland Halberdiers" do
+  race Empire
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Warrior
+  keyword PlayAnytime
+  body "You may play this unit from your hand any time you could take an action."
+
+infiltrateTactic :: CardDef Tactic
+infiltrateTactic = tacticCard "the-skavenblight-threat-004" "Infiltrate" do
+  race Empire
+  cost 1
+  loyalty 2
+  body "Action: Target opponent cannot draw more than one card this turn."
+  whenResolved \self ->
+    push (SetDrawCap self.controller.next 1)
+
+gustavTheBear :: CardDef Unit
+gustavTheBear = unitCard "path-of-the-zealot-023" "Gustav the Bear" do
+  hero
+  trait Cavalry
+  race Empire
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 3
+  body "Limit one Hero per zone. Cancel all damage to this unit while any opponent controls a corrupted unit."
+  damageImmuneWhen \g self ->
+    any (\u -> u.controller /= self.controller && u.corrupted) g.units
+
+talabheimDetachment :: CardDef Unit
+talabheimDetachment = unitCard "path-of-the-zealot-024" "Talabheim Detachment" do
+  race Empire
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Warrior
+  body "Action: Spend 1 resource to return this unit to its owner's hand."
+  action "Withdraw" 1 \usage ->
+    returnUnitToHand usage.self.key
+
+gateOfSigmar :: CardDef Support
+gateOfSigmar = supportCard "path-of-the-zealot-025" "Gate of Sigmar" do
+  race Empire
+  cost 4
+  loyalty 2
+  power 2
+  trait Building
+  body "Cancel one damage assigned to your capital each turn."
+  capitalShieldEachTurn
+
+reiksguardSwordsmen :: CardDef Unit
+reiksguardSwordsmen = unitCard "tooth-and-claw-044" "Reiksguard Swordsmen" do
+  race Empire
+  cost 5
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Knight
+  counterstrike 4
+  body "Counterstrike 4 (this unit deals 4 combat damage immediately after defending)."
+
+ironDiscipline :: CardDef Tactic
+ironDiscipline = tacticCard "tooth-and-claw-045" "Iron Discipline" do
+  race Empire
+  cost 0
+  loyalty 1
+  body
+    "Action: Target one unit. Until the end of the turn, cancel any other action that targets \
+    \this unit unless the action's controller pays an additional 4 resources (per action)."
+  playableWhen $ hasTarget AnyUnit
+  whenResolved \self ->
+    withTarget self.controller AnyUnit \k ->
+      until EndOfTurn $ imposeTargetTax k 4
+
+vigilantElector :: CardDef Unit
+vigilantElector = unitCard "the-deathmaster-s-dance-064" "Vigilant Elector" do
+  race Empire
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 3
+  trait Warrior
+  body
+    "Quest. Action: Spend 1 resource to attach this unit to a target unit. It then counts \
+    \as an Attachment with the text \"Attached unit is destroyed at the end of its controller's turn.\""
+  quest $ action "Mark for judgement" 1 \usage ->
+    withTarget usage.user (unitWhere \u -> u.key /= usage.self.key) \host ->
+      push (TransformUnitToAttachment usage.self.key host)
+
+flagellants :: CardDef Unit
+flagellants = unitCard "the-deathmaster-s-dance-065" "Flagellants" do
+  race Empire
+  cost 1
+  loyalty 1
+  power 0
+  hitPoints 2
+  trait Zealot
+  body "Action: Sacrifice this unit to cancel the next 2 damage assigned to your capital this turn."
+  actionWith "Martyrdom" 0 [SacrificeSelf] \usage ->
+    push (ArmCapitalShield usage.user (Just 2) 0)
+
+ulricsFury :: CardDef Tactic
+ulricsFury = tacticCard "the-deathmaster-s-dance-066" "Ulric's Fury" do
+  race Empire
+  cost 2
+  loyalty 2
+  body "Action: Each of your defending units gains Counterstrike 1 until the end of the turn."
+  whenResolved \self ->
+    push (ArmDefenderCounterstrike self.controller 1)
+
+vigilantPistoliers :: CardDef Unit
+vigilantPistoliers = unitCard "the-warpstone-chronicles-084" "Vigilant Pistoliers" do
+  race Empire
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Warrior
+  body
+    "If this unit is destroyed while in your battlefield, put it into play in your kingdom \
+    \instead of into your discard pile."
+  onDestroyedRelocate \_g self ->
+    if self.zone == BattlefieldZone then Just KingdomZone else Nothing
+
+runefangOfSolland :: CardDef Support
+runefangOfSolland = supportCard "the-warpstone-chronicles-085" "Runefang of Solland" do
+  unique
+  race Empire
+  cost 2
+  loyalty 1
+  traits [Attachment, Relic]
+  body
+    "Attach to a target {empire} unit. Attached unit gains {power}{power}. \
+    \Action: Sacrifice attached unit to lower the cost of the next non-Epic tactic you play this turn to 0."
+  attachmentPower 2
+  action "Final stand" 0 \usage ->
+    for_ usage.self.attachedTo \host -> do
+      destroyUnit host
+      push (ArmFreeTactic usage.user)
+
+helblasterVolleyGun :: CardDef Support
+helblasterVolleyGun = supportCard "the-warpstone-chronicles-086" "Helblaster Volley Gun" do
+  race Empire
+  cost 1
+  loyalty 1
+  traits [Attachment, Weapon]
+  body
+    "Attach to a target unit in your battlefield. Attached unit deals +X damage in combat, \
+    \where X is the number of developments in your battlefield."
+  supportCombat \g s u ->
+    if s.attachedTo == Just u.key
+      then
+        let me = playerOf s.controller g
+            Developments d = me.capital.battlefield.developments
+         in d
+      else 0
+
+helblasterCrew :: CardDef Unit
+helblasterCrew = unitCard "arcane-fire-104" "Helblaster Crew" do
+  race Empire
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Engineer
+  body
+    "Action: When this unit enters play, move one target Attachment from one unit to another \
+    \unit in the same zone."
+  onEnterPlay \_owner self -> do
+    g <- getGame
+    let attached = [a | u <- g.units, a <- u.attachments]
+    unless (null attached) $
+      may self.controller "Helblaster Crew: move an attachment to another unit in the same zone?" $
+        withTarget self.controller
+          (SupportMatching \_ _ s -> isJust s.attachedTo)
+          \aKey -> do
+            gNow <- getGame
+            let mhost =
+                  listToMaybe
+                    [u | u <- gNow.units, any ((== aKey) . (.key)) u.attachments]
+            whenJust mhost \host -> do
+              let dests =
+                    [ u.key
+                    | u <- gNow.units
+                    , u.zone == host.zone
+                    , u.key /= host.key
+                    ]
+              forcePickUnit self.controller dests
+                "Choose the attachment's new host (same zone)."
+                \dst -> push (MoveAttachment aKey dst)
+
+sigmarsBrilliance :: CardDef Tactic
+sigmarsBrilliance = tacticCard "arcane-fire-105" "Sigmar's Brilliance" do
+  race Empire
+  cost 10
+  loyalty 3
+  traits [Epic, Spell]
+  body "Action: Rearrange your units and support cards, moving any number of them into new zones."
+  whenResolved \self -> do
+    let pk = self.controller
+        movable g =
+          any (\u -> u.controller == pk) g.units
+            || any (\s -> s.controller == pk && isNothing s.attachedTo) g.supports
+        loop budget = when (budget > (0 :: Int)) do
+          g <- getGame
+          when (movable g) $
+            may pk "Sigmar's Brilliance: move a card to another zone?" do
+              withTarget pk
+                (ownUnit `Or` SupportMatching \me _ s -> s.controller == me && isNothing s.attachedTo)
+                \case
+                  TargetUnitOption k ->
+                    withTarget pk MyAnyZone \zk -> moveUnit k zk
+                  TargetSupportOption k ->
+                    withTarget pk MyAnyZone \zk -> push (MoveSupport k zk)
+                  _ -> pure ()
+              loop (budget - 1)
+    loop 20
+
+protectTheEmpire :: CardDef Quest
+protectTheEmpire = questCard "arcane-fire-106" "Protect the Empire" do
+  race Empire
+  cost 0
+  loyalty 2
+  trait QuestTrait
+  body "Quest. Any unit questing on this card can defend any of your zones when they are attacked."
+  questerDefendsAnywhere

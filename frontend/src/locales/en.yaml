@@ -1062,9 +1062,13 @@ log:
   deck:
     shuffled: "{player} shuffles their deck."
     milled: "{player} mills {count} cards."
+    taken_to_hand: "{player} adds {count} card(s) from their deck to hand."
+    discarded_from: "{count} card(s) are discarded from {player}'s deck."
   draw:
     opening: "{player} draws their opening hand (7 cards)."
     card: "{player} draws a card."
+    capped: "{player} cannot draw any more cards this turn."
+    capped_set: "{player} cannot draw more than {count} card(s) this turn."
   resources:
     returned: "{player} returns unspent resources to the pool."
     collected: "{player} collects {count} resources."
@@ -1087,10 +1091,23 @@ log:
     returned: "{player} returns {card} to hand."
     played_on_quest: "{player} plays {card} onto the quest {quest} ({cost} resources)."
     assigned_to_quest: "{player} sends {card} questing on {quest}."
+    tokens: "{card} now has {count} resource tokens."
+    saved: "{card} is saved from destruction."
+    relocated_on_destroy: "{card} escapes destruction and redeploys to the {zone}."
+    animated: "A development in {player}'s {zone} stirs into a unit."
+    deanimated: "The animated development in {player}'s {zone} settles back down."
+    stolen_from_discard: "{player} drags {card} out of the opposing discard pile."
+    summoned_from_deck: "{player} puts {card} into play from their deck."
+    control_taken: "{player} takes control of {card}."
+    transformed_attachment: "{card} attaches itself to {target}."
   attachment:
     played: "{player} attaches {card} to {target} ({cost} resources)."
+    moved: "{card} is moved onto {target}."
   support:
     played: "{player} plays {card} ({cost} resources)."
+    played_from_deck: "{player} puts {card} into play from their deck."
+    played_from_discard: "{player} returns {card} to play from their discard pile."
+    moved: "{player} moves {card} to the {zone}."
     tokens: "{card} now has {count} tokens."
     destroyed: "{player}'s {card} is destroyed."
   quest:
@@ -1101,6 +1118,8 @@ log:
     destroyed: "{player}'s quest {card} is destroyed."
   tactic:
     played: "{player} plays the tactic {card} ({cost} resources)."
+    free: "{player}'s {card} is played for free."
+    free_armed: "{player}'s next tactic this turn will cost 0."
   legend:
     played: "{player} plays the legend {card} ({cost} resources)."
     entered_play: "{player}'s legend enters play."
@@ -1114,17 +1133,27 @@ log:
     cleared: "Scoped modifiers cleared."
   zone:
     damaged: "{player}'s {zone} zone takes {amount} damage."
+    healed: "{player}'s {zone} zone heals {amount} damage."
+    development_added: "{player} places the top card of their deck as a development in their {zone}."
     burned: "{player}'s {zone} zone burns!"
     damage_wasted: "{amount} damage to {player}'s burning {zone} is wasted."
     development_played: "{player} plays a face-down development into their {zone}."
   hand:
+    discarded: "{player} discards a card at random."
     discarded_all: "{player} discards their hand ({count} cards)."
+    discarded_chosen: "{count} card(s) are discarded from {player}'s hand."
   discard:
     recycled: "{player} shuffles {count} cards from discard into deck."
   development:
     moved: "{player} moves a development from {from} to {to}."
     destroyed: "{player}'s development in {zone} is destroyed."
+    returned: "{player} returns a development in their {zone} to hand."
+    reclaimed: "{player} lays a fallen card down as a development in their {zone}."
+    flipped_unit: "{player}'s development in the {zone} is revealed: {card} joins the fight until end of turn."
   capital:
+    healed: "{player}'s capital heals {amount} damage."
+    warded: "{player}'s ward cancels {amount} capital damage."
+    ward_armed: "{player} arms a capital ward."
     indirect: "{player} takes {amount} indirect damage on {zone}."
     shielded: "{player}'s capital shield cancels {amount} damage on {zone}."
     redirected: "{player} redirects the first capital damage ({card})."
@@ -1138,6 +1167,19 @@ log:
     rune_paid: "Rune of Fortitude tax paid: {amount} resources."
     rune_penalty: "Rune of Fortitude unpaid: attackers take −{amount} power."
     targets_legend: "{attacker} targets the opponent's legend through the attacked zone."
+    uncancellable: "Combat damage cannot be cancelled for the rest of the turn."
+  damage:
+    cancelled: "{amount} damage to {card} is cancelled."
+    cancelled_pending: "{amount} pending combat damage is cancelled."
+    cancelled_all: All assigned combat damage is cancelled.
+    redirected: "{amount} damage is redirected."
+  action:
+    triggered: "{player} triggers {card}'s '{action}' ({cost} resources)."
+    cancelled: "{player}'s action fizzles — its effect is cancelled."
+    cancel_scheduled: "{player}'s next card action will be cancelled."
+  prompt:
+    opened: "Waiting for {player} to choose…"
+    resolved: "{player} has chosen."
   # ZoneKind enum lookup
   zone_name:
     KingdomZone: Kingdom

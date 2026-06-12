@@ -31,6 +31,8 @@ export interface Card {
   quantity: number | null
   illustrator: string | null
   image: string | null
+  /** True for unique cards (heroes, relics) — at most one copy in play. */
+  unique?: boolean
   /** True when card has only filename-derived data (no engine/text). */
   stub: boolean
 }

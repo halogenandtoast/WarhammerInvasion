@@ -93,6 +93,11 @@ instance HasHitPoints 'Legend
 hitPoints :: HasHitPoints k => Int -> CardBuilder k ()
 hitPoints hp = modify \cardDef -> cardDef {CardDef.hitPoints = Just (Fixed hp)}
 
+-- | Printed "X" hit points (Cold One Chariot). The base is 0; pair
+-- with 'selfHP' to supply the live X value each engine tick.
+hitPointsX :: HasHitPoints k => CardBuilder k ()
+hitPointsX = modify \cardDef -> cardDef {CardDef.hitPoints = Just Variable}
+
 trait :: Trait -> CardBuilder k ()
 trait t = modify \cardDef -> cardDef {traits = t : cardDef.traits}
 
@@ -283,6 +288,42 @@ perTurnDamageCap n = modifyUnitExtras \e -> e {damageCap = Just n}
 corruptsOnDamage :: CardBuilder Unit ()
 corruptsOnDamage = modifyUnitExtras \e -> e {corruptsOnCombatDamage = True}
 
+-- | Game-state-derived bonus to the unit's own max HP (Cold One
+-- Chariot's X). Folded into the cached @effectiveMaxHP@.
+selfHP :: (Game -> UnitDetails -> Int) -> CardBuilder Unit ()
+selfHP f = modifyUnitExtras \e -> e {selfHPBonus = f}
+
+-- | "Cancel all damage to this unit while CONDITION." (Gustav the
+-- Bear.) Only cancellable damage is affected.
+damageImmuneWhen :: (Game -> UnitDetails -> Bool) -> CardBuilder Unit ()
+damageImmuneWhen f = modifyUnitExtras \e -> e {cancelAllDamageWhen = f}
+
+-- | "Whenever this unit is assigned damage, cancel all but N of that
+-- damage." (Dragonmage: 1.)
+perHitCap :: Int -> CardBuilder Unit ()
+perHitCap n = modifyUnitExtras \e -> e {perHitDamageCap = Just n}
+
+-- | Printed "This unit cannot defend." (Clan Moulder's Elite.)
+neverDefends :: CardBuilder Unit ()
+neverDefends = modifyUnitExtras \e -> e {cannotDefend = True}
+
+-- | Zones this unit may attack from (default: battlefield only).
+-- Greyseer Thanquol passes all three; Dragonslayer adds the quest
+-- zone.
+attacksFromZones :: [ZoneKind] -> CardBuilder Unit ()
+attacksFromZones zs = modifyUnitExtras \e -> e {attackEligibleZones = zs}
+
+-- | Destruction replacement: re-enter play in the named zone instead
+-- of hitting the discard pile (Vigilant Pistoliers).
+onDestroyedRelocate :: (Game -> UnitDetails -> Maybe ZoneKind) -> CardBuilder Unit ()
+onDestroyedRelocate f = modifyUnitExtras \e -> e {destroyedToZone = f}
+
+-- | "When this unit defends, it deals its combat damage to all
+-- attacking units." (Juvenile Wyvern.)
+defenderHitsAllAttackers :: CardBuilder Unit ()
+defenderHitsAllAttackers =
+  modifyUnitExtras \e -> e {defenderDamageToAllAttackers = True}
+
 -- | Extra resources a non-controller must spend to target this unit
 -- (King Kazador).
 targetTax :: (Game -> PlayerKey -> UnitDetails -> Int) -> CardBuilder Unit ()
@@ -396,6 +437,66 @@ supportHPAura f = modifySupportExtras \e -> e {supportAuraHP = f}
 imposesRuneOfFortitudeTax :: CardBuilder Support ()
 imposesRuneOfFortitudeTax =
   modifySupportExtras \e -> e {runeOfFortitudeTax = True}
+
+-- | Toughness this support grants a unit (Gromril Armour grants the
+-- attached unit Toughness 1). Args: game, this support, target unit.
+supportToughnessAura
+  :: (Game -> SupportDetails -> UnitDetails -> Int)
+  -> CardBuilder Support ()
+supportToughnessAura f =
+  modifySupportExtras \e -> e {supportAuraToughness = f}
+
+-- | "Whenever you search your deck, you may search an additional
+-- card." (Scout Camp.) Args: game, this support, the searching
+-- player.
+searchBonus
+  :: (Game -> SupportDetails -> PlayerKey -> Int)
+  -> CardBuilder Support ()
+searchBonus f = modifySupportExtras \e -> e {searchDepthBonus = f}
+
+-- | "Whenever a tactic you play deals damage to one or more targets,
+-- deal an additional damage to each target." (Hellcannon Reserves.)
+tacticDamageBoost
+  :: (Game -> SupportDetails -> PlayerKey -> Int)
+  -> CardBuilder Support ()
+tacticDamageBoost f = modifySupportExtras \e -> e {tacticDamageBonus = f}
+
+-- | "Double all damage dealt to the defending opponent's capital"
+-- while the condition holds (Basha's Bloodaxe). Args: game, this
+-- support, the player whose capital is taking damage.
+doublesCapitalDamage
+  :: (Game -> SupportDetails -> PlayerKey -> Bool)
+  -> CardBuilder Support ()
+doublesCapitalDamage f =
+  modifySupportExtras \e -> e {capitalDamageDoubler = f}
+
+-- | "Treat attached unit as though its printed text box were blank
+-- (except for Traits)." (Witch Hag's Curse.)
+blanksAttachedUnit :: CardBuilder Support ()
+blanksAttachedUnit = modifySupportExtras \e -> e {blanksHost = True}
+
+-- | "If attached unit would be destroyed, you may pay N resources to
+-- leave it in play and remove all damage from it." (Hydra Blade.)
+hostDestroyRansomOf :: Int -> CardBuilder Support ()
+hostDestroyRansomOf n =
+  modifySupportExtras \e -> e {hostDestroyRansom = Just n}
+
+-- | Mark a synthetic attachment as physically being the given unit
+-- card; the discard pile receives the unit def when the attachment
+-- leaves play (Vigilant Elector).
+revertsToUnit :: CardDef Unit -> CardBuilder Support ()
+revertsToUnit cd = modifySupportExtras \e -> e {revertToUnit = Just cd}
+
+-- | "Any unit questing on this card can defend any of your zones."
+-- (Protect the Empire.)
+questerDefendsAnywhere :: CardBuilder Quest ()
+questerDefendsAnywhere =
+  modifyQuestExtras \e -> e {questerDefendsAnyZone = True}
+
+-- | "You may spend resources from this card to pay for Attachment
+-- cards." (Dat's Mine!.)
+paysAttachmentCosts :: CardBuilder Quest ()
+paysAttachmentCosts = modifyQuestExtras \e -> e {paysForAttachments = True}
 
 -- | Non-gated constant block. The body fires every engine tick
 -- regardless of which zone this unit is in. Use for "this unit gains

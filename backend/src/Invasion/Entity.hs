@@ -78,6 +78,15 @@ data UnitDetails = UnitDetails
   , defending :: Bool
     -- ^ True iff this unit is currently declared as a defender in
     -- the in-flight combat.
+  , tokens :: Int
+    -- ^ Resource tokens sitting on this unit (Silver Helm Detachment
+    -- enters with 3, War Hydra with 5). Adjusted via
+    -- 'AdjustUnitTokens'; clamped non-negative.
+  , blanked :: Bool
+    -- ^ True while an attached support blanks this unit's printed
+    -- text box (Witch Hag's Curse). Recomputed each engine step; the
+    -- engine suppresses the unit's receive, actions, keywords, and
+    -- extras slices while set. Traits are unaffected.
   }
   deriving stock Show
 
@@ -199,6 +208,8 @@ instance ToJSON UnitDetails where
       , "effectiveMaxHP" .= d.effectiveMaxHP
       , "attacking" .= d.attacking
       , "defending" .= d.defending
+      , "tokens" .= d.tokens
+      , "blanked" .= d.blanked
       ]
 
 instance ToJSON SupportDetails where

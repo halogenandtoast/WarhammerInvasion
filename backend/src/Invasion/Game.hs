@@ -14,7 +14,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import {-# SOURCE #-} Invasion.Card.Types (Card)
 import Invasion.Capital
-import Invasion.CardDef (ActionTarget)
+import Invasion.CardDef (ActionTarget, CardCodeFilter)
 import Invasion.Entity (LegendDetails, QuestDetails, SupportDetails, UnitDetails)
 import Invasion.Modifier
 import Invasion.Player
@@ -237,6 +237,14 @@ data PendingEffect
     -- ^ Destroy the named unit unconditionally when the effect
     -- fires. Used by Rip Dere 'eads Off! and similar
     -- "sacrifice at end of turn" effects.
+  | PEGiveControl UnitKey PlayerKey
+    -- ^ Hand control of the named unit to the named player when the
+    -- effect fires. Used by Grasping Darkness to return its stolen
+    -- unit at end of turn.
+  | PERemoveAnimatedUnit UnitKey
+    -- ^ Remove a Bolt of Change animated development from play (the
+    -- development itself stays where it was). No leave-play hooks —
+    -- the card never "left play", it just stops being a unit.
   deriving stock Show
 
 -- | In-flight combat state. Set on 'BeginCombat', mutated through the
@@ -321,6 +329,33 @@ data LogCategory
 data Scope = ThisTurn | ThisPhase | ThisCombat
   deriving stock (Show, Eq, Ord)
 
+-- | One declared attack, recorded into 'History.combats' at
+-- 'BeginCombat' and completed with the defender list at
+-- 'DeclareDefenders'. Cards that reference "units that attacked this
+-- zone" (Tyriel) or "could have defended but did not" (Malus
+-- Darkblade) read these.
+data CombatRecord = CombatRecord
+  { attacker :: PlayerKey
+  , defender :: PlayerKey
+  , zone :: ZoneKind
+  , attackerKeys :: [UnitKey]
+  , defenderKeys :: [UnitKey]
+  }
+  deriving stock Show
+
+-- | One armed "cancel damage to your capital" grant (Flagellants,
+-- Gifts of Aenarion). Distinct from the once-per-turn
+-- 'capitalShieldPerTurn' supports: grants are armed by effects, last
+-- until end of turn, and may refund resources per point cancelled.
+data CapitalShieldGrant = CapitalShieldGrant
+  { points :: Maybe Int
+    -- ^ 'Just n' cancels up to n more points; 'Nothing' cancels all.
+  , refundPer :: Int
+    -- ^ Resources credited to the shield's owner per point cancelled
+    -- (Gifts of Aenarion: 1).
+  }
+  deriving stock Show
+
 -- | Aggregated record of events that happened during a 'Scope'.
 -- Cards consult this to scale effects ("for each unit that entered a
 -- discard pile this turn", "sacrifice all units that attacked this
@@ -344,6 +379,21 @@ data History = History
     -- ^ Per-player count of Unit cards that player has played in
     -- this scope. Used by We'z Bigga!-style "next unit"
     -- discounts when that lands.
+  , drawnBy :: Map PlayerKey Int
+    -- ^ Per-player count of standard draws taken in this scope.
+    -- Compared against 'Game.drawCaps' (Infiltrate the tactic).
+  , combats :: [CombatRecord]
+    -- ^ Attacks declared in this scope, newest first. Defender lists
+    -- are filled in when 'DeclareDefenders' fires.
+  , playedBy :: Map PlayerKey [CardCodeFilter]
+    -- ^ Per-player static descriptions of every card played in this
+    -- scope, newest first. Lets cost-adjusters and reactions ask
+    -- "have I played a Skaven / Spell card yet this turn?" without a
+    -- registry lookup (Greyseer's Lair, Ancient Waystone, Plague
+    -- Monk).
+  , discardedUnitsBy :: Map PlayerKey [UnitKey]
+    -- ^ Per-player keys of unit cards that entered that player's
+    -- discard pile from play in this scope (Stand Your Ground).
   }
   deriving stock Show
 
@@ -356,6 +406,10 @@ instance Semigroup History where
     , limitedPlayed = a.limitedPlayed + b.limitedPlayed
     , supportsPlayedBy = Map.unionWith (+) a.supportsPlayedBy b.supportsPlayedBy
     , unitsPlayedBy = Map.unionWith (+) a.unitsPlayedBy b.unitsPlayedBy
+    , drawnBy = Map.unionWith (+) a.drawnBy b.drawnBy
+    , combats = a.combats <> b.combats
+    , playedBy = Map.unionWith (<>) a.playedBy b.playedBy
+    , discardedUnitsBy = Map.unionWith (<>) a.discardedUnitsBy b.discardedUnitsBy
     }
 
 instance Monoid History where
@@ -367,6 +421,10 @@ instance Monoid History where
     , limitedPlayed = 0
     , supportsPlayedBy = Map.empty
     , unitsPlayedBy = Map.empty
+    , drawnBy = Map.empty
+    , combats = []
+    , playedBy = Map.empty
+    , discardedUnitsBy = Map.empty
     }
 
 -- | Initial history map with every 'Scope' present at 'mempty'.
@@ -487,6 +545,33 @@ data Game = Game
     -- ^ True after the active player plays a face-down development
     -- this turn. Enforces the once-per-turn development rule. Reset
     -- to False at 'BeginTurn'.
+  , drawCaps :: Map PlayerKey Int
+    -- ^ Per-player limit on standard draws for the rest of the turn
+    -- (Infiltrate the tactic: 1). Checked against the ThisTurn
+    -- 'drawnBy' count; cleared at end of turn.
+  , capitalShields :: Map PlayerKey [CapitalShieldGrant]
+    -- ^ Armed "cancel damage to your capital" grants (Flagellants,
+    -- Gifts of Aenarion), consumed in order at damage time. Cleared
+    -- at end of turn.
+  , defenderCounterstrikeBonus :: Map PlayerKey Int
+    -- ^ "Each of your defending units gains Counterstrike N until the
+    -- end of the turn." (Ulric's Fury.) Added to every defending
+    -- unit's printed Counterstrike when defenders are declared.
+    -- Cleared at end of turn.
+  , pendingFreeTactic :: Map PlayerKey Int
+    -- ^ Count of "the next non-Epic tactic you play this turn costs
+    -- 0" grants (Runefang of Solland). Consumed on play; cleared at
+    -- end of turn.
+  , tacticDamageContext :: Maybe PlayerKey
+    -- ^ Set while the damage messages queued by a resolving tactic
+    -- drain, so 'tacticDamageBonus' supports (Hellcannon Reserves)
+    -- can amplify them. Cleared by the trailing
+    -- 'ClearTacticDamageContext' message.
+  , combatDamageUncancellable :: Bool
+    -- ^ "Until the end of the turn, combat damage cannot be
+    -- cancelled." (Mob Up.) While set, all combat damage assigns into
+    -- the uncancellable bucket (bypassing Toughness and cancel
+    -- effects). Cleared at end of turn.
   }
   deriving stock Show
 
@@ -560,6 +645,8 @@ mconcat
       ''LogCategory
   , deriveToJSON defaultOptions ''LogEntry
   , deriveJSON defaultOptions ''Scope
+  , deriveToJSON defaultOptions ''CombatRecord
+  , deriveToJSON defaultOptions ''CapitalShieldGrant
   , deriveToJSON defaultOptions ''History
   , deriveToJSON defaultOptions ''PendingEffect
   , deriveToJSON defaultOptions ''PendingTarget

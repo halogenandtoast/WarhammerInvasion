@@ -7,6 +7,7 @@
 -- lot of work here.
 module Invasion.Card.Defs.Chaos (module Invasion.Card.Defs.Chaos) where
 
+import Data.Map.Strict qualified as Map
 import Data.Text qualified as T
 import Invasion.Capital
 import Invasion.Card.Builder
@@ -386,6 +387,209 @@ slaaneshsDomination = tacticCard "core-105" "Slaanesh's Domination" do
   whenResolved \self ->
     push (SlaaneshDominate self.controller self.controller.next 3)
 
+-- The Corruption cycle -------------------------------------------------
+
+chosenOfTzeentch :: CardDef Unit
+chosenOfTzeentch = unitCard "the-skavenblight-threat-010" "Chosen of Tzeentch" do
+  race Chaos
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Sorceror
+  body "Quest. Action: Spend 1 resource to deal 1 damage to one target damaged unit (limit once per turn)."
+  quest $ action "Feed on wounds" 1 \usage -> do
+    g <- getGame
+    let used =
+          any (\m -> m.details == ActionUsedThisTurn)
+            (Map.findWithDefault [] (UnitRef usage.self.key) g.modifiers)
+    unless used do
+      until EndOfTurn (PendingBuff usage.self.key ActionUsedThisTurn)
+      withTarget usage.user (unitWhere isDamaged) \k -> dealDamage k 1
+
+boltOfChange :: CardDef Tactic
+boltOfChange = tacticCard "the-skavenblight-threat-011" "Bolt of Change" do
+  race Chaos
+  cost 1
+  loyalty 2
+  trait Spell
+  body
+    "Action: Until the end of the turn, one target development becomes a unit with 2 hit \
+    \points and {power}{power}. It also counts as a development."
+  playableWhen $ hasTarget AnyDevelopmentZone
+  whenResolved \self ->
+    withTarget self.controller AnyDevelopmentZone \(owner, zk) ->
+      push (AnimateDevelopment owner zk 2 2)
+
+buleLordOfPus :: CardDef Unit
+buleLordOfPus = unitCard "path-of-the-zealot-030" "Bule, Lord of Pus" do
+  hero
+  race Chaos
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 4
+  body "Limit one Hero per zone. Forced: At the beginning of your turn, corrupt one target unit."
+  onMyTurnBegin \_owner self -> do
+    g <- getGame
+    let candidates = [u.key | u <- g.units, not u.corrupted]
+    forcePickUnit self.controller candidates
+      "Bule, Lord of Pus: corrupt one target unit."
+      corrupt
+
+blueHorrors :: CardDef Unit
+blueHorrors = unitCard "tooth-and-claw-051" "Blue Horrors" do
+  race Chaos
+  cost 2
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Daemon
+  body
+    "Action: When this unit leaves play, you may put another unit named Blue Horrors into \
+    \play from your hand. (That unit may be played into any zone.)"
+  onSelfLeavesPlay \_owner self -> do
+    let pk = self.controller
+    me <- playerOf pk <$> getGame
+    let copies =
+          [ c
+          | c <- me.hand
+          , Just cd <- [asUnit c.def]
+          , cd.code == self.cardDef.code
+          ]
+    for_ (take 1 copies) \c ->
+      may pk "Put another Blue Horrors into play from your hand?" $
+        withTarget pk MyAnyZone \zk ->
+          putUnitIntoPlay pk FromHand c.key zk
+
+brutalOffering :: CardDef Tactic
+brutalOffering = tacticCard "tooth-and-claw-052" "Brutal Offering" do
+  race Chaos
+  cost 2
+  loyalty 1
+  body
+    "Action: Sacrifice a unit. If you do, deal X damage to each unit in all battlefields, \
+    \where X is the sacrificed unit's power."
+  playableWhen \g pk -> any (\u -> u.controller == pk) g.units
+  whenResolved \self ->
+    sacrificeOwnUnit self.controller "Sacrifice a unit." \k -> do
+      g <- getGame
+      -- The sacrifice is still queued, so the unit is readable for
+      -- its power and excluded from the blast by key.
+      whenJust (findUnit k g) \sacrificed -> do
+        let x = sacrificed.effectivePower
+            targets =
+              [ u.key
+              | u <- g.units
+              , u.zone == BattlefieldZone
+              , u.key /= k
+              ]
+        when (x > 0) $ for_ targets \t -> dealDamage t x
+
+greatUncleanOne :: CardDef Unit
+greatUncleanOne = unitCard "the-deathmaster-s-dance-073" "Great Unclean One" do
+  race Chaos
+  cost 6
+  loyalty 4
+  power 3
+  hitPoints 6
+  trait Daemon
+  body "Battlefield. Action: Sacrifice a corrupt unit to give this unit {power} until the end of the turn."
+  battlefield $ action "Consume the corrupt" 0 \usage -> do
+    g <- getGame
+    let corrupt =
+          [ u.key
+          | u <- g.units
+          , u.controller == usage.user
+          , u.corrupted
+          ]
+    forcePickUnit usage.user corrupt "Sacrifice a corrupt unit." \k -> do
+      destroyUnit k
+      until EndOfTurn $ buffPower usage.self.key 1
+
+hellcannonReserves :: CardDef Support
+hellcannonReserves = supportCard "the-deathmaster-s-dance-074" "Hellcannon Reserves" do
+  race Chaos
+  cost 4
+  loyalty 2
+  power 1
+  trait Siege
+  body
+    "Kingdom. Whenever a tactic you play deals damage to one or more targets, deal an \
+    \additional damage to each target."
+  tacticDamageBoost \_g s pk ->
+    if pk == s.controller && s.zone == KingdomZone then 1 else 0
+
+offeringOfBlood :: CardDef Tactic
+offeringOfBlood = tacticCard "the-deathmaster-s-dance-075" "Offering of Blood" do
+  race Chaos
+  cost 0
+  loyalty 2
+  body "Action: Sacrifice a unit. If you do, deal 1 damage to each section of each opponent's capital."
+  playableWhen \g pk -> any (\u -> u.controller == pk) g.units
+  whenResolved \self ->
+    sacrificeOwnUnit self.controller "Sacrifice a unit." \_k ->
+      for_ [KingdomZone, QuestZone, BattlefieldZone] \zk ->
+        dealZoneDamage self.controller.next zk 1
+
+alluringDaemonettes :: CardDef Unit
+alluringDaemonettes = unitCard "the-warpstone-chronicles-093" "Alluring Daemonettes" do
+  race Chaos
+  cost 5
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Daemon
+  body "Action: When this unit attacks, target unit must defend if able."
+  onMyAttackDeclared \_owner self zone _attackers ->
+    may self.controller "Alluring Daemonettes: force a unit to defend?" $
+      withTarget self.controller
+        (UnitMatching \_ _ u ->
+          u.controller == self.controller.next && u.zone == zone)
+        \k -> until EndOfTurn $ mustDefend k
+
+beastOfChaos :: CardDef Unit
+beastOfChaos = unitCard "arcane-fire-113" "Beast of Chaos" do
+  race Chaos
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 1
+  trait Creature
+  body "Battlefield only."
+  battlefieldOnly
+
+cacophonicScream :: CardDef Tactic
+cacophonicScream = tacticCard "arcane-fire-114" "Cacophonic Scream" do
+  race Chaos
+  cost 10
+  loyalty 3
+  traits [Epic, Spell]
+  body "Play at the beginning of your turn. Action: Deal 8 damage to one section of target capital (you choose which section)."
+  playableWhen \g pk ->
+    g.currentPlayer == pk
+      && case g.actionWindow of
+        Just aw -> aw.trigger == BeginningOfTurnActionWindow
+        Nothing -> False
+  whenResolved \self ->
+    withTarget self.controller AnyCapital \(owner, zk) ->
+      dealZoneDamage owner zk 8
+
+blessingsOfTzeentch :: CardDef Tactic
+blessingsOfTzeentch = tacticCard "arcane-fire-115" "Blessings of Tzeentch" do
+  race Chaos
+  cost 3
+  loyalty 1
+  trait Spell
+  body
+    "Action: Sacrifice a unit. If you do, you may search the top five cards of your deck \
+    \for any number of units and put one of them into play at random (you choose which \
+    \zone). Then, shuffle the other cards back into your deck."
+  playableWhen \g pk -> any (\u -> u.controller == pk) g.units
+  whenResolved \self ->
+    sacrificeOwnUnit self.controller "Sacrifice a unit." \_k ->
+      push (PutRandomUnitIntoPlayFromDeckTop self.controller 5)
+
 -- Cataclysm cycle ------------------------------------------------------
 
 lordOfKhorne :: CardDef Unit
@@ -546,6 +750,7 @@ bloodsworn = unitCard "path-of-the-zealot-031" "Bloodsworn" do
 
 wolvesOfTheNorth :: CardDef Quest
 wolvesOfTheNorth = questCard "path-of-the-zealot-032" "Wolves of the North" do
+  unique
   race Chaos
   cost 0
   loyalty 2
@@ -620,6 +825,7 @@ berserkFury = tacticCard "the-warpstone-chronicles-094" "Berserk Fury" do
 
 daemonsword :: CardDef Support
 daemonsword = supportCard "the-warpstone-chronicles-095" "Daemonsword" do
+  unique
   race Chaos
   cost 2
   loyalty 1

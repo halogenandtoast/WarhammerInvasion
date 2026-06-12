@@ -280,6 +280,107 @@ data Message where
     -- ^ Remove a legend from play; its card goes to the controller's
     -- discard. Triggers 'LegendLeftPlay'.
   LegendLeftPlay :: PlayerKey -> UnitKey -> CardCode -> Message
+  -- Unit tokens (Silver Helm Detachment, War Hydra)
+  AdjustUnitTokens :: UnitKey -> Int -> Message
+    -- ^ Add (positive) or remove (negative) resource tokens on an
+    -- in-play unit. Clamped to >= 0.
+  -- Draw restriction (Infiltrate the tactic)
+  SetDrawCap :: PlayerKey -> Int -> Message
+    -- ^ "Target opponent cannot draw more than N cards this turn."
+    -- Stored in 'Game.drawCaps'; enforced against the ThisTurn
+    -- 'drawnBy' count; cleared at end of turn.
+  -- Capital shields (Flagellants, Gifts of Aenarion)
+  ArmCapitalShield :: PlayerKey -> Maybe Int -> Int -> Message
+    -- ^ Arm a "cancel (the next N | all) damage to your capital this
+    -- turn" grant for the named player. Second arg: resources
+    -- refunded per point cancelled.
+  -- Combat-wide riders
+  ArmDefenderCounterstrike :: PlayerKey -> Int -> Message
+    -- ^ Ulric's Fury: this player's defending units gain
+    -- Counterstrike +N until end of turn.
+  SetCombatDamageUncancellable :: Message
+    -- ^ Mob Up: combat damage cannot be cancelled until end of turn.
+  -- Tactic riders
+  ArmFreeTactic :: PlayerKey -> Message
+    -- ^ Runefang of Solland: the next non-Epic tactic this player
+    -- plays this turn costs 0 (printed part; loyalty still applies).
+  ClearTacticDamageContext :: Message
+    -- ^ Trailing sentinel queued after a tactic's effect body so the
+    -- damage messages it pushed amplify under
+    -- 'Game.tacticDamageContext' and later ones don't.
+  -- Out-of-pile plays
+  PlaySupportFromDiscard :: PlayerKey -> UnitKey -> ZoneKind -> Message
+    -- ^ Put the named support card from the player's discard pile
+    -- directly into the named zone (Repair the Waystones).
+  PutUnitIntoPlayFromDeck :: PlayerKey -> UnitKey -> ZoneKind -> Message
+    -- ^ Pull the named unit card out of the player's deck and put it
+    -- into play (Empty the Hold). Cost is skipped.
+  PutRandomUnitIntoPlayFromDeckTop :: PlayerKey -> Int -> Message
+    -- ^ Blessings of Tzeentch: look at the top N cards of the deck;
+    -- one unit found there (chosen at random) is put into play in a
+    -- zone of the player's choice; the rest shuffle back.
+  StealUnitFromDiscard :: PlayerKey -> PlayerKey -> UnitKey -> ZoneKind -> Bool -> Message
+    -- ^ Slaver Raid: @StealUnitFromDiscard newController srcPlayer
+    -- key zone corrupt@ pulls a unit card out of @srcPlayer@'s
+    -- discard pile and puts it into play under @newController@,
+    -- optionally corrupted.
+  -- Development manipulation
+  ReturnDevelopmentToHand :: PlayerKey -> ZoneKind -> Message
+    -- ^ Abandoned Mine: pop one development and return the facedown
+    -- card to its owner's hand.
+  ConvertDepartedToDevelopment :: PlayerKey -> UnitKey -> ZoneKind -> Message
+    -- ^ Reclaim the Hold: pull the named card (which just left play)
+    -- out of the player's discard pile and place it facedown as a
+    -- development in the named zone.
+  AnimateDevelopment :: PlayerKey -> ZoneKind -> Int -> Int -> Message
+    -- ^ Bolt of Change: a development in the named zone becomes a
+    -- unit with the given power and HP until end of turn. The
+    -- development count stays put ("it also counts as a
+    -- development"); if the animated unit dies, one development from
+    -- that zone is destroyed in its stead.
+  -- Hand / deck card flow
+  TakeCardsFromDeckToHand :: PlayerKey -> [UnitKey] -> Message
+    -- ^ Move the named cards from the player's deck into their hand
+    -- (Chittering Horde).
+  DiscardCardsFromHand :: PlayerKey -> [UnitKey] -> Message
+    -- ^ Discard the named cards from the player's hand (Caught the
+    -- Scent).
+  DiscardCardsFromDeck :: PlayerKey -> [UnitKey] -> Message
+    -- ^ Discard the named cards from anywhere in the player's deck,
+    -- preserving the order of the rest (Plague Monk).
+  -- Attachment / support shuffling
+  TransformUnitToAttachment :: UnitKey -> UnitKey -> Message
+    -- ^ Vigilant Elector: the first unit leaves the unit pool and
+    -- re-enters play as an Attachment on the second. Its synthetic
+    -- support def destroys the host at the host controller's end of
+    -- turn; the discard pile receives the original unit card when
+    -- the attachment leaves play.
+  MoveAttachment :: UnitKey -> UnitKey -> Message
+    -- ^ Helblaster Crew: detach the named attachment from its host
+    -- and attach it to the second unit.
+  MoveSupport :: UnitKey -> ZoneKind -> Message
+    -- ^ Relocate a free-standing support to another of its
+    -- controller's zones (Sigmar's Brilliance).
+  -- Control changes
+  TakeControlOfUnit :: PlayerKey -> UnitKey -> Message
+    -- ^ The named player takes control of the unit; it moves to that
+    -- player's corresponding zone (same 'ZoneKind'). Refused when the
+    -- hero-per-zone limit blocks the arrival. Used by Veteran
+    -- Sellswords, Grasping Darkness, Your Will Is Mine.
+  ScheduleControlReturn :: UnitKey -> PlayerKey -> Message
+    -- ^ At end of turn, hand control of the named unit to the named
+    -- player (Grasping Darkness returns its stolen unit).
+  CheckUnitVitals :: UnitKey -> Message
+    -- ^ Re-verify that the named unit's damage still meets or exceeds
+    -- its effective max HP, and only then queue 'DestroyUnit'. Queued
+    -- by the post-message stat sweep instead of a direct destroy so a
+    -- unit saved in the meantime (Hydra Blade ransom, Vigilant
+    -- Pistoliers relocation) isn't killed by a stale duplicate.
+  -- Combat assignment surgery
+  RedirectAssignedUnitDamage :: UnitKey -> UnitKey -> Int -> Message
+    -- ^ Thick-Skinned: move up to N points of pending cancellable
+    -- combat damage from the first unit's assignment onto the
+    -- second.
   -- Zone bookkeeping
   HealCapital :: PlayerKey -> Int -> Message
     -- ^ Remove up to N total damage tokens from the named player's

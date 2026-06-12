@@ -2407,7 +2407,7 @@
     "health": 1,
     "traits": "Warrior, Elite",
     "text": "Battlefield only.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-001.jpg",
     "stub": false
@@ -2426,7 +2426,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Put into play one target Dwarf unit that entered your discard pile this turn. (You choose the zone in which the unit enters play.)",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-002.jpg",
     "stub": false
@@ -2445,7 +2445,7 @@
     "health": 2,
     "traits": "Warrior",
     "text": "You may play this unit from your hand any time you could take an action.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-003.jpg",
     "stub": false
@@ -2464,7 +2464,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Target opponent cannot draw more than one card this turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-004.jpg",
     "stub": false
@@ -2483,10 +2483,11 @@
     "health": 4,
     "traits": "Hero",
     "text": "Limit one Hero per zone. Forced: Whenever an opponent attacks this zone, he must return one of his attacking units to its owner's hand at the end of the turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-005.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-skavenblight-threat-006",
@@ -2497,12 +2498,12 @@
     "type": "Tactic",
     "race": "High Elf",
     "cost": 1,
-    "loyalty": 2,
+    "loyalty": 4,
     "power": null,
     "health": null,
     "traits": null,
     "text": "Action: Cancel the next 10 damage that would be dealt to one target High Elf unit this turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-006.jpg",
     "stub": false
@@ -2521,7 +2522,7 @@
     "health": null,
     "traits": null,
     "text": "Quest. Action: Discard 3 resource tokens from this card to target a support card in your discard pile, and put it into play in your quest zone. Quest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-007.jpg",
     "stub": false
@@ -2536,14 +2537,14 @@
     "race": "Orc",
     "cost": 1,
     "loyalty": 1,
-    "power": null,
+    "power": 1,
     "health": 1,
     "traits": "Cavalry",
     "text": "Battlefield. This unit gains 2 Power while attacking.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-008.jpg",
-    "stub": true
+    "stub": false
   },
   {
     "id": "the-skavenblight-threat-009",
@@ -2559,7 +2560,7 @@
     "health": null,
     "traits": "Attachment",
     "text": "Attach to a target unit in your battlefield. Attatched unit gains 1 Power for each damage on it.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-009.jpg",
     "stub": false
@@ -2574,11 +2575,11 @@
     "race": "Chaos",
     "cost": 3,
     "loyalty": 2,
-    "power": 1,
+    "power": 2,
     "health": 2,
     "traits": "Sorceror",
     "text": "Quest. Action: Spend 1 resource to deal 1 damage to one target damaged unit (limit once per turn).",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-010.jpg",
     "stub": false
@@ -2597,7 +2598,7 @@
     "health": null,
     "traits": "Spell",
     "text": "Action: Until the end of turn, one target development becomes a unit with 2 hit points and 2 Power. It also counts as a development.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-011.jpg",
     "stub": false
@@ -2611,15 +2612,16 @@
     "type": "Unit",
     "race": "Dark Elf",
     "cost": 5,
-    "loyalty": 3,
+    "loyalty": 4,
     "power": 3,
     "health": 3,
     "traits": "Hero",
     "text": "Limit one Hero per zone. At the end of your battlefield phase, deal 1 damage to each of your opponent's units that could have defended but did not.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-012.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-skavenblight-threat-013",
@@ -2630,12 +2632,12 @@
     "type": "Unit",
     "race": "Dark Elf",
     "cost": 3,
-    "loyalty": 2,
+    "loyalty": 4,
     "power": 1,
     "health": 3,
     "traits": "Cavalry",
     "text": "Toughness 3 Action: Spend 3 resources to have this unit lose all Toughness until the end of turn. Only an opponent may trigger this ability.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-013.jpg",
     "stub": false
@@ -2653,8 +2655,8 @@
     "power": null,
     "health": null,
     "traits": null,
-    "text": "Action: One target unit gets -1 hit points and another target unit gets1 hit points until the end of the turn.",
-    "quantity": null,
+    "text": "Action: One target unit gets -1 hit points and another target unit gets +1 hit points until the end of the turn.",
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-014.jpg",
     "stub": false
@@ -2673,10 +2675,11 @@
     "health": 1,
     "traits": "Hero, Skaven",
     "text": "Limit one Hero per zone. Destruction only. This unit may attack from any zone. While attacking, this unit gains 1 Power for each Skaven unit you control.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-015.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-skavenblight-threat-016",
@@ -2692,7 +2695,7 @@
     "health": 1,
     "traits": "Skaven",
     "text": "Destruction only. Action: Corrupt this unit to have one other target Skaven unit gain 1 Power until end of the turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-016.jpg",
     "stub": false
@@ -2711,7 +2714,7 @@
     "health": null,
     "traits": "Attachment, Weapon, Skaven",
     "text": "Destruction only. Attach to a target unit. Corrupt that unit. Attached unit gains 3 Power while attacking or defending.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-017.jpg",
     "stub": false
@@ -2730,10 +2733,11 @@
     "health": 4,
     "traits": "Hero, Witchhunter",
     "text": "Limit one hero per zone. Order only. Quest. Action: Spend 1 resource to deal 1 damage to one target corrupted unit in the battlefield.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-018.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-skavenblight-threat-019",
@@ -2749,7 +2753,7 @@
     "health": null,
     "traits": "Building",
     "text": "Kingdom. Action: At the beginning of your turn, you may return one of your developments to its owner's hand.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-019.jpg",
     "stub": false
@@ -2768,7 +2772,7 @@
     "health": null,
     "traits": "Building",
     "text": "Kingdom. While you control two or more developments in this zone, lower the cost for you to play Attachment cards by 1.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-skavenblight-threat-020.jpg",
     "stub": false
@@ -2787,7 +2791,7 @@
     "health": 1,
     "traits": "Engineer",
     "text": "Forced: After this unit enters play, heal up to 2 damage from this zone's section of your capital.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-021.jpg",
     "stub": false
@@ -2806,7 +2810,7 @@
     "health": null,
     "traits": "Attachment",
     "text": "Attached unit gains Toughness 1",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-022.jpg",
     "stub": false
@@ -2825,10 +2829,11 @@
     "health": 3,
     "traits": "Hero, Cavalry",
     "text": "Limit one Hero per zone. Cancel all damage to this unit while any opponent controls a corrupted unit.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-023.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "path-of-the-zealot-024",
@@ -2844,7 +2849,7 @@
     "health": 2,
     "traits": "Warrior",
     "text": "Action: Spend 1 resource to return this unit to its owner's hand.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-024.jpg",
     "stub": false
@@ -2863,7 +2868,7 @@
     "health": null,
     "traits": "Building",
     "text": "Cancel one damage assigned to your capital each turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-025.jpg",
     "stub": false
@@ -2882,7 +2887,7 @@
     "health": null,
     "traits": "Spell",
     "text": "Action: Destroy one target Attachment card.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-026.jpg",
     "stub": false
@@ -2901,7 +2906,7 @@
     "health": null,
     "traits": "Siege",
     "text": "Battlefield. Action: Spend X resources to deal X indirect damage to target opponent. X is the number of developments in this zone. (Players assign their own indirect damage.)",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-027.jpg",
     "stub": false
@@ -2920,7 +2925,7 @@
     "health": 3,
     "traits": "Ranger",
     "text": "Battlefield. Action: Spend 2 resources to deal 1 damage to one target unit in any battlefield. Arrer Boyz then takes 1 damage.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-028.jpg",
     "stub": false
@@ -2939,7 +2944,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Move one target Orc unit from your kingdom or your quest zone to your battlefield. That unit must attack this turn if able.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-029.jpg",
     "stub": false
@@ -2958,10 +2963,11 @@
     "health": 4,
     "traits": "Hero",
     "text": "Limit one hero per zone. Forced: At the beginning of your turn, corrupt one target unit.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-030.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "path-of-the-zealot-031",
@@ -2977,7 +2983,7 @@
     "health": 3,
     "traits": "Warrior",
     "text": "Forced: When an opponent's unit enters a discard pile from play, heal all damage on Bloodsworn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-031.jpg",
     "stub": false
@@ -2996,10 +3002,11 @@
     "health": null,
     "traits": "Quest",
     "text": "Action: During your quest phase, the unit questing on this card can initiate a single attack against a single zone controlled by an opponent.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-032.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "path-of-the-zealot-033",
@@ -3015,7 +3022,7 @@
     "health": 4,
     "traits": "Cavalry",
     "text": "This unit gains a power while any unit in play is corrupted.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-033.jpg",
     "stub": false
@@ -3034,7 +3041,7 @@
     "health": null,
     "traits": "Spell",
     "text": "Action: Destroy one target damaged unit.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-034.jpg",
     "stub": false
@@ -3053,7 +3060,7 @@
     "health": 2,
     "traits": "Skaven",
     "text": "Destruction Only. Battlefield. Action: Corrupt this unit to deal 1 damage to one target attacking or defending unit.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-035.jpg",
     "stub": false
@@ -3072,7 +3079,7 @@
     "health": null,
     "traits": "Skaven",
     "text": "Destruction Only. Action: Search the top 5 cards of your deck. You may reveal anynumber of Skaven cards found and put them into your hand. Shuffle therest of the searched cards into your deck.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-036.jpg",
     "stub": false
@@ -3091,7 +3098,7 @@
     "health": 2,
     "traits": "Witch Hunter",
     "text": "Order Only. Forced: After this unit enters play, destroy a unit that does not share the racial affiliation of its controller's capital.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-037.jpg",
     "stub": false
@@ -3110,7 +3117,7 @@
     "health": 1,
     "traits": "Warrior",
     "text": "Battlefield Only. Forced: At the end of your turn, target opponent gains control of this unit and moves it to his corresponding zone.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-038.jpg",
     "stub": false
@@ -3129,7 +3136,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Deal X indirect damage to one target player. X is the number of developments in your battlefield. (Players assign their own indirectdamage.)",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-039.jpg",
     "stub": false
@@ -3148,7 +3155,7 @@
     "health": null,
     "traits": null,
     "text": "Play after a zone is attacked. Action: Target unit must defend this turn, if able.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "path-of-the-zealot-040.jpg",
     "stub": false
@@ -3167,10 +3174,11 @@
     "health": 4,
     "traits": "Hero",
     "text": "Limit one Hero per Zone. This unit gains 1 power for each card attached to it.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-041.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "tooth-and-claw-042",
@@ -3186,7 +3194,7 @@
     "health": null,
     "traits": "Building",
     "text": "Kingdom. Units in your battlefield with one or more Attachment cards attached gain 1 Power.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-042.jpg",
     "stub": false
@@ -3205,7 +3213,7 @@
     "health": null,
     "traits": "Spell, Rune",
     "text": "Action: The next 2 damage dealt to one target unit are redirected to another target unit.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-043.jpg",
     "stub": false
@@ -3224,7 +3232,7 @@
     "health": 2,
     "traits": "Knight",
     "text": "Counterstrike 4.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-044.jpg",
     "stub": false
@@ -3243,7 +3251,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Target one unit. Until the end of the turn, cancel any other action that targets this unit unless the action's controller pays an additional 4 resources (per action).",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-045.jpg",
     "stub": false
@@ -3262,7 +3270,7 @@
     "health": 3,
     "traits": "Mage, Elite",
     "text": "Whenever this unit is assigned damage, cancel all but 1 of that damage.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-046.jpg",
     "stub": false
@@ -3281,7 +3289,7 @@
     "health": null,
     "traits": "Spell",
     "text": "Action: Cancel all damage that would be dealt to your capital until the end of the turn. For each damage thus canceled, gain 1 resource.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-047.jpg",
     "stub": false
@@ -3300,10 +3308,11 @@
     "health": 5,
     "traits": "Hero, Warrior",
     "text": "Limit one hero per zone. This unit gains 1 Power for each damage on it.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-048.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "tooth-and-claw-049",
@@ -3319,7 +3328,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Until the end of the turn, combat damage cannot be canceled.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-049.jpg",
     "stub": false
@@ -3338,7 +3347,7 @@
     "health": null,
     "traits": null,
     "text": "Quest. You may spend resources from this card to pay for Attachment cards that are played from your hand. Quest. FORCED: Place 1 Resource token on this card at the beginning of your turn if a unit is questing here.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-050.jpg",
     "stub": false
@@ -3353,11 +3362,11 @@
     "race": "Chaos",
     "cost": 2,
     "loyalty": 2,
-    "power": 1,
+    "power": 2,
     "health": 2,
     "traits": "Daemon",
     "text": "Action: When this unit leaves play, you may put another unit named Blue Horrors into play from your hand. (That unit may be played into any zone.)",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-051.jpg",
     "stub": false
@@ -3376,7 +3385,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Sacrifice a Unit. If you do, deal X damage to each unit in all Battlefields, where X is the sacrificed Unit's Power.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-052.jpg",
     "stub": false
@@ -3395,7 +3404,7 @@
     "health": "X",
     "traits": "Cavalry",
     "text": "X is the number of developments in this Zone.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-053.jpg",
     "stub": false
@@ -3414,7 +3423,7 @@
     "health": null,
     "traits": "Spell",
     "text": "Action: Until the end of the turn, take control of target unit with printed cost 2 or lower. Move the unit to your corresponding zone.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-054.jpg",
     "stub": false
@@ -3433,7 +3442,7 @@
     "health": 3,
     "traits": "Skaven",
     "text": "Destruction Only. Action: At the beginning of your turn, uncorrupt all Skaven units.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-055.jpg",
     "stub": false
@@ -3452,7 +3461,7 @@
     "health": 2,
     "traits": "Skaven",
     "text": "Destruction Only. Battlefield Only. Scout. This unit enters play corrupted.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-056.jpg",
     "stub": false
@@ -3471,7 +3480,7 @@
     "health": 5,
     "traits": "Warrior, Skaven",
     "text": "Destruction Only. Battlefield Only. This unit cannot defend.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-057.jpg",
     "stub": false
@@ -3490,7 +3499,7 @@
     "health": 1,
     "traits": "Knight",
     "text": "Order only. Quest zone only. Limited - you cannot play more than one Limited card per turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-058.jpg",
     "stub": false
@@ -3509,7 +3518,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Each player with X or more total developments may discard his hand and draw X cards.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-059.jpg",
     "stub": false
@@ -3528,7 +3537,7 @@
     "health": null,
     "traits": "Building",
     "text": "Kingdom. Whenever you search your deck, you may search an additional card.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "tooth-and-claw-060.jpg",
     "stub": false
@@ -3547,7 +3556,7 @@
     "health": 1,
     "traits": "Warrior",
     "text": "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage).",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-061.jpg",
     "stub": false
@@ -3566,7 +3575,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Search the top five cards of your deck. You may put into play (in any zone) one unit found amongst those cards with printed cost 3 or lower. Then shuffle your deck.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-062.jpg",
     "stub": false
@@ -3585,7 +3594,7 @@
     "health": null,
     "traits": null,
     "text": "Quest: After a card you control leaves play, you may discard 1 resource token from this card to place that card into its current zone as a development instead of discarding it. Quest: Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-063.jpg",
     "stub": false
@@ -3604,7 +3613,7 @@
     "health": 3,
     "traits": "Warrior",
     "text": "Quest: Action: Spend 1 resource to attach this unit to a target unit. It then counts as an Attachment with the text \"Attached unit is destroyed at the end of it's controller's turn.\"",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-064.jpg",
     "stub": false
@@ -3619,14 +3628,14 @@
     "race": "Empire",
     "cost": 1,
     "loyalty": 1,
-    "power": null,
+    "power": 0,
     "health": 2,
     "traits": "Zealot",
     "text": "Action: Sacrifice this unit to cancel the next 2 damage assigned to your capital this turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-065.jpg",
-    "stub": true
+    "stub": false
   },
   {
     "id": "the-deathmaster-s-dance-066",
@@ -3642,7 +3651,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Each of your defending units gains Counterstrike 1 until the end of the turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-066.jpg",
     "stub": false
@@ -3661,7 +3670,7 @@
     "health": 2,
     "traits": "Warrior, Elite",
     "text": "This unit enters play with 3 resource tokens on it. Action: Remove a resource token from this unit to gain 1 power until the end of the turn (limit once per turn.)",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-067.jpg",
     "stub": false
@@ -3680,7 +3689,7 @@
     "health": null,
     "traits": "Attachment, Spell",
     "text": "Attach to target unit. Whenever a unit is healed, attached units gains 1 power until the end of the turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-068.jpg",
     "stub": false
@@ -3699,7 +3708,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Return one target unit without any Attachment cards on it to its owner's hand.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-069.jpg",
     "stub": false
@@ -3718,7 +3727,7 @@
     "health": 3,
     "traits": "Warrior",
     "text": "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage).",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-070.jpg",
     "stub": false
@@ -3737,7 +3746,7 @@
     "health": null,
     "traits": "Attachment, Weapon",
     "text": "Attach to an Orc unit. If attached unit is defending alone, destroy all attacking units when they take combat damage this phase.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-071.jpg",
     "stub": false
@@ -3756,7 +3765,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Deal X damage to one target defending unit, where X is the number of units and developments in your battlefield.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-072.jpg",
     "stub": false
@@ -3771,11 +3780,11 @@
     "race": "Chaos",
     "cost": 6,
     "loyalty": 4,
-    "power": 4,
+    "power": 3,
     "health": 6,
     "traits": "Daemon",
     "text": "Battlefield. Action: Sacrifice a corrupt unit to give this unit 1 power until the end of the turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-073.jpg",
     "stub": false
@@ -3794,7 +3803,7 @@
     "health": null,
     "traits": "Siege",
     "text": "Kingdom. Whenever a tactic you play deals damage to one or more targets, deal an additional damage to each target.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-074.jpg",
     "stub": false
@@ -3813,7 +3822,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Sacrifice a unit. If you do, deal 1 damage to each section of each opponent's capital.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-075.jpg",
     "stub": false
@@ -3832,7 +3841,7 @@
     "health": 1,
     "traits": "Creature",
     "text": "Place 5 resource tokens on this unit when it enters play. Action: Remove a resource token from this unit to cancel 1 damage assigned to it. Then add 1 resource to your pool.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-076.jpg",
     "stub": false
@@ -3851,7 +3860,7 @@
     "health": null,
     "traits": "Siege",
     "text": "Battlefield. Action: Spend 2 resources to deal 2 indirect damage to each opponent. (Players assign their own indirect damage.)",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-077.jpg",
     "stub": false
@@ -3870,7 +3879,7 @@
     "health": null,
     "traits": null,
     "text": "Play during your turn. Action: Look at one opponent's hand. You may choose and discard one card from that hand.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-078.jpg",
     "stub": false
@@ -3889,10 +3898,11 @@
     "health": 2,
     "traits": "Hero, Skaven",
     "text": "Limit one hero per zone. Destruction only. Action: Corrupt this unit to destroy one target unit with fewer remaining HP than the number of Skaven cards in play.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-079.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-deathmaster-s-dance-080",
@@ -3908,7 +3918,7 @@
     "health": 2,
     "traits": "Creature",
     "text": "Destruction only. When Juvenile Wyvern defends, it deals its combat damage to all attacking units.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-deathmaster-s-dance-080.jpg",
     "stub": false
@@ -3927,7 +3937,7 @@
     "health": 1,
     "traits": "Slayer",
     "text": "Toughness 2. When you attack during your battlefield phase, this unit may attack from your quest zone.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-081.jpg",
     "stub": false
@@ -3946,10 +3956,11 @@
     "health": null,
     "traits": "Attachment, Relic",
     "text": "Attach to a target Dwarf Unit. Attached unit gains 2 Power. When attached unit enters a discard pile from play, each opponent takes 6 Indirect Damage. (Players assign their own indirect damage.)",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-082.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-warpstone-chronicles-083",
@@ -3960,12 +3971,12 @@
     "type": "Support",
     "race": "Dwarf",
     "cost": 0,
-    "loyalty": 2,
+    "loyalty": 1,
     "power": null,
     "health": null,
     "traits": "Attachment, Weapon",
     "text": "Attach to a Target Unit. While attached unit is attacking or defending, it gains 1 Power for each enemy unit participating in the battle.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-083.jpg",
     "stub": false
@@ -3984,7 +3995,7 @@
     "health": 2,
     "traits": "Warrior",
     "text": "If this unit is destroyed while in your battlefield, put it into play in your kingdom instead of into your discard pile.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-084.jpg",
     "stub": false
@@ -4003,10 +4014,11 @@
     "health": null,
     "traits": "Attachment, Relic",
     "text": "Attach to a target Empire Unit. Attached Unit gains 2 Power. Action: Sacrifice attached Unit to lower the cost of the next non-Epic Tactic you play this turn to 0.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-085.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-warpstone-chronicles-086",
@@ -4021,8 +4033,8 @@
     "power": null,
     "health": null,
     "traits": "Attachment, Weapon",
-    "text": "Attach to a Target Unit in your Battlefield. Attached Unit dealsX damage in combat, where X is the number of developments in your Battlefield.",
-    "quantity": null,
+    "text": "Attach to a target unit in your battlefield. Attached unit deals +X damage in combat, where X is the number of developments in your battlefield.",
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-086.jpg",
     "stub": false
@@ -4041,7 +4053,7 @@
     "health": 1,
     "traits": "Warrior",
     "text": "Toughness 1.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-087.jpg",
     "stub": false
@@ -4060,10 +4072,11 @@
     "health": null,
     "traits": "Attachment, Relic",
     "text": "Attach to a Target High Elf Unit. Attached Unit gains 1 Power for each Resource token on this card. FORCED: At the beginning of your turn, place a Resource token on this card.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-088.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-warpstone-chronicles-089",
@@ -4079,7 +4092,7 @@
     "health": null,
     "traits": "Spell",
     "text": "Action: Look at each opponent's hand. Then, draw a card.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-089.jpg",
     "stub": false
@@ -4096,12 +4109,12 @@
     "loyalty": 1,
     "power": 2,
     "health": 1,
-    "traits": "Warrior, Battlefield Only",
-    "text": null,
-    "quantity": null,
+    "traits": "Warrior",
+    "text": "Battlefield only.",
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-090.jpg",
-    "stub": true
+    "stub": false
   },
   {
     "id": "the-warpstone-chronicles-091",
@@ -4116,11 +4129,12 @@
     "power": null,
     "health": null,
     "traits": "Attachment, Relic",
-    "text": "Attach to a Target Orc Unit. Corrupt that Unit. Attached Unit deals2 Damage in Combat. While attached Unit is attacking double all damage dealt to the defending Opponent's Capital.",
-    "quantity": null,
+    "text": "Attach to a target Orc unit. Corrupt that unit. Attached unit deals +2 damage in combat. While attached unit is attacking, double all damage dealt to the defending opponent's capital.",
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-091.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-warpstone-chronicles-092",
@@ -4136,7 +4150,7 @@
     "health": null,
     "traits": "Attachment",
     "text": "Attach to a Target Orc Unit. Action: Sacrifice this card to redirect any number of combat damage assigned to attached Unit to one Target Unit you control.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-092.jpg",
     "stub": false
@@ -4151,11 +4165,11 @@
     "race": "Chaos",
     "cost": 5,
     "loyalty": 1,
-    "power": 2,
+    "power": 1,
     "health": 3,
     "traits": "Daemon",
     "text": "Action: When this unit attacks, target unit must defend if able.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-093.jpg",
     "stub": false
@@ -4174,7 +4188,7 @@
     "health": null,
     "traits": null,
     "text": "Action: One target Unit gains 3 Power until the end of the turn. At the end of the turn, that unit takes 2 damage.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-094.jpg",
     "stub": false
@@ -4192,11 +4206,12 @@
     "power": null,
     "health": null,
     "traits": "Attachment, Relic",
-    "text": "Attach to a Target Chaos Unit. Corrupt that Unit. Attached Unit gains 3 Power and gets2 Hit Points.",
-    "quantity": null,
+    "text": "Attach to a target Chaos unit. Corrupt that unit. Attached unit gains 3 Power and gets +2 hit points.",
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-095.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-warpstone-chronicles-096",
@@ -4207,12 +4222,12 @@
     "type": "Unit",
     "race": "Dark Elf",
     "cost": 3,
-    "loyalty": 2,
+    "loyalty": 3,
     "power": 1,
     "health": 2,
-    "traits": "Warrior, Battlefield",
-    "text": "Action: Spend X Resources to have this unit dealX Damage in combat until the end of turn. X is the number of Developments in this Zone.",
-    "quantity": null,
+    "traits": "Warrior",
+    "text": "Battlefield. Action: Spend X resources to have this unit deal +X damage in combat until the end of the turn. X is the number of developments in this zone.",
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-096.jpg",
     "stub": false
@@ -4231,10 +4246,11 @@
     "health": null,
     "traits": "Attachment, Relic",
     "text": "Attach to a Target Dark Elf Unit. Corrupt that Unit. Attached Unit gains 2 Power. If attached Unit would be destroyed, you may pay 2 Resources to (instead of destroying it) leave it in play and remove all damage from it.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-097.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "the-warpstone-chronicles-098",
@@ -4245,12 +4261,12 @@
     "type": "Quest",
     "race": "Dark Elf",
     "cost": 1,
-    "loyalty": 2,
+    "loyalty": 3,
     "power": null,
     "health": null,
     "traits": "Quest",
     "text": "Action: Discard 3 Resource tokens from this card to put a unit from an opponent's discard pile into play, corrupt, in your Quest Zone. Quest. FORCED: Place 1 resource token on this card at the beginning of your turn if a unit is questing here.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-098.jpg",
     "stub": false
@@ -4269,7 +4285,7 @@
     "health": null,
     "traits": null,
     "text": "Action: Spend 1 Resource to deal 1 damage to any target unit in this corresponding zone. Use this ability only once per turn, and only if any player has played a Spell card this turn.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-099.jpg",
     "stub": false
@@ -4287,11 +4303,12 @@
     "power": null,
     "health": null,
     "traits": "Attachment, Relic, Skaven",
-    "text": "Attach to a target Skaven Unit. Corrupt that Unit. Whenever a Unit is corrupted, place 1 Resource token on this card. Attached Unit dealsX Damage in combat, where X is the number of resource tokens on this card.",
-    "quantity": null,
+    "text": "Attach to a target Skaven unit. Corrupt that unit. Whenever a unit is corrupted, place 1 resource token on this card. Attached unit deals +X damage in combat, where X is the number of resource tokens on this card.",
+    "quantity": 3,
     "illustrator": null,
     "image": "the-warpstone-chronicles-100.jpg",
-    "stub": false
+    "stub": false,
+    "unique": true
   },
   {
     "id": "arcane-fire-101",
@@ -4307,7 +4324,7 @@
     "health": 4,
     "traits": "Warrior, Elite",
     "text": "Battlefield only.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-101.jpg",
     "stub": false
@@ -4321,12 +4338,12 @@
     "type": "Tactic",
     "race": "Dwarf",
     "cost": 10,
-    "loyalty": 3,
+    "loyalty": 5,
     "power": null,
     "health": null,
     "traits": "Epic Spell",
-    "text": "Epic Spell.\u00a0\u00a0Play during your turn. Action:\u00a0Heal all damage to your capital.",
-    "quantity": null,
+    "text": "Epic Spell.  Play during your turn. Action: Heal all damage to your capital.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-102.jpg",
     "stub": false
@@ -4344,8 +4361,8 @@
     "power": null,
     "health": null,
     "traits": null,
-    "text": "Action:\u00a0Each of your defending Units gains 2 Power until the end of the turn.",
-    "quantity": null,
+    "text": "Action: Each of your defending Units gains 2 Power until the end of the turn.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-103.jpg",
     "stub": false
@@ -4363,8 +4380,8 @@
     "power": 2,
     "health": 2,
     "traits": "Engineer",
-    "text": "Action:\u00a0When this unit enters play, move one target Attachment from one unit to another unit in the same zone.",
-    "quantity": null,
+    "text": "Action: When this unit enters play, move one target Attachment from one unit to another unit in the same zone.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-104.jpg",
     "stub": false
@@ -4382,8 +4399,8 @@
     "power": null,
     "health": null,
     "traits": "Epic Spell",
-    "text": "Action:\u00a0Rearrange your units and support cards, moving any number of them into new zones.",
-    "quantity": null,
+    "text": "Action: Rearrange your units and support cards, moving any number of them into new zones.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-105.jpg",
     "stub": false
@@ -4402,7 +4419,7 @@
     "health": null,
     "traits": "Quest",
     "text": "Any unit questing on this card can defend any of your zones, when they are attacked.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-106.jpg",
     "stub": false
@@ -4420,8 +4437,8 @@
     "power": 1,
     "health": 3,
     "traits": "Warrior, Elite",
-    "text": "FORCED:\u00a0When this unit enters play, put the top card of your deck into your battlefield as a development.",
-    "quantity": null,
+    "text": "FORCED: When this unit enters play, put the top card of your deck into your battlefield as a development.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-107.jpg",
     "stub": false
@@ -4439,8 +4456,8 @@
     "power": null,
     "health": null,
     "traits": "Epic Spell",
-    "text": "Play only during your turn.\u00a0Action:\u00a0Put into play all units in your discard pile. (You choose which zone each unit enters.)",
-    "quantity": null,
+    "text": "Play only during your turn. Action: Put into play all units in your discard pile. (You choose which zone each unit enters.)",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-108.jpg",
     "stub": false
@@ -4458,8 +4475,8 @@
     "power": null,
     "health": null,
     "traits": null,
-    "text": "Action:\u00a0One of your target units gets -1 hit points and gains 3 power until the end of the turn.",
-    "quantity": null,
+    "text": "Action: One of your target units gets -1 hit points and gains 3 power until the end of the turn.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-109.jpg",
     "stub": false
@@ -4477,8 +4494,8 @@
     "power": 1,
     "health": 3,
     "traits": "Ranger",
-    "text": "Action:\u00a0Spend 2 resources and sacrifice this unit to destroy one target support card or development.",
-    "quantity": null,
+    "text": "Action: Spend 2 resources and sacrifice this unit to destroy one target support card or development.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-110.jpg",
     "stub": false
@@ -4496,8 +4513,8 @@
     "power": null,
     "health": null,
     "traits": "Epic Spell",
-    "text": "Play at the beginning of your turn.\u00a0Action:\u00a0Destroy all opponent's units.",
-    "quantity": null,
+    "text": "Play at the beginning of your turn. Action: Destroy all opponent's units.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-111.jpg",
     "stub": false
@@ -4515,8 +4532,8 @@
     "power": null,
     "health": null,
     "traits": null,
-    "text": "Action:\u00a0The unit in play with the lowest printed cost must be sacrificed. You choose which unit in case of a tie.",
-    "quantity": null,
+    "text": "Action: The unit in play with the lowest printed cost must be sacrificed. You choose which unit in case of a tie.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-112.jpg",
     "stub": false
@@ -4535,7 +4552,7 @@
     "health": 1,
     "traits": "Creature",
     "text": "Battlefield Only.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-113.jpg",
     "stub": false
@@ -4553,8 +4570,8 @@
     "power": null,
     "health": null,
     "traits": "Epic Spell",
-    "text": "Play at the beginning of your turn.\u00a0Action:\u00a0Deal 8 damage to one section of target capital (you choose which section).",
-    "quantity": null,
+    "text": "Play at the beginning of your turn. Action: Deal 8 damage to one section of target capital (you choose which section).",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-114.jpg",
     "stub": false
@@ -4572,8 +4589,8 @@
     "power": null,
     "health": null,
     "traits": "Spell",
-    "text": "Action:\u00a0Sacrifice a unit.\u00a0 If you do, you may search the top 5 cards of your deck for any number of units and put one of them into play at random (you choose which zone).\u00a0 Then, shuffle the other cards back into your deck.",
-    "quantity": null,
+    "text": "Action: Sacrifice a unit.  If you do, you may search the top 5 cards of your deck for any number of units and put one of them into play at random (you choose which zone).  Then, shuffle the other cards back into your deck.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-115.jpg",
     "stub": false
@@ -4587,12 +4604,12 @@
     "type": "Unit",
     "race": "Dark Elf",
     "cost": 2,
-    "loyalty": 2,
+    "loyalty": 4,
     "power": 1,
     "health": 1,
-    "traits": "Warrior, Kingdom",
-    "text": "Action:\u00a0Spend 2 resources to choose one target unit with printed cost 2 or lower. That unit cannot attack or defend this turn.",
-    "quantity": null,
+    "traits": "Warrior",
+    "text": "Kingdom. Action: Spend 2 resources to choose one target unit with printed cost 2 or lower. That unit cannot attack or defend this turn.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-116.jpg",
     "stub": false
@@ -4610,8 +4627,8 @@
     "power": null,
     "health": null,
     "traits": "Epic Spell",
-    "text": "Play only during your turn.\u00a0Action:\u00a0Choose a zone. Take control of each opponent's units in that zone. (Those units move to your corresponding zone.)",
-    "quantity": null,
+    "text": "Play only during your turn. Action: Choose a zone. Take control of each opponent's units in that zone. (Those units move to your corresponding zone.)",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-117.jpg",
     "stub": false
@@ -4629,8 +4646,8 @@
     "power": null,
     "health": null,
     "traits": "Attachment, Hex",
-    "text": "Attach to a target unit. Treat attached unit as though its printed text box were blank (except for\u00a0Traits).",
-    "quantity": null,
+    "text": "Attach to a target unit. Treat attached unit as though its printed text box were blank (except for Traits).",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-118.jpg",
     "stub": false
@@ -4649,7 +4666,7 @@
     "health": null,
     "traits": "Warpstone, Skaven",
     "text": "Destruction Only. Kingdom. Lower the cost of the first Skaven card you play each turn by 1.",
-    "quantity": null,
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-119.jpg",
     "stub": false
@@ -4667,8 +4684,8 @@
     "power": 1,
     "health": 2,
     "traits": "Skaven",
-    "text": "Destruction Only. Kingdom.\u00a0Action:\u00a0Whenever you play a Spell, look at the top two cards of any player's deck. Discard any number of those cards and place the rest back on top of the deck in any order.",
-    "quantity": null,
+    "text": "Destruction Only. Kingdom. Action: Whenever you play a Spell, look at the top two cards of any player's deck. Discard any number of those cards and place the rest back on top of the deck in any order.",
+    "quantity": 3,
     "illustrator": null,
     "image": "arcane-fire-120.jpg",
     "stub": false
@@ -15060,7 +15077,7 @@
     "power": -1,
     "health": -1,
     "traits": "Epic.",
-    "text": "Quest. Action: Put 1 resource token on this card at the beginning of your turn if a unit is questing here. Quest. Action: Remove resource tokens from this card equal to the number of units in target opponent's discard pile. If you do, put all units in that opponent\u2019s discard pile into play in any of your zones (you may split them up), corrupted. Then, sacrifice this card.",
+    "text": "Quest. Action: Put 1 resource token on this card at the beginning of your turn if a unit is questing here. Quest. Action: Remove resource tokens from this card equal to the number of units in target opponent's discard pile. If you do, put all units in that opponent’s discard pile into play in any of your zones (you may split them up), corrupted. Then, sacrifice this card.",
     "quantity": 3,
     "illustrator": "Games Workshop Ltd",
     "image": "rising-dawn-019.jpg",
@@ -19318,7 +19335,7 @@
     "traits": "Fortification. Rune.",
     "text": "Action: When this zone is attacked, this card becomes a unit with 4 hit points (and retains its power) until the end of the phase. It also counts as a support card.",
     "quantity": 3,
-    "illustrator": "Andr\u00e9s Anezin",
+    "illustrator": "Andrés Anezin",
     "image": "cataclysm-005.jpg",
     "stub": false
   },
@@ -19753,7 +19770,7 @@
     "power": 0,
     "health": -1,
     "traits": "Hex. Attachment.",
-    "text": "Attach to a target unit. If a card would be discarded at random from the hand of attached unit\u2019s controller, you may instead look at that hand and choose and discard 1 card.",
+    "text": "Attach to a target unit. If a card would be discarded at random from the hand of attached unit’s controller, you may instead look at that hand and choose and discard 1 card.",
     "quantity": 3,
     "illustrator": "Christina Davis",
     "image": "cataclysm-046.jpg",

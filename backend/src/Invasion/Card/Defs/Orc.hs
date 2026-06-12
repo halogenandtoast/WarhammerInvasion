@@ -434,6 +434,270 @@ trollVomit = tacticCard "core-080" "Troll Vomit" do
     g <- getGame
     for_ g.units \u -> destroyUnit u.key
 
+-- The Corruption cycle ------------------------------------------------
+
+spiderRiders :: CardDef Unit
+spiderRiders = unitCard "the-skavenblight-threat-008" "Spider Riders" do
+  race Orc
+  cost 1
+  loyalty 1
+  power 1
+  hitPoints 1
+  trait Cavalry
+  body "Battlefield. This unit gains {power}{power} while attacking."
+  battlefield $ constant \self ->
+    when self.attacking $ gainPower self 2
+
+warPaint :: CardDef Support
+warPaint = supportCard "the-skavenblight-threat-009" "War Paint" do
+  race Orc
+  cost 0
+  loyalty 1
+  trait Attachment
+  body "Attach to a target unit in your battlefield. Attached unit gains {power} for each damage on it."
+  attachedTo \_self unit -> do
+    let Damage d = unit.damage
+    when (d > 0) $ gainPower unit d
+
+arrerBoyz :: CardDef Unit
+arrerBoyz = unitCard "path-of-the-zealot-028" "Arrer Boyz" do
+  race Orc
+  cost 4
+  loyalty 2
+  power 1
+  hitPoints 3
+  trait Ranger
+  body
+    "Battlefield. Action: Spend 2 resources to deal 1 damage to one target unit in any \
+    \battlefield. Arrer Boyz then takes 1 damage."
+  battlefield $ action "Loose arrers" 2 \usage ->
+    withTarget usage.user (unitWhere \u -> u.zone == BattlefieldZone) \k -> do
+      dealDamage k 1
+      dealDamage usage.self.key 1
+
+wolfRiderAssault :: CardDef Tactic
+wolfRiderAssault = tacticCard "path-of-the-zealot-029" "Wolf Rider Assault" do
+  race Orc
+  cost 0
+  loyalty 1
+  body
+    "Action: Move one target {orc} unit from your kingdom or your quest zone to your \
+    \battlefield. That unit must attack this turn if able."
+  playableWhen $ hasTarget movableOrc
+  whenResolved \self ->
+    -- "Must attack this turn" is left to the controller — the engine
+    -- doesn't force attack declarations.
+    withTarget self.controller movableOrc \k ->
+      moveUnit k BattlefieldZone
+  where
+    movableOrc = UnitMatching \me _ u ->
+      u.controller == me && u `isRace` Orc && u.zone /= BattlefieldZone
+
+ugrokBeardburna :: CardDef Unit
+ugrokBeardburna = unitCard "tooth-and-claw-048" "Ugrok Beardburna" do
+  hero
+  trait Warrior
+  race Orc
+  cost 5
+  loyalty 2
+  power 3
+  hitPoints 5
+  body "Limit one Hero per zone. This unit gains {power} for each damage on it."
+  selfPower \_g u -> let Damage d = u.damage in d
+
+mobUp :: CardDef Tactic
+mobUp = tacticCard "tooth-and-claw-049" "Mob Up" do
+  race Orc
+  cost 0
+  loyalty 1
+  body "Action: Until the end of the turn, combat damage cannot be cancelled."
+  whenResolved \_ -> push SetCombatDamageUncancellable
+
+datsMine :: CardDef Quest
+datsMine = questCard "tooth-and-claw-050" "Dat's Mine!" do
+  race Orc
+  cost 0
+  loyalty 2
+  body
+    "Quest. You may spend resources from this card to pay for Attachment cards that are \
+    \played from your hand. \
+    \Quest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here."
+  forced accrueTokenWhileQuesting
+  paysAttachmentCosts
+
+ironBoyz :: CardDef Unit
+ironBoyz = unitCard "the-deathmaster-s-dance-070" "Iron Boyz" do
+  race Orc
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Warrior
+  toughness 1
+  body "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage)."
+
+grimgorsSpike :: CardDef Support
+grimgorsSpike = supportCard "the-deathmaster-s-dance-071" "Grimgor's Spike" do
+  race Orc
+  cost 1
+  loyalty 2
+  traits [Attachment, Weapon]
+  body
+    "Attach to an {orc} unit. If attached unit is defending alone, destroy all attacking \
+    \units when they take combat damage this phase."
+  onReceive $ Receive \msg _owner self -> case msg of
+    DealDamageToUnit uk n | n > 0 -> spikeImpale self uk
+    DealDamageToUnitUncancellable uk n | n > 0 -> spikeImpale self uk
+    _ -> pure ()
+  where
+    spikeImpale self uk = do
+      g <- getGame
+      case (self.attachedTo, g.combat) of
+        (Just hostKey, Just cs)
+          | cs.defenders == [hostKey]
+          , uk `elem` cs.attackers ->
+              destroyUnit uk
+        _ -> pure ()
+
+swarmEm :: CardDef Tactic
+swarmEm = tacticCard "the-deathmaster-s-dance-072" "Swarm 'Em" do
+  race Orc
+  -- Printed cost X, where X is forced to the count below — modelled
+  -- as printed 0 plus a self cost adjustment so the engine collects
+  -- exactly X.
+  cost 0
+  loyalty 2
+  body
+    "Action: Deal X damage to one target defending unit, where X is the number of units \
+    \and developments in your battlefield."
+  selfCostAdjust \g pk -> swarmCount g pk
+  playableWhen $ hasTarget defendingUnit
+  whenResolved \self -> do
+    g <- getGame
+    let x = swarmCount g self.controller
+    when (x > 0) $
+      withTarget self.controller defendingUnit \k -> dealDamage k x
+  where
+    swarmCount g pk =
+      let me = playerOf pk g
+          Developments d = me.capital.battlefield.developments
+          units = length [u | u <- g.units, u.controller == pk, u.zone == BattlefieldZone]
+       in d + units
+
+snotlingPumpWagon :: CardDef Unit
+snotlingPumpWagon = unitCard "the-warpstone-chronicles-090" "Snotling Pump Wagon" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 2
+  hitPoints 1
+  trait Warrior
+  body "Battlefield only."
+  battlefieldOnly
+
+bashasBloodaxe :: CardDef Support
+bashasBloodaxe = supportCard "the-warpstone-chronicles-091" "Basha's Bloodaxe" do
+  unique
+  race Orc
+  cost 2
+  loyalty 1
+  traits [Attachment, Relic]
+  body
+    "Attach to a target {orc} unit. Corrupt that unit. Attached unit deals +2 damage in \
+    \combat. While attached unit is attacking, double all damage dealt to the defending \
+    \opponent's capital."
+  onEnterPlay \_owner self -> for_ self.attachedTo corrupt
+  supportCombat \_g s u ->
+    if s.attachedTo == Just u.key then 2 else 0
+  doublesCapitalDamage \g s targetPk ->
+    case (s.attachedTo, g.combat) of
+      (Just hostKey, Just cs) ->
+        hostKey `elem` cs.attackers && cs.defendingPlayer == targetPk
+      _ -> False
+
+thickSkinned :: CardDef Support
+thickSkinned = supportCard "the-warpstone-chronicles-092" "Thick-Skinned" do
+  race Orc
+  cost 0
+  loyalty 2
+  trait Attachment
+  body
+    "Attach to a target {orc} unit. Action: Sacrifice this card to redirect any number of \
+    \combat damage assigned to attached unit to one target unit you control."
+  actionWith "Soak it up" 0 [SacrificeSelf] \usage -> do
+    g <- getGame
+    for_ usage.self.attachedTo \host -> do
+      let pending = case g.combat of
+            Just cs ->
+              sum
+                [ pd.cancellable
+                | pd <- cs.pendingAssignments
+                , pd.target == PDUnit host
+                ]
+            Nothing -> 0
+      when (pending > 0) $
+        withTarget usage.user
+          (UnitMatching \me _ u -> u.controller == me && u.key /= host)
+          \dst -> do
+            n <- chooseAmount usage.user 1 pending "Redirect how much combat damage?"
+            push (RedirectAssignedUnitDamage host dst n)
+
+snotlingSaboteurs :: CardDef Unit
+snotlingSaboteurs = unitCard "arcane-fire-110" "Snotling Saboteurs" do
+  race Orc
+  cost 3
+  loyalty 2
+  power 1
+  hitPoints 3
+  trait Ranger
+  body
+    "Action: Spend 2 resources and sacrifice this unit to destroy one target support card \
+    \or development."
+  actionWith "Sabotage" 2 [SacrificeSelf] \usage ->
+    withTarget usage.user (AnySupportCard `Or` AnyDevelopmentZone) \case
+      TargetSupportOption k -> destroySupport k
+      TargetZoneOption owner zk -> destroyDevelopment owner zk
+      _ -> pure ()
+
+daBrainbusta :: CardDef Tactic
+daBrainbusta = tacticCard "arcane-fire-111" "Da Brainbusta!" do
+  race Orc
+  cost 10
+  loyalty 3
+  traits [Epic, Spell]
+  body "Play at the beginning of your turn. Action: Destroy all opponents' units."
+  playableWhen \g pk ->
+    g.currentPlayer == pk
+      && case g.actionWindow of
+        Just aw -> aw.trigger == BeginningOfTurnActionWindow
+        Nothing -> False
+  whenResolved \self -> do
+    g <- getGame
+    for_ [u.key | u <- g.units, u.controller /= self.controller] destroyUnit
+
+easyPickins :: CardDef Tactic
+easyPickins = tacticCard "arcane-fire-112" "Easy Pickin's" do
+  race Orc
+  cost 2
+  loyalty 1
+  body
+    "Action: The unit in play with the lowest printed cost must be sacrificed. You choose \
+    \which unit in case of a tie."
+  playableWhen \g _pk -> not (null g.units)
+  whenResolved \self -> do
+    g <- getGame
+    let printedCost u = case u.cardDef.cost of
+          Fixed n -> n
+          Variable -> 0
+    case g.units of
+      [] -> pure ()
+      us -> do
+        let lowest = minimum (map printedCost us)
+            candidates = [u.key | u <- us, printedCost u == lowest]
+        forcePickUnit self.controller candidates
+          "Easy Pickin's: choose which lowest-cost unit is sacrificed."
+          destroyUnit
+
 -- | A small lifted lookup that retrieves the unit list from
 -- 'getGame'. The 'effects' DSL works inside 'EffectM', not a 'HasGame'
 -- monad; we drive it through getGame manually.

@@ -44,6 +44,10 @@ data Keyword
     -- ^ Hero restriction. While a player controls a Hero in a given
     -- zone, neither player may put, play, or move another Hero into
     -- that same zone (FAQ 2.2 clarification).
+  | PlayAnytime
+    -- ^ "You may play this unit from your hand any time you could
+    -- take an action." (Nordland Halberdiers.) The engine relaxes the
+    -- capital-window gate to tactic timing for cards carrying this.
   deriving stock (Show, Eq)
 
 data Cost = PayResources Number | NoCost
@@ -83,6 +87,14 @@ data Trait
   | Skill
   | Warpstone
   | Zealot
+  | Skaven
+  | WitchHunter
+    -- ^ Printed as both "Witchhunter." (Marius the Righteous) and
+    -- "Witch Hunter." (Zealot Hunter); one constructor covers both.
+  | Hex
+  | Epic
+    -- ^ Half of the printed "Epic Spell." trait line. Epic spells are
+    -- excluded from cost-reduction effects like Runefang of Solland.
   deriving stock (Show, Eq)
 
 mconcat
@@ -149,6 +161,14 @@ data ExtraCost
     -- ^ Sacrifice one of your own units. Engine prompts the firing
     -- player; the picked unit is destroyed before the action's
     -- effect fires.
+  | SacrificeSelf
+    -- ^ Sacrifice the card hosting this action (Flagellants, Snotling
+    -- Saboteurs, Thick-Skinned). Units are destroyed, supports
+    -- discarded, before the effect fires.
+  | CorruptSelf
+    -- ^ Corrupt the unit hosting this action (Clan Rats, Poison Wind
+    -- Globadiers, Deathmaster Sniktch). Validation requires the host
+    -- to be an uncorrupted unit.
   deriving stock (Show, Eq)
 
 -- | A receipt for one extra cost paid during action triggering. Cards
@@ -156,7 +176,10 @@ data ExtraCost
 -- discarded inspect 'ActionUsage.payments' to find the receipts.
 data Payment
   = SacrificedUnit UnitKey
-    -- ^ Key of the unit destroyed to pay a 'SacrificeUnit' cost.
+    -- ^ Key of the unit destroyed to pay a 'SacrificeUnit' (or
+    -- 'SacrificeSelf') cost.
+  | CorruptedSelf
+    -- ^ Receipt for a paid 'CorruptSelf' cost.
   deriving stock (Show, Eq)
 
 -- | Everything an action's effect body needs to know when it fires:
@@ -188,6 +211,10 @@ data ActionDef k = ActionDef
     -- action only triggers while the host card sits in zone 'z' —
     -- mirrors the printed "[Zone]." prefix. 'Nothing' means the
     -- action is always available.
+  , actionOpponentOnly :: Bool
+    -- ^ "Only an opponent may trigger this ability." (Morathi's
+    -- Pegasus.) When set, the engine accepts the trigger only from
+    -- the host's opponent, who also pays the action's cost.
   }
 
 -- | Open type family of per-kind extras records. The engine queries
@@ -254,6 +281,34 @@ data UnitExtras = UnitExtras
     -- the inbound (post-multiplier, post-toughness) amount. Return
     -- 'Just plan' to claim some or all of the damage and route it
     -- elsewhere; 'Nothing' lets the damage land normally.
+  , selfHPBonus :: Game -> InPlay Unit -> Int
+    -- ^ Game-state-derived bonus to the unit's own max HP (Cold One
+    -- Chariot: X = developments in this zone). Folded into the cached
+    -- @effectiveMaxHP@ alongside attachment and aura HP.
+  , cancelAllDamageWhen :: Game -> InPlay Unit -> Bool
+    -- ^ "Cancel all damage to this unit while CONDITION." (Gustav the
+    -- Bear.) Checked on the cancellable damage path only —
+    -- uncancellable damage ignores it, per the keyword rules.
+  , perHitDamageCap :: Maybe Int
+    -- ^ "Whenever this unit is assigned damage, cancel all but N of
+    -- that damage." (Dragonmage: 1.) Caps each cancellable damage
+    -- event after Toughness; distinct from the per-turn 'damageCap'.
+  , cannotDefend :: Bool
+    -- ^ Printed "This unit cannot defend." (Clan Moulder's Elite.)
+    -- Excluded from the defender candidate pool.
+  , attackEligibleZones :: [ZoneKind]
+    -- ^ Zones this unit may attack from. Default battlefield only;
+    -- Greyseer Thanquol attacks from anywhere, Dragonslayer also from
+    -- the quest zone.
+  , destroyedToZone :: Game -> InPlay Unit -> Maybe ZoneKind
+    -- ^ Destruction replacement: instead of going to the discard
+    -- pile, re-enter play in the named zone (Vigilant Pistoliers:
+    -- battlefield -> kingdom). Attachments are still discarded and
+    -- leave-play hooks still fire.
+  , defenderDamageToAllAttackers :: Bool
+    -- ^ "When this unit defends, it deals its combat damage to all
+    -- attacking units." (Juvenile Wyvern.) The assign step gives each
+    -- attacker the unit's full combat damage instead of pooling it.
   }
 
 -- | Card-supplied redirect plan returned from 'preDamageRedirect'.
@@ -340,6 +395,37 @@ data SupportExtras = SupportExtras
     -- 'DealDamageToZone'; the engine tracks per-source usage in
     -- 'Game.capitalDefenseUsed' so the cancel fires at most once per
     -- turn regardless of whose turn it is.
+  , supportAuraToughness :: Game -> InPlay Support -> InPlay Unit -> Int
+    -- ^ Extra Toughness this support grants a unit (Gromril Armour:
+    -- +1 to the attached unit). Summed into 'totalToughness'
+    -- alongside the unit-side 'unitAuraToughness'.
+  , searchDepthBonus :: Game -> InPlay Support -> PlayerKey -> Int
+    -- ^ "Whenever you search your deck, you may search an additional
+    -- card." (Scout Camp.) Added to the depth of every
+    -- 'searchTopOfDeck' run by the named player.
+  , tacticDamageBonus :: Game -> InPlay Support -> PlayerKey -> Int
+    -- ^ "Whenever a tactic you play deals damage to one or more
+    -- targets, deal an additional damage to each target." (Hellcannon
+    -- Reserves.) Consulted by the damage handlers while
+    -- 'Game.tacticDamageContext' names the playing player.
+  , capitalDamageDoubler :: Game -> InPlay Support -> PlayerKey -> Bool
+    -- ^ "While attached unit is attacking, double all damage dealt to
+    -- the defending opponent's capital." (Basha's Bloodaxe.) Args:
+    -- game, this support, the player whose capital is being damaged.
+  , blanksHost :: Bool
+    -- ^ "Treat attached unit as though its printed text box were
+    -- blank (except for Traits)." (Witch Hag's Curse.) The engine
+    -- suppresses the host's receive, actions, keywords, and extras
+    -- while attached.
+  , hostDestroyRansom :: Maybe Int
+    -- ^ "If attached unit would be destroyed, you may pay N resources
+    -- to (instead of destroying it) leave it in play and remove all
+    -- damage from it." (Hydra Blade: 2.)
+  , revertToUnit :: Maybe (CardDef Unit)
+    -- ^ Set on synthetic attachments that are physically unit cards
+    -- (Vigilant Elector after its quest action). When the attachment
+    -- leaves play, the discard pile receives this unit def instead of
+    -- the synthetic support def.
   }
 
 -- | Static metadata about a card that's currently being played, used
@@ -364,6 +450,15 @@ data QuestExtras = QuestExtras
     -- Border while it holds 3+ resource tokens). Evaluated at damage
     -- time by 'DealDamageToZone'; once-per-turn usage is tracked in
     -- 'Game.capitalDefenseUsed'.
+  , questerDefendsAnyZone :: Bool
+    -- ^ "Any unit questing on this card can defend any of your zones
+    -- when they are attacked." (Protect the Empire.) Expands the
+    -- defender candidate pool past the attacked zone.
+  , paysForAttachments :: Bool
+    -- ^ "You may spend resources from this card to pay for Attachment
+    -- cards that are played from your hand." (Dat's Mine!.) The
+    -- attachment-play payment path drains this quest's tokens before
+    -- the resource pool.
   }
 
 -- | Tactic-specific tunables. Empty for now.
@@ -392,6 +487,13 @@ instance HasDefaultExtras Unit where
     , unitCostAdjustment = \_ _ _ _ -> 0
     , unitAuraToughness = \_ _ _ -> 0
     , preDamageRedirect = \_ _ _ -> Nothing
+    , selfHPBonus = \_ _ -> 0
+    , cancelAllDamageWhen = \_ _ -> False
+    , perHitDamageCap = Nothing
+    , cannotDefend = False
+    , attackEligibleZones = [BattlefieldZone]
+    , destroyedToZone = \_ _ -> Nothing
+    , defenderDamageToAllAttackers = False
     }
 
 instance HasDefaultExtras Support where
@@ -407,11 +509,20 @@ instance HasDefaultExtras Support where
     , supportAuraHP = \_ _ _ -> 0
     , runeOfFortitudeTax = False
     , capitalShieldPerTurn = False
+    , supportAuraToughness = \_ _ _ -> 0
+    , searchDepthBonus = \_ _ _ -> 0
+    , tacticDamageBonus = \_ _ _ -> 0
+    , capitalDamageDoubler = \_ _ _ -> False
+    , blanksHost = False
+    , hostDestroyRansom = Nothing
+    , revertToUnit = Nothing
     }
 
 instance HasDefaultExtras Quest where
   defaultExtras = QuestExtras
     { capitalRedirectFirstDamage = \_ _ -> False
+    , questerDefendsAnyZone = False
+    , paysForAttachments = False
     }
 
 instance HasDefaultExtras Tactic where
@@ -520,4 +631,11 @@ instance ToJSON (CardDef k) where
           [ "name" .= a.actionName
           , "cost" .= a.actionCost
           , "target" .= a.actionTarget
+          , "opponentOnly" .= a.actionOpponentOnly
           ]
+
+-- ToJSON because 'CardCodeFilter' rides inside 'History.playedBy'
+-- (and 'Game' serializes its history map to the wire). Lives at the
+-- bottom of the module so the TH splice doesn't cut earlier
+-- declarations off from later ones.
+deriveToJSON defaultOptions ''CardCodeFilter

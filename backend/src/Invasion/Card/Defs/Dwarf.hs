@@ -8,6 +8,7 @@
 module Invasion.Card.Defs.Dwarf (module Invasion.Card.Defs.Dwarf) where
 
 import Data.Map.Strict qualified as Map
+import Data.Text qualified as T
 import Invasion.Card.Builder
 import Invasion.Card.Effects
 import Invasion.Card.Triggers
@@ -352,3 +353,260 @@ masterRuneOfValaya = tacticCard "core-025" "Master Rune of Valaya" do
   -- normal.
   whenResolved \_ ->
     push CancelAllAssignedDamage
+
+-- The Corruption cycle ------------------------------------------------
+
+gurnisElite :: CardDef Unit
+gurnisElite = unitCard "the-skavenblight-threat-001" "Gurni's Elite" do
+  race Dwarf
+  cost 3
+  loyalty 3
+  power 3
+  hitPoints 1
+  traits [Warrior, Elite]
+  body "Battlefield only."
+  battlefieldOnly
+
+standYourGround :: CardDef Tactic
+standYourGround = tacticCard "the-skavenblight-threat-002" "Stand Your Ground" do
+  race Dwarf
+  cost 1
+  loyalty 2
+  body
+    "Action: Put into play one target {dwarf} unit that entered your discard pile this turn. \
+    \(You choose the zone in which the unit enters play.)"
+  playableWhen \g pk -> not (null (fallenDwarves g pk))
+  whenResolved \self -> do
+    let pk = self.controller
+    g <- getGame
+    chooseFromCards pk 1 1 (fallenDwarves g pk)
+      "Choose a Dwarf unit that fell this turn to put back into play." \chosen ->
+        for_ chosen \c ->
+          withTarget pk MyAnyZone \zk ->
+            putUnitIntoPlay pk FromDiscard c.key zk
+  where
+    fallenDwarves g pk =
+      let fellThisTurn =
+            Map.findWithDefault [] pk
+              (Map.findWithDefault mempty ThisTurn g.history).discardedUnitsBy
+       in [ c
+          | c <- (playerOf pk g).discard
+          , c.key `elem` fellThisTurn
+          , maybe False (`isRace` Dwarf) (asUnit c.def)
+          ]
+
+dwarfMiner :: CardDef Unit
+dwarfMiner = unitCard "path-of-the-zealot-021" "Dwarf Miner" do
+  race Dwarf
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 1
+  trait Engineer
+  body "Forced: After this unit enters play, heal up to 2 damage from this zone's section of your capital."
+  onEnterPlay \_owner self ->
+    push (HealZone self.controller self.zone 2)
+
+gromrilArmour :: CardDef Support
+gromrilArmour = supportCard "path-of-the-zealot-022" "Gromril Armour" do
+  race Dwarf
+  cost 0
+  loyalty 2
+  trait Attachment
+  body "Attach to a unit. Attached unit gains Toughness 1."
+  supportToughnessAura \_g s u ->
+    if s.attachedTo == Just u.key then 1 else 0
+
+gurniThorgrimson :: CardDef Unit
+gurniThorgrimson = unitCard "tooth-and-claw-041" "Gurni Thorgrimson" do
+  hero
+  race Dwarf
+  cost 5
+  loyalty 3
+  power 2
+  hitPoints 4
+  body "Limit one Hero per zone. This unit gains {power} for each card attached to it."
+  selfPower \_g u -> length u.attachments
+
+anvilOfDoom :: CardDef Support
+anvilOfDoom = supportCard "tooth-and-claw-042" "Anvil of Doom" do
+  race Dwarf
+  cost 3
+  loyalty 2
+  power 1
+  trait Building
+  body "Kingdom. Units in your battlefield with one or more Attachment cards attached gain {power}."
+  supportAura \_g s u ->
+    if s.zone == KingdomZone
+      && u.controller == s.controller
+      && u.zone == BattlefieldZone
+      && not (null u.attachments)
+      then 1
+      else 0
+
+blessingOfValaya :: CardDef Tactic
+blessingOfValaya = tacticCard "tooth-and-claw-043" "Blessing of Valaya" do
+  race Dwarf
+  cost 2
+  loyalty 1
+  traits [Spell, Rune]
+  body "Action: The next 2 damage dealt to one target unit are redirected to another target unit."
+  playableWhen \g _pk -> length g.units >= 2
+  whenResolved \self -> do
+    let pk = self.controller
+    withTarget pk AnyUnit \src ->
+      withTarget pk (unitWhere \u -> u.key /= src) \dst ->
+        -- No printed expiry: the shield lasts until consumed.
+        until Permanent $ redirectNextDamage src 2 dst
+
+mountainLegion :: CardDef Unit
+mountainLegion = unitCard "the-deathmaster-s-dance-061" "Mountain Legion" do
+  race Dwarf
+  cost 1
+  loyalty 3
+  power 1
+  hitPoints 1
+  trait Warrior
+  toughness 1
+  body "Toughness 1 (whenever this unit is assigned damage, cancel 1 of that damage)."
+
+emptyTheHold :: CardDef Tactic
+emptyTheHold = tacticCard "the-deathmaster-s-dance-062" "Empty the Hold" do
+  race Dwarf
+  cost 4
+  loyalty 1
+  body
+    "Action: Search the top five cards of your deck. You may put into play (in any zone) \
+    \one unit found amongst those cards with printed cost 3 or lower. Then, shuffle your deck."
+  playableWhen \g pk -> hasDeckSize 1 g pk
+  whenResolved \self -> do
+    let pk = self.controller
+    searchTopOfDeck pk 5 \result -> do
+      let matches =
+            [ c
+            | c <- result.cards
+            , Just cd <- [asUnit c.def]
+            , costAtMost 3 cd
+            ]
+      chooseFromCards pk 0 1 matches
+        "Choose a unit with printed cost 3 or lower to put into play." \chosen ->
+          for_ chosen \c ->
+            withTarget pk MyAnyZone \zk ->
+              push (PutUnitIntoPlayFromDeck pk c.key zk)
+      shuffleDeck pk
+
+reclaimTheHold :: CardDef Quest
+reclaimTheHold = questCard "the-deathmaster-s-dance-063" "Reclaim the Hold" do
+  race Dwarf
+  cost 0
+  loyalty 2
+  body
+    "Quest. After a card you control leaves play, you may discard 1 resource token from this card \
+    \to place that card into its current zone as a development instead of discarding it. \
+    \Quest. Forced: Place 1 resource token on this card at the beginning of your turn if a unit is questing here."
+  forced accrueTokenWhileQuesting
+  -- Covers departing UNITS (the overwhelmingly common case). Support
+  -- departures don't carry their zone on the leave-play message, so
+  -- they can't be reclaimed yet.
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitLeftPlay du
+      | du.controller == self.controller -> do
+          g <- getGame
+          whenJust (findQuest self.key g) \q -> do
+            let inDiscard =
+                  any ((== du.key) . (.key)) (playerOf self.controller g).discard
+            when (q.tokens >= 1 && inDiscard) $
+              may self.controller
+                ("Reclaim the Hold: place " <> T.pack du.cardDef.title
+                  <> " as a development instead of discarding it?")
+                do
+                  addQuestToken self.key (-1)
+                  push (ConvertDepartedToDevelopment self.controller du.key du.zone)
+    _ -> pure ()
+
+dragonslayer :: CardDef Unit
+dragonslayer = unitCard "the-warpstone-chronicles-081" "Dragonslayer" do
+  race Dwarf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 1
+  trait Slayer
+  toughness 2
+  body
+    "Toughness 2. When you attack during your battlefield phase, this unit may attack \
+    \from your quest zone."
+  attacksFromZones [BattlefieldZone, QuestZone]
+
+greatBookOfGrudges :: CardDef Support
+greatBookOfGrudges = supportCard "the-warpstone-chronicles-082" "Great Book of Grudges" do
+  unique
+  race Dwarf
+  cost 2
+  loyalty 1
+  traits [Attachment, Relic]
+  body
+    "Attach to a target {dwarf} unit. Attached unit gains {power}{power}. \
+    \When attached unit enters a discard pile from play, each opponent takes 6 indirect damage. \
+    \(Players assign their own indirect damage.)"
+  attachmentPower 2
+  -- Fires on the host's destruction (the only path into a discard
+  -- pile from play for an in-play unit; bounce goes to hand).
+  onReceive $ Receive \msg _owner self -> case msg of
+    DestroyUnit uk
+      | Just hostKey <- self.attachedTo
+      , uk == hostKey ->
+          indirectDamage self.controller.next 6
+    _ -> pure ()
+
+flameCannon :: CardDef Support
+flameCannon = supportCard "the-warpstone-chronicles-083" "Flame Cannon" do
+  race Dwarf
+  cost 0
+  loyalty 1
+  traits [Attachment, Weapon]
+  body
+    "Attach to a target unit. While attached unit is attacking or defending, it gains \
+    \{power} for each enemy unit participating in the battle."
+  attachedTo \_self unit -> do
+    g <- getGame
+    let enemies = case g.combat of
+          Just cs
+            | unit.attacking -> length cs.defenders
+            | unit.defending -> length cs.attackers
+          _ -> 0
+    when ((unit.attacking || unit.defending) && enemies > 0) $
+      gainPower unit enemies
+
+longbeards :: CardDef Unit
+longbeards = unitCard "arcane-fire-101" "Longbeards" do
+  race Dwarf
+  cost 4
+  loyalty 2
+  power 3
+  hitPoints 4
+  traits [Warrior, Elite]
+  body "Battlefield only."
+  battlefieldOnly
+
+runeOfHearthAndHome :: CardDef Tactic
+runeOfHearthAndHome = tacticCard "arcane-fire-102" "Rune of Hearth and Home" do
+  race Dwarf
+  cost 10
+  loyalty 5
+  traits [Epic, Spell]
+  body "Epic Spell. Play during your turn. Action: Heal all damage to your capital."
+  playableWhen \g pk -> g.currentPlayer == pk
+  whenResolved \self -> healCapital self.controller 999
+
+hewnFromTheMountain :: CardDef Tactic
+hewnFromTheMountain = tacticCard "arcane-fire-103" "Hewn From the Mountain" do
+  race Dwarf
+  cost 2
+  loyalty 1
+  body "Action: Each of your defending units gains {power}{power} until the end of the turn."
+  whenResolved \self ->
+    withCombat \cs ->
+      when (cs.defendingPlayer == self.controller) $
+        for_ cs.defenders \k ->
+          until EndOfTurn $ buffPower k 2

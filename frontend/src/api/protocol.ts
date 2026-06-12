@@ -107,6 +107,7 @@ export type Trait =
   | 'QuestTrait' | 'Wasteland' | 'CapitalCenter' | 'Rift' | 'Relic'
   | 'Banner' | 'Goblin' | 'Mage' | 'Mutation' | 'Noble' | 'Shaman'
   | 'Skill' | 'Warpstone' | 'Zealot'
+  | 'Skaven' | 'WitchHunter' | 'Hex' | 'Epic'
 
 // Card definition as serialized by Invasion.CardDef.ToJSON. The 'receive'
 // function field is dropped on the wire — see CardDef.hs.
@@ -157,6 +158,12 @@ export interface EngineUnit {
   // in-flight combat. Cleared when combat ends.
   attacking: boolean
   defending: boolean
+  // Resource tokens sitting on the unit (Silver Helm Detachment,
+  // War Hydra).
+  tokens: number
+  // True while an attached support blanks the unit's printed text box
+  // (Witch Hag's Curse). Traits are unaffected.
+  blanked: boolean
 }
 
 export interface EngineSupport {

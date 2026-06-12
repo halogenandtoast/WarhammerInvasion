@@ -85,3 +85,14 @@ instance HasRaces (CardDef k) where
 -- | @x \`isRace\` r@ — does the value carry the given race?
 isRace :: HasRaces a => a -> Race -> Bool
 isRace x r = r `elem` racesOf x
+
+-- | The printed trait list of any card definition, regardless of
+-- kind. Used by effects that filter mixed card lists by trait
+-- (Chittering Horde reveals "Skaven cards" of any kind).
+someCardTraits :: SomeCardDef -> [Trait]
+someCardTraits = \case
+  UnitCardDef cd -> cd.traits
+  SupportCardDef cd -> cd.traits
+  QuestCardDef cd -> cd.traits
+  TacticCardDef cd -> cd.traits
+  LegendCardDef cd -> cd.traits
