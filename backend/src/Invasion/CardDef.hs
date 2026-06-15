@@ -281,6 +281,12 @@ data UnitExtras = UnitExtras
     -- the inbound (post-multiplier, post-toughness) amount. Return
     -- 'Just plan' to claim some or all of the damage and route it
     -- elsewhere; 'Nothing' lets the damage land normally.
+  , selfToughnessBonus :: Game -> InPlay Unit -> Int
+    -- ^ Game-state-derived bonus to the unit's own Toughness (Ludwig
+    -- Schwarzheim: X = experiences attached). Folded into
+    -- 'totalToughness' alongside the printed keyword and auras. Distinct
+    -- from 'Toughness Variable', which the engine reads as
+    -- developments-in-zone.
   , selfHPBonus :: Game -> InPlay Unit -> Int
     -- ^ Game-state-derived bonus to the unit's own max HP (Cold One
     -- Chariot: X = developments in this zone). Folded into the cached
@@ -487,6 +493,7 @@ instance HasDefaultExtras Unit where
     , unitCostAdjustment = \_ _ _ _ -> 0
     , unitAuraToughness = \_ _ _ -> 0
     , preDamageRedirect = \_ _ _ -> Nothing
+    , selfToughnessBonus = \_ _ -> 0
     , selfHPBonus = \_ _ -> 0
     , cancelAllDamageWhen = \_ _ -> False
     , perHitDamageCap = Nothing

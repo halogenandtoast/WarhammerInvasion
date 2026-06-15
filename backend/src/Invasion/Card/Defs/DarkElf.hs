@@ -12,7 +12,7 @@ import Invasion.Card.Effects
 import Invasion.Card.Triggers
 import Invasion.Card.Types
 import Invasion.CardDef
-import Invasion.Entity (SupportDetails (..), TacticContext (..), UnitDetails (..))
+import Invasion.Entity (LegendDetails (..), QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Game hiding (battlefield)
 import Invasion.Message
 import Invasion.Modifier
@@ -387,3 +387,40 @@ witchHagsCurse = supportCard "arcane-fire-118" "Witch Hag's Curse" do
   traits [Attachment, Hex]
   body "Attach to a target unit. Treat attached unit as though its printed text box were blank (except for Traits)."
   blanksAttachedUnit
+
+-- Days of Blood --------------------------------------------------------
+
+-- | "If you control a non-[Dark Elf] card, sacrifice this card."
+-- Counts any in-play unit, support, quest, or legend the player
+-- controls whose printed races don't include Dark Elf (neutral cards,
+-- with no race, therefore trip it). The watchtower itself is Dark Elf
+-- and so never counts against its own condition.
+controlsNonDarkElf :: Game -> PlayerKey -> Bool
+controlsNonDarkElf g pk =
+  has g.units || has g.supports || has g.quests || has g.legends
+  where
+    has
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Bool
+    has xs = any (\x -> x.controller == pk && DarkElf `notElem` x.cardDef.races) xs
+
+chillSeaWatchtower :: CardDef Support
+chillSeaWatchtower = supportCard "days-of-blood-004" "Chill Sea Watchtower" do
+  race DarkElf
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a non-[Dark Elf] card, sacrifice this card."
+  onReceive $ Receive \msg _owner self -> do
+    let boardChanged = case msg of
+          UnitEnteredPlay{} -> True
+          SupportEnteredPlay{} -> True
+          QuestEnteredPlay{} -> True
+          BeginTurn{} -> True
+          _ -> False
+    when boardChanged do
+      g <- getGame
+      when (controlsNonDarkElf g self.controller) $ destroySupport self.key

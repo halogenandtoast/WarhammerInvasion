@@ -969,3 +969,26 @@ riftOfBattle = supportCard "the-accursed-dead-052" "Rift of Battle" do
   trait Rift
   body "Units in all corresponding zones deal +1 damage in combat."
   supportCombat \_g _s _u -> 1
+
+ghorgon :: CardDef Unit
+ghorgon = unitCard "days-of-blood-017" "Ghorgon" do
+  race Chaos
+  cost 2
+  loyalty 2
+  power 3
+  hitPoints 3
+  trait Creature
+  battlefieldOnly
+  body
+    "Battlefield only. Forced: When this unit attacks, discard the top card of your deck. \
+    \If the discarded card is not a unit, sacrifice this unit."
+  onMyAttackDeclared \owner self _zone _attackers ->
+    case owner.deck of
+      [] -> pure ()
+      (top : _) -> do
+        millFromDeck self.controller 1
+        unless (isUnitCard top) $ destroyUnit self.key
+  where
+    isUnitCard c = case c.def of
+      UnitCardDef _ -> True
+      _ -> False

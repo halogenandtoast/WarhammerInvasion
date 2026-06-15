@@ -4369,9 +4369,10 @@ markPlayedLimited cd =
 totalToughness :: Game -> UnitDetails -> Int
 totalToughness g u
   | hasModifier g.modifiers u.key LoseAllToughness = 0
-  | otherwise = printed + aura + supportAura
+  | otherwise = printed + selfBonus + aura + supportAura
   where
     printed = sum (map asInt (unitKeywords u))
+    selfBonus = (unitExtrasOf u).selfToughnessBonus g u
     asInt (Toughness (Fixed n)) = n
     asInt (Toughness Variable) = devsInZone g u
     asInt _ = 0

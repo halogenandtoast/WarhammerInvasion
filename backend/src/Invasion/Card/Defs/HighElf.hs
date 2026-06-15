@@ -360,3 +360,31 @@ chargeOfTheSilverHelms = tacticCard "arcane-fire-109" "Charge of the Silver Helm
     withTarget self.controller ownUnit \k -> do
       until EndOfTurn $ debuffHP k 1
       until EndOfTurn $ buffPower k 3
+
+-- Days of Blood --------------------------------------------------------
+
+greatFireDragon :: CardDef Unit
+greatFireDragon = unitCard "days-of-blood-010" "Great Fire Dragon" do
+  race HighElf
+  cost 5
+  loyalty 2
+  power 3
+  hitPoints 4
+  trait Creature
+  battlefieldOnly
+  body
+    "Battlefield only. Action: When this unit attacks, put 1 resource token on it. \
+    \Then, you may remove X resource tokens from this unit to deal X damage to target \
+    \unit in the attacked zone."
+  onMyAttackDeclared \_owner self zone _attackers -> do
+    push (AdjustUnitTokens self.key 1)
+    g <- getGame
+    let avail = maybe 0 (.tokens) (findUnit self.key g) + 1
+        inZone u = u.zone == zone && u.controller /= self.controller
+        targets = [u | u <- g.units, inZone u]
+    when (avail > 0 && not (null targets)) $
+      may self.controller "Great Fire Dragon: remove resource tokens to deal damage?" do
+        x <- chooseAmount self.controller 1 avail "Remove how many resource tokens?"
+        withTarget self.controller (UnitMatching \_ _ u -> inZone u) \k -> do
+          push (AdjustUnitTokens self.key (negate x))
+          dealDamage k x

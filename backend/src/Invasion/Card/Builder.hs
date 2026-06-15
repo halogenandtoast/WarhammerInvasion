@@ -293,6 +293,13 @@ corruptsOnDamage = modifyUnitExtras \e -> e {corruptsOnCombatDamage = True}
 selfHP :: (Game -> UnitDetails -> Int) -> CardBuilder Unit ()
 selfHP f = modifyUnitExtras \e -> e {selfHPBonus = f}
 
+-- | Game-state-derived bonus to the unit's own Toughness (Ludwig
+-- Schwarzheim: X = experiences attached). Folded into 'totalToughness'.
+-- Distinct from the 'toughnessX' keyword, which the engine reads as
+-- developments-in-zone.
+selfToughness :: (Game -> UnitDetails -> Int) -> CardBuilder Unit ()
+selfToughness f = modifyUnitExtras \e -> e {selfToughnessBonus = f}
+
 -- | "Cancel all damage to this unit while CONDITION." (Gustav the
 -- Bear.) Only cancellable damage is affected.
 damageImmuneWhen :: (Game -> UnitDetails -> Bool) -> CardBuilder Unit ()

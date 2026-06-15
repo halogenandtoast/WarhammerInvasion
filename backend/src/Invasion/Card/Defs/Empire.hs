@@ -694,3 +694,27 @@ protectTheEmpire = questCard "arcane-fire-106" "Protect the Empire" do
   trait QuestTrait
   body "Quest. Any unit questing on this card can defend any of your zones when they are attacked."
   questerDefendsAnywhere
+
+-- Days of Blood --------------------------------------------------------
+
+ludwigSchwarzheim :: CardDef Unit
+ludwigSchwarzheim = unitCard "days-of-blood-007" "Ludwig Schwarzheim" do
+  unique
+  race Empire
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 3
+  trait Knight
+  body
+    "Toughness X. X is the number of experiences attached to this unit. \
+    \Action: When this unit attacks or defends, attach 1 experience to it."
+  -- Toughness X here is experience-derived, distinct from the engine's
+  -- development-counting 'Toughness Variable' keyword.
+  selfToughness \_g u -> length u.experiences
+  onMyAttackDeclared \_owner self _zone _attackers ->
+    attachExperience self.key self.cardDef.code
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks | self.key `elem` ks ->
+      attachExperience self.key self.cardDef.code
+    _ -> pure ()
