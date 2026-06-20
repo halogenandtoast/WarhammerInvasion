@@ -636,3 +636,36 @@ karakHirnMine = supportCard "glory-of-days-past-064" "Karak Hirn Mine" do
   body "If you control a faceup non-[Dwarf] unit or support card, sacrifice this card."
   sacrificeWhenBoardChanges \g self ->
     controlsNonRaceUnitOrSupport g self.controller Dwarf
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+kingAlrik :: CardDef Unit
+kingAlrik = unitCard "the-ruinous-hordes-088" "King Alrik" do
+  unique
+  race Dwarf
+  cost 3
+  loyalty 3
+  power 0
+  hitPoints 3
+  traits [Noble, Warrior]
+  battlefieldOnly
+  body "Battlefield only. This unit gains {power} for each resource you have in your pool."
+  selfPower \g u -> let Resources r = (playerOf u.controller g).resources in r
+
+hornHoldDefender :: CardDef Unit
+hornHoldDefender = unitCard "the-ruinous-hordes-089" "Horn Hold Defender" do
+  race Dwarf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Warrior
+  body
+    "While you have at least 3 resources in your pool, this unit gains Toughness 2. \
+    \Action: When this unit attacks or defends, gain 1 resource."
+  selfToughness \g u ->
+    let Resources r = (playerOf u.controller g).resources in if r >= 3 then 2 else 0
+  onMyAttackDeclared \_owner self _zone _attackers -> gainResources self.controller 1
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks | self.key `elem` ks -> gainResources self.controller 1
+    _ -> pure ()

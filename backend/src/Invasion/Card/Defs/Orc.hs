@@ -744,3 +744,25 @@ mobOHutz = supportCard "battle-for-the-old-world-043" "Mob O' Hutz" do
   body "If you control a faceup non-[Orc] unit or support card, sacrifice this card."
   sacrificeWhenBoardChanges \g self ->
     controlsNonRaceUnitOrSupport g self.controller Orc
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+wolfGobbos :: CardDef Unit
+wolfGobbos = unitCard "the-ruinous-hordes-094" "Wolf Gobbos" do
+  race Orc
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Goblin
+  body
+    "Action: When this unit survives an attack on an opponent's zone, sacrifice this unit \
+    \to destroy target unit in that zone."
+  onCombatResolveAsAttacker \_owner self cs -> do
+    g <- getGame
+    when (isJust (findUnit self.key g)) $
+      may self.controller "Wolf Gobbos: sacrifice to destroy a unit in that zone?" do
+        destroyUnit self.key
+        withTarget self.controller
+          (UnitMatching \_pk _g u -> u.zone == cs.targetZone && u.controller /= self.controller)
+          destroyUnit

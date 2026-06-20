@@ -785,3 +785,26 @@ chapterhouseStables = supportCard "battle-for-the-old-world-049" "Chapterhouse S
            && knightsPlayed == 0
           then -1
           else 0
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+steelBehemoth :: CardDef Unit
+steelBehemoth = unitCard "the-ruinous-hordes-085" "Steel Behemoth" do
+  race Empire
+  cost 6
+  loyalty 4
+  power 4
+  hitPoints 4
+  trait WarMachine
+  battlefieldOnly
+  body
+    "Battlefield only. Toughness X. X is the number of all opponent's units \
+    \participating in combat."
+  selfToughness \g u -> case g.combat of
+    Just cs ->
+      length
+        [ k
+        | k <- cs.attackers <> cs.defenders
+        , maybe False (\v -> v.controller == u.controller.next) (findUnit k g)
+        ]
+    Nothing -> 0

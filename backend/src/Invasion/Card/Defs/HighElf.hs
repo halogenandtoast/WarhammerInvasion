@@ -439,3 +439,19 @@ masterOfQhaysh = unitCard "glory-of-days-past-067" "Master of Qhaysh" do
     when (isJust (findUnit self.key g)) $
       withTarget self.controller (UnitMatching \_pk _g u -> u.tokens >= 1) \k ->
         push (AdjustUnitTokens k 1)
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+avelornSojourner :: CardDef Unit
+avelornSojourner = unitCard "the-ruinous-hordes-091" "Avelorn Sojourner" do
+  race HighElf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Mage
+  body "While this unit is questing, raise the cost of each tactic played by an opponent by 1."
+  unitCostAdjust \_g self pk filt ->
+    if self.zone == QuestZone && pk /= self.controller && filt.cfKind == Tactic
+      then 1
+      else 0
