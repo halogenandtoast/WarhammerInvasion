@@ -519,3 +519,26 @@ treasureThieves = unitCard "the-accursed-dead-053" "Treasure Thieves" do
         let diff = abs (someCardCost mine.def - someCardCost theirs.def)
         when (diff > 0) $ gainResources pk diff
       _ -> pure ()
+
+-- Bloodquest: Vessel of the Winds ---------------------------------------
+
+templeOfSpite :: CardDef Support
+templeOfSpite = supportCard "vessel-of-the-winds-075" "Temple of Spite" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 1
+  body
+    "Quest. Action: Discard the top card of your deck to have target unit get -1 hit point \
+    \until the end of the turn. Then, put 1 resource token on this card. (Limit once per turn.)"
+  quest $ action "Temple of Spite" 0 \usage -> do
+    g <- getGame
+    let used =
+          any (\m -> m.details == ActionUsedThisTurn)
+            (Map.findWithDefault [] (UnitRef usage.self.key) g.modifiers)
+    unless used $
+      withTarget usage.user AnyUnit \k -> do
+        until EndOfTurn (PendingBuff usage.self.key ActionUsedThisTurn)
+        millFromDeck usage.user 1
+        until EndOfTurn $ debuffHP k 1
+        adjustSupportTokens usage.self.key 1

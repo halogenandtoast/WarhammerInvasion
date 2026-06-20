@@ -691,3 +691,18 @@ bordertown = supportCard "days-of-blood-019" "Bordertown" do
           g <- getGame
           when (isJust g.combat) $ destroySupport self.key
     _ -> pure ()
+
+-- Bloodquest: Vessel of the Winds ---------------------------------------
+
+magePriestOfItza :: CardDef Unit
+magePriestOfItza = unitCard "vessel-of-the-winds-076" "Mage-Priest of Itza" do
+  cost 3
+  loyalty 0
+  power 1
+  hitPoints 3
+  trait Priest
+  orderOnly
+  body
+    "Order only. Action: When this unit enters play, shuffle the top 5 cards of your discard \
+    \pile back into your deck."
+  onEnterPlay \_owner self -> recycleDiscard self.controller 5

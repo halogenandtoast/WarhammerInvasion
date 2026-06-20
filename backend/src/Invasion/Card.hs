@@ -171,6 +171,9 @@ allCards =
     , ("the-accursed-dead-045", UnitCardDef lionStandard)
     , ("the-accursed-dead-051", UnitCardDef strickenWarrior)
     , ("the-accursed-dead-053", UnitCardDef treasureThieves)
+    -- Bloodquest cycle — Vessel of the Winds (pack 4)
+    , ("vessel-of-the-winds-075", SupportCardDef templeOfSpite)
+    , ("vessel-of-the-winds-076", UnitCardDef magePriestOfItza)
     -- Chaos — Cataclysm cycle
     , ("cataclysm-033", UnitCardDef lordOfKhorne)
     , ("faith-and-steel-113", UnitCardDef skulltaker)
