@@ -455,3 +455,29 @@ avelornSojourner = unitCard "the-ruinous-hordes-091" "Avelorn Sojourner" do
     if self.zone == QuestZone && pk /= self.controller && filt.cfKind == Tactic
       then 1
       else 0
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+lothernSeaMaster :: CardDef Unit
+lothernSeaMaster = unitCard "rising-dawn-009" "Lothern Sea Master" do
+  race HighElf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  traits [Warrior, Elite]
+  body
+    "Battlefield. This unit enters play with 3 resource tokens on it. Action: Deal X indirect \
+    \damage to target opponent. X is the number of resource tokens on this unit. Then, remove \
+    \1 resource token from this card. (Limit once per turn)."
+  onEnterPlay \_owner self -> push (AdjustUnitTokens self.key 3)
+  battlefield $ action "Bombard" 0 \usage -> do
+    g <- getGame
+    whenJust (findUnit usage.self.key g) \u -> do
+      let used =
+            any (\m -> m.details == ActionUsedThisTurn)
+              (Map.findWithDefault [] (UnitRef u.key) g.modifiers)
+      when (u.tokens > 0 && not used) do
+        until EndOfTurn (PendingBuff u.key ActionUsedThisTurn)
+        indirectDamage usage.user.next u.tokens
+        push (AdjustUnitTokens u.key (-1))

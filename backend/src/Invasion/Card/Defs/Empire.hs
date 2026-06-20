@@ -816,3 +816,20 @@ ostlandGreatswords = unitCard "glory-of-days-past-065" "Ostland Greatswords" do
   trait Warrior
   raider 2
   body "Raider 2."
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+rageOfTheBear :: CardDef Tactic
+rageOfTheBear = tacticCard "rising-dawn-008" "Rage of the Bear" do
+  race Empire
+  cost 1
+  loyalty 2
+  trait Spell
+  body
+    "Action: Heal 1 damage on target Mage unit. It deals +2 damage in combat until the end \
+    \of the turn."
+  playableWhen $ hasTarget (unitWhere \u -> Mage `elem` u.cardDef.traits)
+  whenResolved \self ->
+    withTarget self.controller (unitWhere \u -> Mage `elem` u.cardDef.traits) \k -> do
+      healUnit k 1
+      until EndOfTurn $ buffCombatDamage k 2

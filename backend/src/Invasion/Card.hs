@@ -158,6 +158,12 @@ allCards =
     , ("core-103", TacticCardDef bloodForTheBloodGod)
     , ("core-104", TacticCardDef cullingTheWeak)
     , ("core-105", TacticCardDef slaaneshsDomination)
+    -- Bloodquest cycle — Rising Dawn (pack 1)
+    , ("rising-dawn-005", UnitCardDef orcBully)
+    , ("rising-dawn-008", TacticCardDef rageOfTheBear)
+    , ("rising-dawn-009", UnitCardDef lothernSeaMaster)
+    , ("rising-dawn-013", TacticCardDef boonOfTzeentch)
+    , ("rising-dawn-015", SupportCardDef towerOfOblivion)
     -- Chaos — Cataclysm cycle
     , ("cataclysm-033", UnitCardDef lordOfKhorne)
     , ("faith-and-steel-113", UnitCardDef skulltaker)

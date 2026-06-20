@@ -800,3 +800,19 @@ goblinRaiders = unitCard "oaths-of-vengeance-031" "Goblin Raiders" do
   battlefieldOnly
   raider 2
   body "Battlefield only. Raider 2."
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+orcBully :: CardDef Unit
+orcBully = unitCard "rising-dawn-005" "Orc Bully" do
+  race Orc
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Elite
+  body "Forced: When this unit enters play, deal 1 damage to each Goblin unit you control."
+  onEnterPlay \_owner self -> do
+    g <- getGame
+    for_ [u.key | u <- g.units, u.controller == self.controller, Goblin `elem` u.cardDef.traits] \k ->
+      dealDamage k 1

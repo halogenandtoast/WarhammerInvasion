@@ -470,3 +470,26 @@ coldOneChampion = unitCard "the-ruinous-hordes-096" "Cold One Champion" do
   raider 2
   scout
   body "Raider 2. Scout."
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+towerOfOblivion :: CardDef Support
+towerOfOblivion = supportCard "rising-dawn-015" "Tower of Oblivion" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 1
+  body
+    "Quest. Action: Discard the top card of your deck to have target unit lose {power} until \
+    \the end of the turn. Then, put 1 resource token on this card. (Limit once per turn)."
+  quest $ action "Tower of Oblivion" 0 \usage -> do
+    g <- getGame
+    let used =
+          any (\m -> m.details == ActionUsedThisTurn)
+            (Map.findWithDefault [] (UnitRef usage.self.key) g.modifiers)
+    unless used $
+      withTarget usage.user AnyUnit \k -> do
+        until EndOfTurn (PendingBuff usage.self.key ActionUsedThisTurn)
+        millFromDeck usage.user 1
+        until EndOfTurn $ buffPower k (-1)
+        adjustSupportTokens usage.self.key 1

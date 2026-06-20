@@ -1090,3 +1090,24 @@ norseMarauders = unitCard "days-of-blood-016" "Norse Marauders" do
   trait Warrior
   raider 3
   body "Raider 3."
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+boonOfTzeentch :: CardDef Tactic
+boonOfTzeentch = tacticCard "rising-dawn-013" "Boon of Tzeentch" do
+  race Chaos
+  cost 2
+  loyalty 3
+  trait Spell
+  body
+    "Action: Discard the top card of your deck. Gain resources equal to the printed cost of \
+    \the discarded card."
+  whenResolved \self -> do
+    let pk = self.controller
+    me <- playerOf pk <$> getGame
+    case me.deck of
+      [] -> pure ()
+      (top : _) -> do
+        millFromDeck pk 1
+        let c = someCardCost top.def
+        when (c > 0) $ gainResources pk c
