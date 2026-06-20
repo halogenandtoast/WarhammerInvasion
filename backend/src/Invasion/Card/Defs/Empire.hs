@@ -805,3 +805,14 @@ theEmperorsStatue = supportCard "faith-and-steel-103" "The Emperor's Statue" do
   trait Building
   body "If you control a non-[Empire] card, sacrifice this card."
   sacrificeIfControlsOffFaction Empire
+
+ostlandGreatswords :: CardDef Unit
+ostlandGreatswords = unitCard "glory-of-days-past-065" "Ostland Greatswords" do
+  race Empire
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Warrior
+  raider 2
+  body "Raider 2."

@@ -1079,3 +1079,14 @@ painfulMutation = supportCard "glory-of-days-past-075" "Painful Mutation" do
       whenJust (findUnit hostKey g) \host ->
         when (host.effectivePower > 0) $
           indirectDamage host.controller host.effectivePower
+
+norseMarauders :: CardDef Unit
+norseMarauders = unitCard "days-of-blood-016" "Norse Marauders" do
+  race Chaos
+  cost 4
+  loyalty 1
+  power 2
+  hitPoints 3
+  trait Warrior
+  raider 3
+  body "Raider 3."

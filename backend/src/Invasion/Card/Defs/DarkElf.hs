@@ -447,3 +447,26 @@ markedForDeath = supportCard "glory-of-days-past-078" "Marked for Death" do
                 Variable -> 0
            in when (x > 0) $ millFromDeck du.controller x
     _ -> pure ()
+
+hagGraefKnights :: CardDef Unit
+hagGraefKnights = unitCard "oaths-of-vengeance-036" "Hag Graef Knights" do
+  race DarkElf
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Cavalry
+  raider 2
+  body "Raider 2."
+
+coldOneChampion :: CardDef Unit
+coldOneChampion = unitCard "the-ruinous-hordes-096" "Cold One Champion" do
+  race DarkElf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 3
+  trait Cavalry
+  raider 2
+  scout
+  body "Raider 2. Scout."

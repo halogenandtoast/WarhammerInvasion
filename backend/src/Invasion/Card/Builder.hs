@@ -122,6 +122,13 @@ toughnessX = keyword (Toughness Variable)
 scout :: CardBuilder Unit ()
 scout = keyword Scout
 
+-- | Raider X keyword: after combat damage, the attacking player gains
+-- X resources for this unit if it survived the combat it attacked in.
+-- Stacks across multiple instances. Resolved centrally by the combat
+-- pipeline ('FireRaiderResources').
+raider :: Int -> CardBuilder Unit ()
+raider n = keyword (Raider n)
+
 -- | Counterstrike N keyword: while declared as a defender, this unit
 -- immediately deals N uncancellable damage to one attacker of its
 -- choice before regular combat damage assigns.

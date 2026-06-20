@@ -788,3 +788,15 @@ gobboBigBoss = unitCard "faith-and-steel-111" "Gobbo Big Boss" do
         , Orc `elem` v.cardDef.races
         ]
     Nothing -> 0
+
+goblinRaiders :: CardDef Unit
+goblinRaiders = unitCard "oaths-of-vengeance-031" "Goblin Raiders" do
+  race Orc
+  cost 1
+  loyalty 2
+  power 1
+  hitPoints 1
+  trait Goblin
+  battlefieldOnly
+  raider 2
+  body "Battlefield only. Raider 2."

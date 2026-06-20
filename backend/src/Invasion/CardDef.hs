@@ -27,6 +27,13 @@ data Keyword
   | Limited
   | DamageCannotBeCancelled
   | Counterstrike Int
+  | Raider Int
+    -- ^ Raider X (Eternal War cycle): after combat damage is applied,
+    -- the attacking player gains resources equal to the combined
+    -- Raider X of all his attacking units that survived combat.
+    -- Multiple instances on one unit (e.g. printed + an attachment)
+    -- add together. Handled centrally by the combat pipeline
+    -- ('FireRaiderResources'), mirroring 'Scout'.
   | PlayInOpponentArea
     -- ^ Quest enters play in the opponent's play area while remaining
     -- under the playing player's control. Used by Dominion of Chaos.

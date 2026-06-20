@@ -704,3 +704,14 @@ fearlessInBattle = tacticCard "faith-and-steel-107" "Fearless in Battle" do
     for_ slayers \u -> do
       until EndOfTurn $ buffCombatDamage u.key 1
       until EndOfTurn $ buffToughness u.key 1
+
+veteranThunderers :: CardDef Unit
+veteranThunderers = unitCard "days-of-blood-005" "Veteran Thunderers" do
+  race Dwarf
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Warrior
+  raider 2
+  body "Raider 2."
