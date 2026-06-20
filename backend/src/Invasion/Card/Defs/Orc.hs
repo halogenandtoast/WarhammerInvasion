@@ -711,3 +711,23 @@ hasAnyDevelopment g =
   let withDev :: [Zone] -> Bool
       withDev zs = any (\z -> case z.developments of Developments n -> n > 0) zs
    in withDev g.player1.capital.zones || withDev g.player2.capital.zones
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+wolfChariot :: CardDef Unit
+wolfChariot = unitCard "oaths-of-vengeance-030" "Wolf Chariot" do
+  race Orc
+  cost 5
+  loyalty 2
+  power 3
+  hitPoints 4
+  traits [Cavalry, Goblin]
+  battlefieldOnly
+  body
+    "Battlefield only. Action: When this unit attacks, sacrifice a unit you control. \
+    \This unit gains {power} equal to the sacrificed unit's loyalty until the end of the phase."
+  onMyAttackDeclared \_owner self _zone _attackers ->
+    sacrificeOwnUnit self.controller "Wolf Chariot: sacrifice a unit you control." \k -> do
+      g <- getGame
+      let loy = maybe 0 (\u -> u.cardDef.loyalty) (findUnit k g)
+      when (loy > 0) $ until EndOfTurn $ buffPower self.key loy

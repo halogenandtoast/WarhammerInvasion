@@ -439,6 +439,23 @@ onAnyMessage
   -> CardBuilder k ()
 onAnyMessage handler = onReceive $ Receive \_msg owner self -> handler owner self
 
+-- | "If you control a non-[Race] card, sacrifice this card." The
+-- mono-faction watchtower idiom (Chill Sea Watchtower, Outlying
+-- Tower): the support checks its controller's board whenever it could
+-- have changed (a card entering play, or the start of a turn) and
+-- sacrifices itself the moment an off-faction card is in play.
+sacrificeIfControlsOffFaction :: Race -> CardBuilder Support ()
+sacrificeIfControlsOffFaction r = onReceive $ Receive \msg _owner self -> do
+  let boardChanged = case msg of
+        UnitEnteredPlay{} -> True
+        SupportEnteredPlay{} -> True
+        QuestEnteredPlay{} -> True
+        BeginTurn{} -> True
+        _ -> False
+  when boardChanged do
+    g <- getGame
+    when (controlsNonRaceCard g self.controller r) $ destroySupport self.key
+
 -- | Append an 'ActionDef' to the card's static action list. Multiple
 -- actions can be declared; the engine surfaces them to the client by
 -- index. Used directly by cards that build a record-style action; the

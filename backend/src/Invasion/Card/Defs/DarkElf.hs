@@ -12,7 +12,7 @@ import Invasion.Card.Effects
 import Invasion.Card.Triggers
 import Invasion.Card.Types
 import Invasion.CardDef
-import Invasion.Entity (LegendDetails (..), QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
+import Invasion.Entity (SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Game hiding (battlefield)
 import Invasion.Message
 import Invasion.Modifier
@@ -390,22 +390,6 @@ witchHagsCurse = supportCard "arcane-fire-118" "Witch Hag's Curse" do
 
 -- Days of Blood --------------------------------------------------------
 
--- | "If you control a non-[Dark Elf] card, sacrifice this card."
--- Counts any in-play unit, support, quest, or legend the player
--- controls whose printed races don't include Dark Elf (neutral cards,
--- with no race, therefore trip it). The watchtower itself is Dark Elf
--- and so never counts against its own condition.
-controlsNonDarkElf :: Game -> PlayerKey -> Bool
-controlsNonDarkElf g pk =
-  has g.units || has g.supports || has g.quests || has g.legends
-  where
-    has
-      :: ( HasField "controller" a PlayerKey
-         , HasField "cardDef" a (CardDef k)
-         )
-      => [a] -> Bool
-    has xs = any (\x -> x.controller == pk && DarkElf `notElem` x.cardDef.races) xs
-
 chillSeaWatchtower :: CardDef Support
 chillSeaWatchtower = supportCard "days-of-blood-004" "Chill Sea Watchtower" do
   race DarkElf
@@ -414,13 +398,35 @@ chillSeaWatchtower = supportCard "days-of-blood-004" "Chill Sea Watchtower" do
   power 1
   trait Building
   body "If you control a non-[Dark Elf] card, sacrifice this card."
-  onReceive $ Receive \msg _owner self -> do
-    let boardChanged = case msg of
-          UnitEnteredPlay{} -> True
-          SupportEnteredPlay{} -> True
-          QuestEnteredPlay{} -> True
-          BeginTurn{} -> True
-          _ -> False
-    when boardChanged do
-      g <- getGame
-      when (controlsNonDarkElf g self.controller) $ destroySupport self.key
+  sacrificeIfControlsOffFaction DarkElf
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+vaedraBloodsworn :: CardDef Unit
+vaedraBloodsworn = unitCard "oaths-of-vengeance-035" "Vaedra Bloodsworn" do
+  unique
+  race DarkElf
+  cost 3
+  loyalty 2
+  power 0
+  hitPoints 3
+  traits [Warrior]
+  body
+    "Action: When this unit attacks or defends, discard the top card of target opponent's \
+    \deck. This unit gains {power} equal to the cost of the discarded card until the end of \
+    \the phase."
+  onMyAttackDeclared \_owner self _zone _attackers -> drainTopCard self
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks | self.key `elem` ks -> drainTopCard self
+    _ -> pure ()
+  where
+    drainTopCard :: TriggerM m => UnitDetails -> m ()
+    drainTopCard self = do
+      let opp = self.controller.next
+      oppPlayer <- playerOf opp <$> getGame
+      case oppPlayer.deck of
+        [] -> pure ()
+        (top : _) -> do
+          millFromDeck opp 1
+          let c = someCardCost top.def
+          when (c > 0) $ until EndOfTurn $ buffPower self.key c

@@ -61,6 +61,14 @@ data ModifierDetails
     -- includes eligible units carrying this marker.
   deriving stock (Show, Eq)
 
+-- TODO: add an 'EndOfPhase' scope. Many cards read "until the end of
+-- the phase" (e.g. Wolf Chariot, Vaedra Bloodsworn, Maid of Sigmar's
+-- buff family, and the skipped Get Outta My Way! / Cavalry Raid).
+-- These currently use 'EndOfTurn' as an approximation, which is correct
+-- only because each phase has at most one combat today — it breaks down
+-- for any effect that should expire before a later same-turn phase, or
+-- for multi-combat phases. Implement a real phase-scoped expiry
+-- (cleared on 'EndPhase') and migrate the approximating cards to it.
 data ModifierScope = EndOfTurn | Permanent
   deriving stock (Show, Eq)
 

@@ -92,6 +92,8 @@ data Trait
     -- ^ Printed as both "Witchhunter." (Marius the Righteous) and
     -- "Witch Hunter." (Zealot Hunter); one constructor covers both.
   | Hex
+  | Vault
+    -- ^ Resource-generating support trait (Wealth of the Hold).
   | Epic
     -- ^ Half of the printed "Epic Spell." trait line. Epic spells are
     -- excluded from cost-reduction effects like Runefang of Solland.

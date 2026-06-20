@@ -388,3 +388,15 @@ greatFireDragon = unitCard "days-of-blood-010" "Great Fire Dragon" do
         withTarget self.controller (UnitMatching \_ _ u -> inZone u) \k -> do
           push (AdjustUnitTokens self.key (negate x))
           dealDamage k x
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+outlyingTower :: CardDef Support
+outlyingTower = supportCard "oaths-of-vengeance-023" "Outlying Tower" do
+  race HighElf
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a non-[High Elf] card, sacrifice this card."
+  sacrificeIfControlsOffFaction HighElf

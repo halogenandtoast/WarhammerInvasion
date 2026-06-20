@@ -774,6 +774,22 @@ hasEnemySupport g pk = any (\s -> s.controller /= pk) g.supports
 hasDeckSize :: Int -> Game -> PlayerKey -> Bool
 hasDeckSize n g pk = length (playerOf pk g).deck >= n
 
+-- | "Does this player control any in-play card whose printed races
+-- don't include @r@?" Backs the mono-faction watchtowers (Chill Sea
+-- Watchtower, Outlying Tower), which sacrifice themselves the moment
+-- their controller fields an off-faction card. Neutral cards (no race)
+-- count as off-faction, matching the printed "non-[Race] card" wording.
+controlsNonRaceCard :: Game -> PlayerKey -> Race -> Bool
+controlsNonRaceCard g pk r =
+  has g.units || has g.supports || has g.quests || has g.legends
+  where
+    has
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Bool
+    has = any \x -> x.controller == pk && r `notElem` x.cardDef.races
+
 -- | Does the player have at least one non-burned development zone
 -- (kingdom or battlefield)?
 canDevelop :: Game -> PlayerKey -> Bool

@@ -718,3 +718,25 @@ ludwigSchwarzheim = unitCard "days-of-blood-007" "Ludwig Schwarzheim" do
     DeclareDefenders ks | self.key `elem` ks ->
       attachExperience self.key self.cardDef.code
     _ -> pure ()
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+maidOfSigmar :: CardDef Unit
+maidOfSigmar = unitCard "oaths-of-vengeance-028" "Maid of Sigmar" do
+  race Empire
+  cost 2
+  loyalty 2
+  power 0
+  hitPoints 2
+  trait Priest
+  battlefieldOnly
+  body
+    "Battlefield only. This unit gains {power} for each experience attached to it. \
+    \Action: When this unit attacks or defends, attach 1 experience to it."
+  selfPower \_g u -> length u.experiences
+  onMyAttackDeclared \_owner self _zone _attackers ->
+    attachExperience self.key self.cardDef.code
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks | self.key `elem` ks ->
+      attachExperience self.key self.cardDef.code
+    _ -> pure ()

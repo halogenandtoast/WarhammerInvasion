@@ -610,3 +610,16 @@ hewnFromTheMountain = tacticCard "arcane-fire-103" "Hewn From the Mountain" do
       when (cs.defendingPlayer == self.controller) $
         for_ cs.defenders \k ->
           until EndOfTurn $ buffPower k 2
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+wealthOfTheHold :: CardDef Support
+wealthOfTheHold = supportCard "oaths-of-vengeance-027" "Wealth of the Hold" do
+  race Dwarf
+  cost 2
+  loyalty 2
+  power 1
+  trait Vault
+  body "Action: At the beginning of each opponent's turn, gain 1 resource."
+  onAnyTurnBegin \_owner self turnOwner ->
+    when (turnOwner /= self.controller) $ gainResources self.controller 1
