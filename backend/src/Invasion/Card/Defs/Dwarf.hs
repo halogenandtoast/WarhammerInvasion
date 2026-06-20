@@ -715,3 +715,30 @@ veteranThunderers = unitCard "days-of-blood-005" "Veteran Thunderers" do
   trait Warrior
   raider 2
   body "Raider 2."
+
+-- Bloodquest: Shield of the Gods ----------------------------------------
+
+dwarfAdventurer :: CardDef Unit
+dwarfAdventurer = unitCard "shield-of-the-gods-103" "Dwarf Adventurer" do
+  race Dwarf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 2
+  body "Quest. While this unit is questing, opponents' units cost 1 additional resource to play."
+  unitCostAdjust \_g self pk filt ->
+    if self.zone == QuestZone && pk /= self.controller && filt.cfKind == Unit
+      then 1
+      else 0
+
+hospitableCave :: CardDef Support
+hospitableCave = supportCard "shield-of-the-gods-104" "Hospitable Cave" do
+  race Dwarf
+  cost 2
+  loyalty 1
+  power 1
+  body "Quest. Each of your questing units gain Toughness 3."
+  supportToughnessAura \_g self u ->
+    if self.zone == QuestZone && u.controller == self.controller && u.zone == QuestZone
+      then 3
+      else 0

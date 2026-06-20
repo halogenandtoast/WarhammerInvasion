@@ -816,3 +816,27 @@ orcBully = unitCard "rising-dawn-005" "Orc Bully" do
     g <- getGame
     for_ [u.key | u <- g.units, u.controller == self.controller, Goblin `elem` u.cardDef.traits] \k ->
       dealDamage k 1
+
+-- Bloodquest: Shield of the Gods ----------------------------------------
+
+manglerSquigs :: CardDef Unit
+manglerSquigs = unitCard "shield-of-the-gods-105" "Mangler Squigs" do
+  race Orc
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 4
+  trait Creature
+  body
+    "Action: When this unit attacks, reveal the top card of your deck. If the printed cost of \
+    \the revealed card is odd, double this unit's power until the end of the turn. Otherwise, \
+    \this unit takes 2 damage."
+  onMyAttackDeclared \owner self _zone _attackers ->
+    case owner.deck of
+      [] -> pure ()
+      (top : _) -> do
+        g <- getGame
+        if odd (someCardCost top.def)
+          then whenJust (findUnit self.key g) \u ->
+            until EndOfTurn $ buffPower self.key u.effectivePower
+          else dealDamage self.key 2

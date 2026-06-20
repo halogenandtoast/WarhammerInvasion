@@ -854,3 +854,19 @@ averheimSoldiers = unitCard "fragments-of-power-027" "Averheim Soldiers" do
       let toks = sum [q.tokens | q <- g.quests, q.controller == self.controller]
       when (toks > 0) $ until EndOfTurn $ buffHP self.key toks
     _ -> pure ()
+
+-- Bloodquest: Shield of the Gods ----------------------------------------
+
+steelStandard :: CardDef Unit
+steelStandard = unitCard "shield-of-the-gods-107" "Steel Standard" do
+  race Empire
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  trait Knight
+  body "Knight units in this zone gain Toughness 1."
+  toughnessAura \_g self u ->
+    if Knight `elem` u.cardDef.traits && u.zone == self.zone && u.controller == self.controller
+      then 1
+      else 0

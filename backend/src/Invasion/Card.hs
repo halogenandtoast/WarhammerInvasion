@@ -177,6 +177,12 @@ allCards =
     -- Bloodquest cycle — Portent of Doom (pack 5)
     , ("portent-of-doom-089", UnitCardDef princeAlthran)
     , ("portent-of-doom-093", TacticCardDef murderlust)
+    -- Bloodquest cycle — Shield of the Gods (pack 6)
+    , ("shield-of-the-gods-103", UnitCardDef dwarfAdventurer)
+    , ("shield-of-the-gods-104", SupportCardDef hospitableCave)
+    , ("shield-of-the-gods-105", UnitCardDef manglerSquigs)
+    , ("shield-of-the-gods-107", UnitCardDef steelStandard)
+    , ("shield-of-the-gods-109", UnitCardDef ellyrianElite)
     -- Chaos — Cataclysm cycle
     , ("cataclysm-033", UnitCardDef lordOfKhorne)
     , ("faith-and-steel-113", UnitCardDef skulltaker)

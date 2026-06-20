@@ -515,3 +515,16 @@ princeAlthran = unitCard "portent-of-doom-089" "Prince Althran" do
     withTarget usage.user (UnitMatching \pk _g u -> u.controller == pk && u.tokens > 0) \k -> do
       push (AdjustUnitTokens k (-1))
       until EndOfTurn $ buffPower usage.self.key 1
+
+-- Bloodquest: Shield of the Gods ----------------------------------------
+
+ellyrianElite :: CardDef Unit
+ellyrianElite = unitCard "shield-of-the-gods-109" "Ellyrian Elite" do
+  race HighElf
+  cost 4
+  loyalty 3
+  power 2
+  hitPoints 4
+  traits [Cavalry, Elite]
+  scout
+  body "Scout."
