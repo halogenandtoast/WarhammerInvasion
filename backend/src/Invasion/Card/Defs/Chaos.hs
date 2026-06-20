@@ -1111,3 +1111,27 @@ boonOfTzeentch = tacticCard "rising-dawn-013" "Boon of Tzeentch" do
         millFromDeck pk 1
         let c = someCardCost top.def
         when (c > 0) $ gainResources pk c
+
+-- Bloodquest: Fragments of Power ----------------------------------------
+
+stolenSkin :: CardDef Support
+stolenSkin = supportCard "fragments-of-power-032" "Stolen Skin" do
+  race Chaos
+  cost 0
+  loyalty 2
+  trait Attachment
+  body
+    "Attach to a target [Chaos] unit. Attached unit gains Toughness 1. If attached unit \
+    \survives combat, heal all damage on it."
+  supportToughnessAura \_g self u -> if self.attachedTo == Just u.key then 1 else 0
+  onReceive $ Receive \msg _owner self -> case msg of
+    ResolveCombat ->
+      for_ self.attachedTo \hostKey -> do
+        g <- getGame
+        case g.combat of
+          Just cs
+            | hostKey `elem` (cs.attackers <> cs.defenders) ->
+                whenJust (findUnit hostKey g) \host ->
+                  let Damage d = host.damage in when (d > 0) $ healUnit hostKey d
+          _ -> pure ()
+    _ -> pure ()

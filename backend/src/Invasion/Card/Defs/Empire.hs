@@ -833,3 +833,24 @@ rageOfTheBear = tacticCard "rising-dawn-008" "Rage of the Bear" do
     withTarget self.controller (unitWhere \u -> Mage `elem` u.cardDef.traits) \k -> do
       healUnit k 1
       until EndOfTurn $ buffCombatDamage k 2
+
+-- Bloodquest: Fragments of Power ----------------------------------------
+
+averheimSoldiers :: CardDef Unit
+averheimSoldiers = unitCard "fragments-of-power-027" "Averheim Soldiers" do
+  race Empire
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  trait Warrior
+  body
+    "This unit deals +2 damage in combat. Action: When this unit defends, it gets +1 hit \
+    \point for each resource token on quests you control until the end of the turn."
+  combatPower \_g _u -> 2
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks | self.key `elem` ks -> do
+      g <- getGame
+      let toks = sum [q.tokens | q <- g.quests, q.controller == self.controller]
+      when (toks > 0) $ until EndOfTurn $ buffHP self.key toks
+    _ -> pure ()

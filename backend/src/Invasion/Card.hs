@@ -164,6 +164,9 @@ allCards =
     , ("rising-dawn-009", UnitCardDef lothernSeaMaster)
     , ("rising-dawn-013", TacticCardDef boonOfTzeentch)
     , ("rising-dawn-015", SupportCardDef towerOfOblivion)
+    -- Bloodquest cycle — Fragments of Power (pack 2)
+    , ("fragments-of-power-027", UnitCardDef averheimSoldiers)
+    , ("fragments-of-power-032", SupportCardDef stolenSkin)
     -- Chaos — Cataclysm cycle
     , ("cataclysm-033", UnitCardDef lordOfKhorne)
     , ("faith-and-steel-113", UnitCardDef skulltaker)
