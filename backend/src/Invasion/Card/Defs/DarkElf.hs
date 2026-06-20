@@ -493,3 +493,29 @@ towerOfOblivion = supportCard "rising-dawn-015" "Tower of Oblivion" do
         millFromDeck usage.user 1
         until EndOfTurn $ buffPower k (-1)
         adjustSupportTokens usage.self.key 1
+
+-- Bloodquest: The Accursed Dead -----------------------------------------
+
+treasureThieves :: CardDef Unit
+treasureThieves = unitCard "the-accursed-dead-053" "Treasure Thieves" do
+  race DarkElf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Sorceror
+  body
+    "Action: When this unit enters play, discard the top card of your deck to discard the top \
+    \card of target opponent's deck. Gain resources equal to the difference in printed cost \
+    \between the discarded cards."
+  onEnterPlay \owner self -> do
+    let pk = self.controller
+        opp = pk.next
+    oppP <- playerOf opp <$> getGame
+    case (owner.deck, oppP.deck) of
+      (mine : _, theirs : _) -> do
+        millFromDeck pk 1
+        millFromDeck opp 1
+        let diff = abs (someCardCost mine.def - someCardCost theirs.def)
+        when (diff > 0) $ gainResources pk diff
+      _ -> pure ()

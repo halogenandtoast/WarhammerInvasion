@@ -481,3 +481,16 @@ lothernSeaMaster = unitCard "rising-dawn-009" "Lothern Sea Master" do
         until EndOfTurn (PendingBuff u.key ActionUsedThisTurn)
         indirectDamage usage.user.next u.tokens
         push (AdjustUnitTokens u.key (-1))
+
+-- Bloodquest: The Accursed Dead -----------------------------------------
+
+lionStandard :: CardDef Unit
+lionStandard = unitCard "the-accursed-dead-045" "Lion Standard" do
+  race HighElf
+  cost 0
+  loyalty 2
+  power 0
+  hitPoints 2
+  body "Action: Spend 1 resource to have target unit get +1 hit point until the end of the turn."
+  action "Bolster" 1 \usage ->
+    withTarget usage.user AnyUnit \k -> until EndOfTurn $ buffHP k 1

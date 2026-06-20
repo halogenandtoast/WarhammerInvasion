@@ -167,6 +167,10 @@ allCards =
     -- Bloodquest cycle — Fragments of Power (pack 2)
     , ("fragments-of-power-027", UnitCardDef averheimSoldiers)
     , ("fragments-of-power-032", SupportCardDef stolenSkin)
+    -- Bloodquest cycle — The Accursed Dead (pack 3)
+    , ("the-accursed-dead-045", UnitCardDef lionStandard)
+    , ("the-accursed-dead-051", UnitCardDef strickenWarrior)
+    , ("the-accursed-dead-053", UnitCardDef treasureThieves)
     -- Chaos — Cataclysm cycle
     , ("cataclysm-033", UnitCardDef lordOfKhorne)
     , ("faith-and-steel-113", UnitCardDef skulltaker)

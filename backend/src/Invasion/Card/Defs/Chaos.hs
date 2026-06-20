@@ -1135,3 +1135,26 @@ stolenSkin = supportCard "fragments-of-power-032" "Stolen Skin" do
                   let Damage d = host.damage in when (d > 0) $ healUnit hostKey d
           _ -> pure ()
     _ -> pure ()
+
+-- Bloodquest: The Accursed Dead -----------------------------------------
+
+strickenWarrior :: CardDef Unit
+strickenWarrior = unitCard "the-accursed-dead-051" "Stricken Warrior" do
+  race Chaos
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 4
+  trait Warrior
+  body
+    "Forced: When this unit is opposed in combat, deal 1 damage to each other participating \
+    \unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks -> do
+      g <- getGame
+      case g.combat of
+        Just cs
+          | (self.key `elem` cs.attackers && not (null ks)) || self.key `elem` ks ->
+              for_ (filter (/= self.key) (cs.attackers <> ks)) \k -> dealDamage k 1
+        _ -> pure ()
+    _ -> pure ()
