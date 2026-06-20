@@ -107,7 +107,8 @@ export type Trait =
   | 'QuestTrait' | 'Wasteland' | 'CapitalCenter' | 'Rift' | 'Relic'
   | 'Banner' | 'Goblin' | 'Mage' | 'Mutation' | 'Noble' | 'Shaman'
   | 'Skill' | 'Warpstone' | 'Zealot'
-  | 'Skaven' | 'WitchHunter' | 'Hex' | 'Epic'
+  | 'Skaven' | 'WitchHunter' | 'Hex' | 'Vault' | 'Berserker' | 'Dragon'
+  | 'WarMachine' | 'Epic'
 
 // Card definition as serialized by Invasion.CardDef.ToJSON. The 'receive'
 // function field is dropped on the wire — see CardDef.hs.
