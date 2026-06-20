@@ -790,6 +790,21 @@ controlsNonRaceCard g pk r =
       => [a] -> Bool
     has = any \x -> x.controller == pk && r `notElem` x.cardDef.races
 
+-- | "Does this player control a faceup non-[Race] unit or support
+-- card?" The narrower cousin of 'controlsNonRaceCard' used by Mob O'
+-- Hutz, whose printed condition only counts units and supports (not
+-- quests/legends). In-play units and supports are always faceup, so no
+-- separate facedown check is needed.
+controlsNonRaceUnitOrSupport :: Game -> PlayerKey -> Race -> Bool
+controlsNonRaceUnitOrSupport g pk r = has g.units || has g.supports
+  where
+    has
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Bool
+    has = any \x -> x.controller == pk && r `notElem` x.cardDef.races
+
 -- | Does the player have at least one non-burned development zone
 -- (kingdom or battlefield)?
 canDevelop :: Game -> PlayerKey -> Bool

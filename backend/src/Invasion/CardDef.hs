@@ -94,6 +94,8 @@ data Trait
   | Hex
   | Vault
     -- ^ Resource-generating support trait (Wealth of the Hold).
+  | Berserker
+    -- ^ Aggressive melee unit trait (Norse Clansman, Ded Scary Boy).
   | Epic
     -- ^ Half of the printed "Epic Spell." trait line. Epic spells are
     -- excluded from cost-reduction effects like Runefang of Solland.

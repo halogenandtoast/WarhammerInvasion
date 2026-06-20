@@ -731,3 +731,16 @@ wolfChariot = unitCard "oaths-of-vengeance-030" "Wolf Chariot" do
       g <- getGame
       let loy = maybe 0 (\u -> u.cardDef.loyalty) (findUnit k g)
       when (loy > 0) $ until EndOfTurn $ buffPower self.key loy
+
+-- Battle for the Old World ---------------------------------------------
+
+mobOHutz :: CardDef Support
+mobOHutz = supportCard "battle-for-the-old-world-043" "Mob O' Hutz" do
+  race Orc
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a faceup non-[Orc] unit or support card, sacrifice this card."
+  sacrificeWhenBoardChanges \g self ->
+    controlsNonRaceUnitOrSupport g self.controller Orc

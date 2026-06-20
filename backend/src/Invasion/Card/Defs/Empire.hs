@@ -740,3 +740,48 @@ maidOfSigmar = unitCard "oaths-of-vengeance-028" "Maid of Sigmar" do
     DeclareDefenders ks | self.key `elem` ks ->
       attachExperience self.key self.cardDef.code
     _ -> pure ()
+
+-- Battle for the Old World ---------------------------------------------
+
+reiksguardElite :: CardDef Unit
+reiksguardElite = unitCard "battle-for-the-old-world-047" "Reiksguard Elite" do
+  race Empire
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 1
+  traits [Elite, Knight]
+  battlefieldOnly
+  body
+    "Battlefield only. This unit gains +1 hit point for every experience attached to it. \
+    \Action: When this unit attacks or defends, attach 1 experience to it."
+  selfHP \_g u -> length u.experiences
+  onMyAttackDeclared \_owner self _zone _attackers ->
+    attachExperience self.key self.cardDef.code
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks | self.key `elem` ks ->
+      attachExperience self.key self.cardDef.code
+    _ -> pure ()
+
+chapterhouseStables :: CardDef Support
+chapterhouseStables = supportCard "battle-for-the-old-world-049" "Chapterhouse Stables" do
+  race Empire
+  cost 3
+  loyalty 1
+  power 1
+  trait Building
+  body "Lower the cost of the first Knight unit you play each turn by 1."
+  globalCostAdjust \g self pk filt ->
+    let knightsPlayed =
+          length
+            [ cf
+            | cf <- Map.findWithDefault [] pk (historyOfThisTurn g).playedBy
+            , cf.cfKind == Unit
+            , Knight `elem` cf.cfTraits
+            ]
+     in if pk == self.controller
+           && filt.cfKind == Unit
+           && Knight `elem` filt.cfTraits
+           && knightsPlayed == 0
+          then -1
+          else 0

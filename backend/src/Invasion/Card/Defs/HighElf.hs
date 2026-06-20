@@ -400,3 +400,23 @@ outlyingTower = supportCard "oaths-of-vengeance-023" "Outlying Tower" do
   trait Building
   body "If you control a non-[High Elf] card, sacrifice this card."
   sacrificeIfControlsOffFaction HighElf
+
+-- Battle for the Old World ---------------------------------------------
+
+lilea :: CardDef Unit
+lilea = unitCard "battle-for-the-old-world-050" "Lilea" do
+  unique
+  race HighElf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 3
+  traits [Elite, Ranger]
+  body
+    "Action: When this unit attacks, put 1 resource token on it. Then, deal X indirect \
+    \damage to target opponent. X is the number of resource tokens on this unit."
+  onMyAttackDeclared \_owner self _zone _attackers -> do
+    push (AdjustUnitTokens self.key 1)
+    g <- getGame
+    let x = maybe 0 (.tokens) (findUnit self.key g) + 1
+    when (x > 0) $ indirectDamage self.controller.next x

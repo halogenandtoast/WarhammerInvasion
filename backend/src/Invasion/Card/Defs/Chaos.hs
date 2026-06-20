@@ -992,3 +992,44 @@ ghorgon = unitCard "days-of-blood-017" "Ghorgon" do
     isUnitCard c = case c.def of
       UnitCardDef _ -> True
       _ -> False
+
+-- Battle for the Old World ---------------------------------------------
+
+norseClansman :: CardDef Unit
+norseClansman = unitCard "battle-for-the-old-world-053" "Norse Clansman" do
+  race Chaos
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Berserker
+  body
+    "Forced: When this unit is opposed in combat, discard the top card of your deck. \
+    \If the discarded card is a unit, deal 1 uncancellable damage to target attacking \
+    \or defending unit."
+  -- "Opposed in combat" is modelled at the defender-declaration step:
+  -- the unit is opposed once attackers and defenders both exist and it
+  -- is on one side of the combat.
+  onReceive $ Receive \msg owner self -> case msg of
+    DeclareDefenders ks -> do
+      g <- getGame
+      let opposed = case g.combat of
+            Just cs ->
+              (self.key `elem` cs.attackers && not (null ks))
+                || self.key `elem` ks
+            Nothing -> False
+      when opposed case owner.deck of
+        [] -> pure ()
+        (top : _) -> do
+          millFromDeck self.controller 1
+          when (isUnitCard top) $
+            withTarget self.controller inCombatUnit \k ->
+              dealUncancellableDamage k 1
+    _ -> pure ()
+  where
+    isUnitCard c = case c.def of
+      UnitCardDef _ -> True
+      _ -> False
+    inCombatUnit = UnitMatching \_pk g u -> case g.combat of
+      Just cs -> u.key `elem` cs.attackers || u.key `elem` cs.defenders
+      Nothing -> False

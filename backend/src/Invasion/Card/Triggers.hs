@@ -439,13 +439,14 @@ onAnyMessage
   -> CardBuilder k ()
 onAnyMessage handler = onReceive $ Receive \_msg owner self -> handler owner self
 
--- | "If you control a non-[Race] card, sacrifice this card." The
--- mono-faction watchtower idiom (Chill Sea Watchtower, Outlying
--- Tower): the support checks its controller's board whenever it could
--- have changed (a card entering play, or the start of a turn) and
--- sacrifices itself the moment an off-faction card is in play.
-sacrificeIfControlsOffFaction :: Race -> CardBuilder Support ()
-sacrificeIfControlsOffFaction r = onReceive $ Receive \msg _owner self -> do
+-- | "When you control X, sacrifice this card." Re-checks the predicate
+-- whenever the controller's board could have changed (a card entering
+-- play, or the start of a turn) and sacrifices the support the moment
+-- it holds. Backs the self-sacrificing buildings (the mono-faction
+-- watchtowers, Mob O' Hutz).
+sacrificeWhenBoardChanges
+  :: (Game -> SupportDetails -> Bool) -> CardBuilder Support ()
+sacrificeWhenBoardChanges p = onReceive $ Receive \msg _owner self -> do
   let boardChanged = case msg of
         UnitEnteredPlay{} -> True
         SupportEnteredPlay{} -> True
@@ -454,7 +455,13 @@ sacrificeIfControlsOffFaction r = onReceive $ Receive \msg _owner self -> do
         _ -> False
   when boardChanged do
     g <- getGame
-    when (controlsNonRaceCard g self.controller r) $ destroySupport self.key
+    when (p g self) $ destroySupport self.key
+
+-- | "If you control a non-[Race] card, sacrifice this card." The
+-- mono-faction watchtower idiom (Chill Sea Watchtower, Outlying Tower).
+sacrificeIfControlsOffFaction :: Race -> CardBuilder Support ()
+sacrificeIfControlsOffFaction r =
+  sacrificeWhenBoardChanges \g self -> controlsNonRaceCard g self.controller r
 
 -- | Append an 'ActionDef' to the card's static action list. Multiple
 -- actions can be declared; the engine surfaces them to the client by
