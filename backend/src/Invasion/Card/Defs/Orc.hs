@@ -766,3 +766,25 @@ wolfGobbos = unitCard "the-ruinous-hordes-094" "Wolf Gobbos" do
         withTarget self.controller
           (UnitMatching \_pk _g u -> u.zone == cs.targetZone && u.controller /= self.controller)
           destroyUnit
+
+-- Faith and Steel ------------------------------------------------------
+
+gobboBigBoss :: CardDef Unit
+gobboBigBoss = unitCard "faith-and-steel-111" "Gobbo Big Boss" do
+  race Orc
+  cost 3
+  loyalty 1
+  power 0
+  hitPoints 3
+  trait Goblin
+  body "This unit gains {power} for each attacking or defending [Orc] unit you control."
+  selfPower \g u -> case g.combat of
+    Just cs ->
+      length
+        [ k
+        | k <- cs.attackers <> cs.defenders
+        , Just v <- [findUnit k g]
+        , v.controller == u.controller
+        , Orc `elem` v.cardDef.races
+        ]
+    Nothing -> 0

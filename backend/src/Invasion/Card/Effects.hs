@@ -638,6 +638,11 @@ imposeTargetTax target n = PendingBuff target (TargetTaxBonus n)
 buffCombatDamage :: UnitKey -> Int -> PendingBuff
 buffCombatDamage target n = PendingBuff target (GainCombatDamage n)
 
+-- | "Target unit gains Toughness N." Produces a 'PendingBuff' folded
+-- into 'totalToughness' for the buff's scope (Fearless in Battle).
+buffToughness :: UnitKey -> Int -> PendingBuff
+buffToughness target n = PendingBuff target (GainToughness n)
+
 -- | "Target unit must defend this turn, if able." Animosity,
 -- Alluring Daemonettes.
 mustDefend :: UnitKey -> PendingBuff

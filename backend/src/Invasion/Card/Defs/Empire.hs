@@ -808,3 +808,15 @@ steelBehemoth = unitCard "the-ruinous-hordes-085" "Steel Behemoth" do
         , maybe False (\v -> v.controller == u.controller.next) (findUnit k g)
         ]
     Nothing -> 0
+
+-- Faith and Steel ------------------------------------------------------
+
+theEmperorsStatue :: CardDef Support
+theEmperorsStatue = supportCard "faith-and-steel-103" "The Emperor's Statue" do
+  race Empire
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a non-[Empire] card, sacrifice this card."
+  sacrificeIfControlsOffFaction Empire

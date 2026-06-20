@@ -55,6 +55,10 @@ data ModifierDetails
   | GainCombatDamage Int
     -- ^ "This unit deals +N damage in combat." (Naggaroth Spearmen.)
     -- Added by 'combatDamageOf' on top of effective power.
+  | GainToughness Int
+    -- ^ "This unit gains Toughness N" for the modifier's scope
+    -- (Fearless in Battle). Summed into 'totalToughness' alongside the
+    -- printed keyword and auras.
   | MustDefend
     -- ^ "Target unit must defend this turn, if able." (Animosity,
     -- Alluring Daemonettes.) The defender-declaration step force-

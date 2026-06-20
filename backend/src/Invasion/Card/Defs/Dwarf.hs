@@ -669,3 +669,41 @@ hornHoldDefender = unitCard "the-ruinous-hordes-089" "Horn Hold Defender" do
   onReceive $ Receive \msg _owner self -> case msg of
     DeclareDefenders ks | self.key `elem` ks -> gainResources self.controller 1
     _ -> pure ()
+
+-- Faith and Steel ------------------------------------------------------
+
+doomSeeker :: CardDef Unit
+doomSeeker = unitCard "faith-and-steel-106" "Doom-Seeker" do
+  race Dwarf
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Slayer
+  body
+    "Action: When this unit survives an attack on an opponent's zone, sacrifice this unit \
+    \to destroy target support card in that zone."
+  onCombatResolveAsAttacker \_owner self cs -> do
+    g <- getGame
+    when (isJust (findUnit self.key g)) $
+      may self.controller "Doom-Seeker: sacrifice to destroy a support in that zone?" do
+        destroyUnit self.key
+        withTarget self.controller
+          (SupportMatching \_pk _g s -> s.zone == cs.targetZone && s.controller /= self.controller)
+          destroySupport
+
+fearlessInBattle :: CardDef Tactic
+fearlessInBattle = tacticCard "faith-and-steel-107" "Fearless in Battle" do
+  race Dwarf
+  cost 1
+  loyalty 3
+  trait Slayer
+  body
+    "Action: Until the end of the phase, each Slayer unit you control deals +1 damage in \
+    \combat and gains Toughness 1."
+  whenResolved \self -> do
+    slayers <- unitsMatching self.controller
+      (UnitMatching \pk _g u -> u.controller == pk && Slayer `elem` u.cardDef.traits)
+    for_ slayers \u -> do
+      until EndOfTurn $ buffCombatDamage u.key 1
+      until EndOfTurn $ buffToughness u.key 1
