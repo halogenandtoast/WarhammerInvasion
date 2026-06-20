@@ -665,10 +665,7 @@ hornHoldDefender = unitCard "the-ruinous-hordes-089" "Horn Hold Defender" do
     \Action: When this unit attacks or defends, gain 1 resource."
   selfToughness \g u ->
     let Resources r = (playerOf u.controller g).resources in if r >= 3 then 2 else 0
-  onMyAttackDeclared \_owner self _zone _attackers -> gainResources self.controller 1
-  onReceive $ Receive \msg _owner self -> case msg of
-    DeclareDefenders ks | self.key `elem` ks -> gainResources self.controller 1
-    _ -> pure ()
+  onMyAttackOrDefend \_owner self -> gainResources self.controller 1
 
 -- Faith and Steel ------------------------------------------------------
 

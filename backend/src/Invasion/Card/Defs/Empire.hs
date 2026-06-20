@@ -712,12 +712,7 @@ ludwigSchwarzheim = unitCard "days-of-blood-007" "Ludwig Schwarzheim" do
   -- Toughness X here is experience-derived, distinct from the engine's
   -- development-counting 'Toughness Variable' keyword.
   selfToughness \_g u -> length u.experiences
-  onMyAttackDeclared \_owner self _zone _attackers ->
-    attachExperience self.key self.cardDef.code
-  onReceive $ Receive \msg _owner self -> case msg of
-    DeclareDefenders ks | self.key `elem` ks ->
-      attachExperience self.key self.cardDef.code
-    _ -> pure ()
+  gainsExperienceOnAttackOrDefend
 
 -- Oaths of Vengeance ---------------------------------------------------
 
@@ -734,12 +729,7 @@ maidOfSigmar = unitCard "oaths-of-vengeance-028" "Maid of Sigmar" do
     "Battlefield only. This unit gains {power} for each experience attached to it. \
     \Action: When this unit attacks or defends, attach 1 experience to it."
   selfPower \_g u -> length u.experiences
-  onMyAttackDeclared \_owner self _zone _attackers ->
-    attachExperience self.key self.cardDef.code
-  onReceive $ Receive \msg _owner self -> case msg of
-    DeclareDefenders ks | self.key `elem` ks ->
-      attachExperience self.key self.cardDef.code
-    _ -> pure ()
+  gainsExperienceOnAttackOrDefend
 
 -- Battle for the Old World ---------------------------------------------
 
@@ -756,12 +746,7 @@ reiksguardElite = unitCard "battle-for-the-old-world-047" "Reiksguard Elite" do
     "Battlefield only. This unit gains +1 hit point for every experience attached to it. \
     \Action: When this unit attacks or defends, attach 1 experience to it."
   selfHP \_g u -> length u.experiences
-  onMyAttackDeclared \_owner self _zone _attackers ->
-    attachExperience self.key self.cardDef.code
-  onReceive $ Receive \msg _owner self -> case msg of
-    DeclareDefenders ks | self.key `elem` ks ->
-      attachExperience self.key self.cardDef.code
-    _ -> pure ()
+  gainsExperienceOnAttackOrDefend
 
 chapterhouseStables :: CardDef Support
 chapterhouseStables = supportCard "battle-for-the-old-world-049" "Chapterhouse Stables" do

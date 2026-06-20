@@ -415,10 +415,7 @@ vaedraBloodsworn = unitCard "oaths-of-vengeance-035" "Vaedra Bloodsworn" do
     "Action: When this unit attacks or defends, discard the top card of target opponent's \
     \deck. This unit gains {power} equal to the cost of the discarded card until the end of \
     \the phase."
-  onMyAttackDeclared \_owner self _zone _attackers -> drainTopCard self
-  onReceive $ Receive \msg _owner self -> case msg of
-    DeclareDefenders ks | self.key `elem` ks -> drainTopCard self
-    _ -> pure ()
+  onMyAttackOrDefend \_owner self -> drainTopCard self
   where
     drainTopCard :: TriggerM m => UnitDetails -> m ()
     drainTopCard self = do
