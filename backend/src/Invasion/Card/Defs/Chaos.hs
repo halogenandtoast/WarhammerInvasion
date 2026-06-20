@@ -1033,3 +1033,49 @@ norseClansman = unitCard "battle-for-the-old-world-053" "Norse Clansman" do
     inCombatUnit = UnitMatching \_pk g u -> case g.combat of
       Just cs -> u.key `elem` cs.attackers || u.key `elem` cs.defenders
       Nothing -> False
+
+-- Glory of Days Past ---------------------------------------------------
+
+chaosDragon :: CardDef Unit
+chaosDragon = unitCard "glory-of-days-past-073" "Chaos Dragon" do
+  race Chaos
+  cost 7
+  loyalty 3
+  power 5
+  hitPoints 5
+  traits [Creature, Dragon]
+  battlefieldOnly
+  body
+    "Battlefield only. Action: When this unit attacks, discard the top card of your deck. \
+    \If the discarded card is a unit, corrupt target unit in the defending zone."
+  onMyAttackDeclared \owner self zone _attackers ->
+    case owner.deck of
+      [] -> pure ()
+      (top : _) -> do
+        millFromDeck self.controller 1
+        when (isChaosDragonUnit top) $
+          withTarget self.controller
+            (UnitMatching \_pk _g u -> u.zone == zone && u.controller /= self.controller)
+            corrupt
+  where
+    isChaosDragonUnit c = case c.def of
+      UnitCardDef _ -> True
+      _ -> False
+
+painfulMutation :: CardDef Support
+painfulMutation = supportCard "glory-of-days-past-075" "Painful Mutation" do
+  race Chaos
+  cost 1
+  loyalty 2
+  traits [Attachment, Mutation]
+  body
+    "Attach to a target unit in any battlefield zone. Attached unit gains {power}{power}. \
+    \Forced: At the beginning of your turn, deal X indirect damage to attached unit's \
+    \controller. X is attached unit's total {power}."
+  attachmentPower 2
+  onMyTurnBegin \_owner self ->
+    for_ self.attachedTo \hostKey -> do
+      g <- getGame
+      whenJust (findUnit hostKey g) \host ->
+        when (host.effectivePower > 0) $
+          indirectDamage host.controller host.effectivePower

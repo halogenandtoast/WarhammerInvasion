@@ -623,3 +623,16 @@ wealthOfTheHold = supportCard "oaths-of-vengeance-027" "Wealth of the Hold" do
   body "Action: At the beginning of each opponent's turn, gain 1 resource."
   onAnyTurnBegin \_owner self turnOwner ->
     when (turnOwner /= self.controller) $ gainResources self.controller 1
+
+-- Glory of Days Past ---------------------------------------------------
+
+karakHirnMine :: CardDef Support
+karakHirnMine = supportCard "glory-of-days-past-064" "Karak Hirn Mine" do
+  race Dwarf
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a faceup non-[Dwarf] unit or support card, sacrifice this card."
+  sacrificeWhenBoardChanges \g self ->
+    controlsNonRaceUnitOrSupport g self.controller Dwarf

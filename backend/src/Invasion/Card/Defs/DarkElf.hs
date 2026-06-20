@@ -430,3 +430,23 @@ vaedraBloodsworn = unitCard "oaths-of-vengeance-035" "Vaedra Bloodsworn" do
           millFromDeck opp 1
           let c = someCardCost top.def
           when (c > 0) $ until EndOfTurn $ buffPower self.key c
+
+-- Glory of Days Past ---------------------------------------------------
+
+markedForDeath :: CardDef Support
+markedForDeath = supportCard "glory-of-days-past-078" "Marked for Death" do
+  race DarkElf
+  cost 0
+  loyalty 2
+  trait Attachment
+  body
+    "Attach to a target unit. When attached unit leaves play, attached unit's controller \
+    \must discard X cards from the top of his deck. X is the attached unit's cost."
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitLeftPlay du
+      | Just du.key == self.attachedTo ->
+          let x = case du.cardDef.cost of
+                Fixed n -> n
+                Variable -> 0
+           in when (x > 0) $ millFromDeck du.controller x
+    _ -> pure ()

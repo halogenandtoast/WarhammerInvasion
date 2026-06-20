@@ -96,6 +96,8 @@ data Trait
     -- ^ Resource-generating support trait (Wealth of the Hold).
   | Berserker
     -- ^ Aggressive melee unit trait (Norse Clansman, Ded Scary Boy).
+  | Dragon
+    -- ^ Dragon creature trait (Chaos Dragon, Great Fire Dragon).
   | Epic
     -- ^ Half of the printed "Epic Spell." trait line. Epic spells are
     -- excluded from cost-reduction effects like Runefang of Solland.

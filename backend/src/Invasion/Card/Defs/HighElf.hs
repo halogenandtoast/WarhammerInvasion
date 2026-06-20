@@ -420,3 +420,22 @@ lilea = unitCard "battle-for-the-old-world-050" "Lilea" do
     g <- getGame
     let x = maybe 0 (.tokens) (findUnit self.key g) + 1
     when (x > 0) $ indirectDamage self.controller.next x
+
+-- Glory of Days Past ---------------------------------------------------
+
+masterOfQhaysh :: CardDef Unit
+masterOfQhaysh = unitCard "glory-of-days-past-067" "Master of Qhaysh" do
+  race HighElf
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Mage
+  body
+    "Action: When this unit survives an attack on an opponent's zone, put 1 resource \
+    \token on a card with at least 1 resource token on it."
+  onCombatResolveAsAttacker \_owner self _cs -> do
+    g <- getGame
+    when (isJust (findUnit self.key g)) $
+      withTarget self.controller (UnitMatching \_pk _g u -> u.tokens >= 1) \k ->
+        push (AdjustUnitTokens k 1)
