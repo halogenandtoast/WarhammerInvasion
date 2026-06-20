@@ -174,6 +174,9 @@ allCards =
     -- Bloodquest cycle — Vessel of the Winds (pack 4)
     , ("vessel-of-the-winds-075", SupportCardDef templeOfSpite)
     , ("vessel-of-the-winds-076", UnitCardDef magePriestOfItza)
+    -- Bloodquest cycle — Portent of Doom (pack 5)
+    , ("portent-of-doom-089", UnitCardDef princeAlthran)
+    , ("portent-of-doom-093", TacticCardDef murderlust)
     -- Chaos — Cataclysm cycle
     , ("cataclysm-033", UnitCardDef lordOfKhorne)
     , ("faith-and-steel-113", UnitCardDef skulltaker)

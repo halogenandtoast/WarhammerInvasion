@@ -494,3 +494,24 @@ lionStandard = unitCard "the-accursed-dead-045" "Lion Standard" do
   body "Action: Spend 1 resource to have target unit get +1 hit point until the end of the turn."
   action "Bolster" 1 \usage ->
     withTarget usage.user AnyUnit \k -> until EndOfTurn $ buffHP k 1
+
+-- Bloodquest: Portent of Doom -------------------------------------------
+
+princeAlthran :: CardDef Unit
+princeAlthran = unitCard "portent-of-doom-089" "Prince Althran" do
+  hero
+  trait Noble
+  race HighElf
+  cost 3
+  loyalty 3
+  power 2
+  hitPoints 3
+  body
+    "Limit one Hero per zone. This unit enters play with 1 resource token on it. Action: \
+    \Remove 1 resource token from a unit you control to have this unit gain {power} until the \
+    \end of the turn."
+  onEnterPlay \_owner self -> push (AdjustUnitTokens self.key 1)
+  action "Rally" 0 \usage ->
+    withTarget usage.user (UnitMatching \pk _g u -> u.controller == pk && u.tokens > 0) \k -> do
+      push (AdjustUnitTokens k (-1))
+      until EndOfTurn $ buffPower usage.self.key 1

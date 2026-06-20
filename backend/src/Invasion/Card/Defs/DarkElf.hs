@@ -542,3 +542,17 @@ templeOfSpite = supportCard "vessel-of-the-winds-075" "Temple of Spite" do
         millFromDeck usage.user 1
         until EndOfTurn $ debuffHP k 1
         adjustSupportTokens usage.self.key 1
+
+-- Bloodquest: Portent of Doom -------------------------------------------
+
+murderlust :: CardDef Tactic
+murderlust = tacticCard "portent-of-doom-093" "Murderlust" do
+  race DarkElf
+  cost 0
+  loyalty 2
+  body "Action: Sacrifice a unit to restore up to 2 target units."
+  playableWhen \g pk -> any (\u -> u.controller == pk) g.units
+  whenResolved \self ->
+    sacrificeOwnUnit self.controller "Murderlust: sacrifice a unit." \_k -> do
+      corrupted <- unitsMatching self.controller (unitWhere (.corrupted))
+      chooseUpTo self.controller 2 (map (.key) corrupted) (traverse_ (push . CleanseUnit))
