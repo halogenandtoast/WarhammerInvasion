@@ -874,3 +874,17 @@ squigLobber = unitCard "the-iron-rock-044" "Squig Lobber" do
         when (u.tokens > 0) do
           push (AdjustUnitTokens u.key (-1))
           indirectDamage usage.user.next 1
+
+raidingParties :: CardDef Quest
+raidingParties = questCard "the-iron-rock-060" "Raiding Parties" do
+  race Orc
+  cost 0
+  loyalty 3
+  body
+    "Quest. Action: When this card enters play, draw a card. Quest. Action: When you play \
+    \an {orc} non-Attachment support card from your hand, destroy target development if a \
+    \unit is questing here."
+  onEnterPlay \_owner self -> drawCard self.controller
+  onQuestSupportPayoff Orc \self ->
+    withTarget self.controller AnyDevelopmentZone \(owner, zk) ->
+      destroyDevelopment owner zk

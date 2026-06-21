@@ -12,7 +12,7 @@ import Invasion.Card.Effects
 import Invasion.Card.Triggers
 import Invasion.Card.Types
 import Invasion.CardDef
-import Invasion.Entity (SupportDetails (..), TacticContext (..), UnitDetails (..))
+import Invasion.Entity (QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Game hiding (battlefield)
 import Invasion.Message
 import Invasion.Modifier
@@ -576,3 +576,15 @@ harpyAerie = supportCard "city-of-winter-093" "Harpy Aerie" do
         withTarget self.controller
           (UnitMatching \_ _ u -> u.key `elem` cs.attackers)
           \k -> until EndOfTurn (debuffHP k 2)
+
+raidingShips :: CardDef Quest
+raidingShips = questCard "city-of-winter-100" "Raiding Ships" do
+  race DarkElf
+  cost 0
+  loyalty 3
+  body
+    "Quest. Action: When this card enters play, draw a card. Quest. Action: When you play \
+    \a {darkelf} non-Attachment support card from your hand, discard a card at random from \
+    \an opponent's hand if a unit is questing here."
+  onEnterPlay \_owner self -> drawCard self.controller
+  onQuestSupportPayoff DarkElf \self -> discardRandom self.controller.next

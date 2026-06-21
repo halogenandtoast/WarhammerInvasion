@@ -930,3 +930,15 @@ wingedRidersOfKislev = unitCard "the-imperial-throne-108" "Winged Riders of Kisl
   body "Action: When this unit attacks, it gains {power} for each other attacking unit."
   onMyAttackDeclared \_owner self _zone attackers ->
     until EndOfTurn $ buffPower self.key (length (filter (/= self.key) attackers))
+
+recruitingForWar :: CardDef Quest
+recruitingForWar = questCard "the-imperial-throne-120" "Recruiting for War" do
+  race Empire
+  cost 0
+  loyalty 3
+  body
+    "Quest. Action: When this card enters play, draw a card. Quest. Action: When you play \
+    \an {empire} non-Attachment support card from your hand, draw a card if a unit is \
+    \questing here."
+  onEnterPlay \_owner self -> drawCard self.controller
+  onQuestSupportPayoff Empire \self -> drawCard self.controller

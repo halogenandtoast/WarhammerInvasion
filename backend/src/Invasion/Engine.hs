@@ -4543,6 +4543,7 @@ recomputeUnitStats g = g {units = map update g.units}
           base = printedHP
             + sum (map (attachmentHPBonus u) u.attachments)
             + (extrasOf u).selfHPBonus g u
+            + sum [(extrasOf v).unitAuraHp g v u | v <- g.units]
           minus = modifierHPPenalty u
           plus = modifierHPBonus u
           supportAura =

@@ -758,3 +758,81 @@ runeblades = unitCard "karaz-a-karak-064" "Runeblades" do
     \loyalty of a {dwarf} card you control."
   combatPower \g u ->
     if unitIsAttacking g u then highestLoyaltyControlled Dwarf g u.controller else 0
+
+mountainSentry :: CardDef Unit
+mountainSentry = unitCard "karaz-a-karak-061" "Mountain Sentry" do
+  race Dwarf
+  cost 1
+  loyalty 2
+  power 0
+  hitPoints 1
+  trait Musician
+  body "Ranger units in this zone get +2 hit points."
+  hpAura \_g self u ->
+    if u.zone == self.zone && u.controller == self.controller && Ranger `elem` u.cardDef.traits
+      then 2
+      else 0
+
+queenHelga :: CardDef Unit
+queenHelga = unitCard "karaz-a-karak-062" "Queen Helga" do
+  race Dwarf
+  cost 5
+  loyalty 3
+  power 1
+  hitPoints 3
+  traits [Hero, Noble]
+  limitOneHeroPerZone
+  toughness 2
+  body
+    "Limit one Hero per zone. Toughness 2. Action: When a Hero unit enters play under \
+    \your control, put a {dwarf} unit with printed cost 3 or lower into play in the same \
+    \zone from your hand."
+  onFriendlyUnitEnterPlay \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \entered ->
+      when (Hero `elem` entered.cardDef.traits) do
+        let pk = self.controller
+        me <- playerOf pk <$> getGame
+        let isCand c = case c.def of
+              UnitCardDef cd -> Dwarf `elem` cd.races && someCardCost c.def <= 3
+              _ -> False
+            cands = filter isCand me.hand
+        chooseFromCards pk 0 1 cands
+          "Queen Helga: put a Dwarf unit (cost 3 or lower) into play in that zone." \chosen ->
+          for_ chosen \c -> putUnitIntoPlay pk FromHand c.key entered.zone
+
+guildOfEngineers :: CardDef Unit
+guildOfEngineers = unitCard "the-iron-rock-041" "Guild of Engineers" do
+  race Dwarf
+  cost 2
+  loyalty 3
+  power 1
+  hitPoints 1
+  trait Engineer
+  body
+    "Kingdom. Action: When you play an Engineer unit from your hand, gain 1 resource. \
+    \Quest. Action: When you play an Engineer unit from your hand, draw a card."
+  -- Approximation: 'onFriendlyUnitEnterPlay' fires for any Engineer
+  -- unit entering under your control; the printed "from your hand"
+  -- restriction isn't carried on 'UnitEnteredPlay', so put-into-play
+  -- effects also count.
+  kingdom $ onFriendlyUnitEnterPlay \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (Engineer `elem` u.cardDef.traits) $ gainResources self.controller 1
+  quest $ onFriendlyUnitEnterPlay \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (Engineer `elem` u.cardDef.traits) $ drawCard self.controller
+
+buildingForWar :: CardDef Quest
+buildingForWar = questCard "karaz-a-karak-080" "Building for War" do
+  race Dwarf
+  cost 0
+  loyalty 3
+  body
+    "Quest. Action: When this card enters play, draw a card. Quest. Action: When you play \
+    \a {dwarf} non-Attachment support card from your hand, gain 1 resource if a unit is \
+    \questing here."
+  onEnterPlay \_owner self -> drawCard self.controller
+  onQuestSupportPayoff Dwarf \self -> gainResources self.controller 1

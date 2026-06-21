@@ -954,10 +954,16 @@ raidingCamps = questCard "the-inevitable-city-020" "Raiding Camps" do
     "Quest. Action: When this card enters play, draw a card. \
     \Quest. Action: When you play a {chaos} non-Attachment support card from your hand, \
     \destroy target support card in a zone with no units if a unit is questing here."
-  -- "When this card enters play, draw a card." The second ability
-  -- needs unit-questing-here tracking and is parked.
   onEnterPlay \_owner self ->
     drawCard self.controller
+  -- "destroy target support card in a zone with no units": pick any
+  -- in-play support whose controller's zone holds no units.
+  onQuestSupportPayoff Chaos \self ->
+    withTarget self.controller
+      ( SupportMatching \_pk g s ->
+          null [u | u <- g.units, u.controller == s.controller, u.zone == s.zone]
+      )
+      destroySupport
 
 -- The Accursed Dead ----------------------------------------------------
 
@@ -1174,3 +1180,40 @@ savageForsaken = unitCard "the-inevitable-city-008" "Savage Forsaken" do
     \loyalty on a {chaos} card you control."
   combatPower \g u ->
     if unitIsAttacking g u then highestLoyaltyControlled Chaos g u.controller else 0
+
+theBleedingWall :: CardDef Support
+theBleedingWall = supportCard "the-inevitable-city-011" "The Bleeding Wall" do
+  race Chaos
+  cost 2
+  loyalty 2
+  power 1
+  trait Location
+  body
+    "Action: When a {chaos} unit you control is corrupted, put a resource token on this \
+    \card. Action: Remove 2 resource tokens from this card to destroy target corrupted unit."
+  onUnitCorrupted \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (u.controller == self.controller && Chaos `elem` u.cardDef.races) $
+        adjustSupportTokens self.key 1
+  action "Bleed the corrupted" 0 \usage -> do
+    g <- getGame
+    whenJust (findSupport usage.self.key g) \s ->
+      when (s.tokens >= 2 && any (.corrupted) g.units) do
+        adjustSupportTokens usage.self.key (-2)
+        withTarget usage.user (UnitMatching \_ _ u -> u.corrupted) destroyUnit
+
+beastmanShaman :: CardDef Unit
+beastmanShaman = unitCard "the-iron-rock-054" "Beastman Shaman" do
+  race Chaos
+  cost 3
+  loyalty 3
+  power 2
+  hitPoints 1
+  trait Sorceror
+  body "Action: When a {chaos} unit you control is corrupted, draw a card."
+  onUnitCorrupted \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (u.controller == self.controller && Chaos `elem` u.cardDef.races) $
+        drawCard self.controller

@@ -269,6 +269,13 @@ unitAura f = modifyUnitExtras \e -> e {unitAuraPower = f}
 toughnessAura :: (Game -> UnitDetails -> UnitDetails -> Int) -> CardBuilder Unit ()
 toughnessAura f = modifyUnitExtras \e -> e {unitAuraToughness = f}
 
+-- | Aura hit points granted to other units. Source unit is 'self';
+-- target unit is the third arg. The unit-side mirror of the support
+-- 'supportAuraHP' slot; used by Mountain Sentry ("Ranger units in
+-- this zone get +2 hit points").
+hpAura :: (Game -> UnitDetails -> UnitDetails -> Int) -> CardBuilder Unit ()
+hpAura f = modifyUnitExtras \e -> e {unitAuraHp = f}
+
 -- | Install a pre-damage redirect plan. The slice receives the
 -- in-flight damage and decides whether (and how much) to claim;
 -- when it returns 'Just', the engine pulls that many points off

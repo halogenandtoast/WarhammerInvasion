@@ -273,6 +273,70 @@ onFriendlyUnitLeavePlay handler = onReceive $ Receive \msg owner self -> case ms
         handler owner self du.key du.zone du.cardDef.code
   _ -> pure ()
 
+-- | "When one of my OTHER units enters play." The friendly mirror of
+-- 'onOpponentUnitEnterPlay'; skips the host's own entry so a unit's
+-- arrival doesn't fire its own watch handler. Body receives the
+-- entering unit's key (look it up with 'findUnit' for its zone /
+-- traits). Used by Queen Helga and the "when a [type] unit enters
+-- play under your control" cards.
+onFriendlyUnitEnterPlay
+  :: forall k
+   . ( HasField "controller" (InPlay k) PlayerKey
+     , HasField "key" (InPlay k) UnitKey
+     )
+  => (forall m. TriggerM m => Player -> InPlay k -> UnitKey -> m ())
+  -> CardBuilder k ()
+onFriendlyUnitEnterPlay handler = onReceive $ Receive \msg owner self -> case msg of
+  UnitEnteredPlay pk uk
+    | pk == self.controller && uk /= self.key ->
+        handler owner self uk
+  _ -> pure ()
+
+-- | "When a unit is corrupted." Fires off the 'CorruptUnit' message
+-- and hands the body the corrupted unit's key; the body decides
+-- whether it cares (e.g. "a [Chaos] unit you control"). Used by The
+-- Bleeding Wall and Beastman Shaman.
+onUnitCorrupted
+  :: forall k
+   . (forall m. TriggerM m => Player -> InPlay k -> UnitKey -> m ())
+  -> CardBuilder k ()
+onUnitCorrupted handler = onReceive $ Receive \msg owner self -> case msg of
+  CorruptUnit uk -> handler owner self uk
+  _ -> pure ()
+
+-- | "When you play a (non-Attachment) support card from your hand."
+-- Fires off the from-hand 'PlaySupport' message only (not the
+-- from-deck / from-discard variants), guarded to the host's
+-- controller. Body receives the played support's key — look it up
+-- with 'findSupport' to filter on race / traits. Used by the
+-- "…for War" quest cycle.
+onYouPlaySupport
+  :: forall k
+   . HasField "controller" (InPlay k) PlayerKey
+  => (forall m. TriggerM m => Player -> InPlay k -> UnitKey -> m ())
+  -> CardBuilder k ()
+onYouPlaySupport handler = onReceive $ Receive \msg owner self -> case msg of
+  PlaySupport pk uk _zone
+    | pk == self.controller -> handler owner self uk
+  _ -> pure ()
+
+-- | The shared second half of the "…for War" quest cycle: "When you
+-- play a [Race] non-Attachment support card from your hand, <payoff>
+-- if a unit is questing here." Filters the played support on race and
+-- the non-Attachment clause, then gates the payoff on a unit
+-- currently questing on this quest.
+onQuestSupportPayoff
+  :: Race
+  -> (forall m. TriggerM m => InPlay Quest -> m ())
+  -> CardBuilder Quest ()
+onQuestSupportPayoff r body = onYouPlaySupport \_owner self uk -> do
+  g <- getGame
+  case findSupport uk g of
+    Just s
+      | r `elem` s.cardDef.races && Attachment `notElem` s.cardDef.traits ->
+          withQuest self.key \q -> when (isJust q.questingUnit) (body self)
+    _ -> pure ()
+
 -- | "When this tactic resolves." The handler receives the chosen
 -- target carried by 'PlayTactic'; for tactics that ignore the target
 -- the third argument can be ignored.
