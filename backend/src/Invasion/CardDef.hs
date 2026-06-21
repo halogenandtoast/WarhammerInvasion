@@ -107,6 +107,12 @@ data Trait
     -- ^ Dragon creature trait (Chaos Dragon, Great Fire Dragon).
   | WarMachine
     -- ^ War Machine trait (Steel Behemoth, Dead-Eye Cannon Crew).
+  | Musician
+    -- ^ Musician trait (Imperial Drummer, Dragon Caller).
+  | Location
+    -- ^ Location support trait (Straits of Lothern, Capital-cycle locations).
+  | Fortification
+    -- ^ Fortification support trait (Harpy Aerie, Wall of Maggots).
   | Epic
     -- ^ Half of the printed "Epic Spell." trait line. Epic spells are
     -- excluded from cost-reduction effects like Runefang of Solland.

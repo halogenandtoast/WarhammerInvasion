@@ -556,3 +556,23 @@ murderlust = tacticCard "portent-of-doom-093" "Murderlust" do
     sacrificeOwnUnit self.controller "Murderlust: sacrifice a unit." \_k -> do
       corrupted <- unitsMatching self.controller (unitWhere (.corrupted))
       chooseUpTo self.controller 2 (map (.key) corrupted) (traverse_ (push . CleanseUnit))
+
+-- The Capital Cycle ----------------------------------------------------
+
+harpyAerie :: CardDef Support
+harpyAerie = supportCard "city-of-winter-093" "Harpy Aerie" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 0
+  trait Fortification
+  body
+    "Action: When this zone is attacked, target attacking unit gets -2 hit points \
+    \until the end of the turn."
+  onMyZoneAttacked \_owner self cs ->
+    case cs.attackers of
+      [] -> pure ()
+      _ ->
+        withTarget self.controller
+          (UnitMatching \_ _ u -> u.key `elem` cs.attackers)
+          \k -> until EndOfTurn (debuffHP k 2)

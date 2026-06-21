@@ -884,6 +884,17 @@ unitIsDefending g u = maybe False (elem u.key . (.defenders)) g.combat
 allInPlaySupports :: Game -> [SupportDetails]
 allInPlaySupports g = g.supports ++ concatMap (.attachments) g.units
 
+-- | "the highest loyalty on a [Race] card you control." Scans every
+-- in-play unit and support controlled by @pk@ that carries the race
+-- symbol and returns the greatest printed loyalty (0 if none). Shared
+-- by the Capital-cycle "X is the highest loyalty …" cards (Savage
+-- Forsaken, Ruglud's Armoured Orcs, Runeblades, Priests of Sigmar).
+highestLoyaltyControlled :: Race -> Game -> PlayerKey -> Int
+highestLoyaltyControlled r g pk =
+  maximum $ 0 :
+    [u.cardDef.loyalty | u <- g.units, u.controller == pk, r `elem` u.cardDef.races]
+    ++ [s.cardDef.loyalty | s <- allInPlaySupports g, s.controller == pk, r `elem` s.cardDef.races]
+
 -- ---------------------------------------------------------------------
 -- Static-effect builder monad
 --

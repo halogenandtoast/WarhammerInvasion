@@ -870,3 +870,63 @@ steelStandard = unitCard "shield-of-the-gods-107" "Steel Standard" do
     if Knight `elem` u.cardDef.traits && u.zone == self.zone && u.controller == self.controller
       then 1
       else 0
+
+-- The Capital Cycle ----------------------------------------------------
+
+imperialDrummer :: CardDef Unit
+imperialDrummer = unitCard "the-imperial-throne-103" "Imperial Drummer" do
+  race Empire
+  cost 1
+  loyalty 2
+  power 0
+  hitPoints 1
+  trait Musician
+  body "Battlefield. Warrior units in this zone gain {power}."
+  unitAura \_g self u ->
+    if self.zone == BattlefieldZone
+      && u.zone == BattlefieldZone
+      && u.controller == self.controller
+      && Warrior `elem` u.cardDef.traits
+      then 1
+      else 0
+
+priestsOfSigmar :: CardDef Unit
+priestsOfSigmar = unitCard "the-imperial-throne-106" "Priests of Sigmar" do
+  race Empire
+  cost 5
+  loyalty 2
+  power 2
+  hitPoints 3
+  traits [Cavalry, Priest]
+  body "Toughness X. X is the highest loyalty on an {empire} card you control."
+  selfToughness \g u -> highestLoyaltyControlled Empire g u.controller
+
+stirlandDeathjacks :: CardDef Unit
+stirlandDeathjacks = unitCard "the-imperial-throne-107" "Stirland Deathjacks" do
+  race Empire
+  cost 1
+  loyalty 3
+  power 1
+  hitPoints 1
+  trait Warrior
+  body "Action: When this unit enters or leaves play, deal 1 damage to target corrupted unit."
+  onEnterPlay \_owner self -> do
+    g <- getGame
+    when (any (.corrupted) g.units) $
+      withTarget self.controller (UnitMatching \_ _ u -> u.corrupted) (`dealDamage` 1)
+  onSelfLeavesPlay \_owner self -> do
+    g <- getGame
+    when (any (.corrupted) g.units) $
+      withTarget self.controller (UnitMatching \_ _ u -> u.corrupted) (`dealDamage` 1)
+
+wingedRidersOfKislev :: CardDef Unit
+wingedRidersOfKislev = unitCard "the-imperial-throne-108" "Winged Riders of Kislev" do
+  race Empire
+  cost 5
+  loyalty 3
+  power 3
+  hitPoints 3
+  trait Cavalry
+  body "Action: When this unit attacks, it gains {power} for each other attacking unit."
+  onMyAttackDeclared \_owner self _zone attackers ->
+    until EndOfTurn $ buffPower self.key (length (filter (/= self.key) attackers))

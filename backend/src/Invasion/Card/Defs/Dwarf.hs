@@ -742,3 +742,19 @@ hospitableCave = supportCard "shield-of-the-gods-104" "Hospitable Cave" do
     if self.zone == QuestZone && u.controller == self.controller && u.zone == QuestZone
       then 3
       else 0
+
+-- The Capital Cycle ----------------------------------------------------
+
+runeblades :: CardDef Unit
+runeblades = unitCard "karaz-a-karak-064" "Runeblades" do
+  race Dwarf
+  cost 4
+  loyalty 2
+  power 0
+  hitPoints 3
+  traits [Warrior, Elite]
+  body
+    "This unit deals +X damage in combat while attacking. X is the highest \
+    \loyalty of a {dwarf} card you control."
+  combatPower \g u ->
+    if unitIsAttacking g u then highestLoyaltyControlled Dwarf g u.controller else 0

@@ -528,3 +528,30 @@ ellyrianElite = unitCard "shield-of-the-gods-109" "Ellyrian Elite" do
   traits [Cavalry, Elite]
   scout
   body "Scout."
+
+-- The Capital Cycle ----------------------------------------------------
+
+princeOfCaledor :: CardDef Unit
+princeOfCaledor = unitCard "the-inevitable-city-004" "Prince of Caledor" do
+  race HighElf
+  cost 8
+  loyalty 3
+  power 4
+  hitPoints 4
+  trait Noble
+  body "Lower the cost to play this unit by 1 for each damaged unit you control."
+  selfCostAdjust \g pk ->
+    negate (length [u | u <- g.units, u.controller == pk, isDamaged u])
+
+straitsOfLothern :: CardDef Support
+straitsOfLothern = supportCard "realm-of-the-phoenix-king-030" "Straits of Lothern" do
+  race HighElf
+  cost 3
+  loyalty 3
+  power 1
+  trait Location
+  body "Kingdom. This card gains {power} equal to the number of units in this zone."
+  zonePowerAura \g s zone ->
+    if s.zone == zone
+      then length [u | u <- g.units, u.controller == s.controller, u.zone == zone]
+      else 0

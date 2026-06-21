@@ -840,3 +840,37 @@ manglerSquigs = unitCard "shield-of-the-gods-105" "Mangler Squigs" do
           then whenJust (findUnit self.key g) \u ->
             until EndOfTurn $ buffPower self.key u.effectivePower
           else dealDamage self.key 2
+
+-- The Capital Cycle ----------------------------------------------------
+
+rugludsArmouredOrcs :: CardDef Unit
+rugludsArmouredOrcs = unitCard "the-iron-rock-045" "Ruglud's Armoured Orcs" do
+  race Orc
+  cost 4
+  loyalty 1
+  power 2
+  hitPoints 2
+  trait Warrior
+  body "Toughness X. X is the highest loyalty of an {orc} card you control."
+  selfToughness \g u -> highestLoyaltyControlled Orc g u.controller
+
+squigLobber :: CardDef Unit
+squigLobber = unitCard "the-iron-rock-044" "Squig Lobber" do
+  race Orc
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Siege
+  body
+    "Battlefield. Action: At the beginning of your turn, put a resource token on this \
+    \card. Action: Remove a resource token from this unit to deal 1 indirect damage to \
+    \target opponent."
+  battlefield $ do
+    onMyTurnBegin \_owner self -> push (AdjustUnitTokens self.key 1)
+    action "Lob a squig" 0 \usage -> do
+      g <- getGame
+      whenJust (findUnit usage.self.key g) \u ->
+        when (u.tokens > 0) do
+          push (AdjustUnitTokens u.key (-1))
+          indirectDamage usage.user.next 1

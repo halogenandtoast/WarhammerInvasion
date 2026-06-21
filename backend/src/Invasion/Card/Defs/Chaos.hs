@@ -1158,3 +1158,19 @@ strickenWarrior = unitCard "the-accursed-dead-051" "Stricken Warrior" do
               for_ (filter (/= self.key) (cs.attackers <> ks)) \k -> dealDamage k 1
         _ -> pure ()
     _ -> pure ()
+
+-- The Capital Cycle ----------------------------------------------------
+
+savageForsaken :: CardDef Unit
+savageForsaken = unitCard "the-inevitable-city-008" "Savage Forsaken" do
+  race Chaos
+  cost 3
+  loyalty 1
+  power 0
+  hitPoints 2
+  traits [Warrior, Elite]
+  body
+    "This unit deals +X damage in combat while attacking. X is the highest \
+    \loyalty on a {chaos} card you control."
+  combatPower \g u ->
+    if unitIsAttacking g u then highestLoyaltyControlled Chaos g u.controller else 0

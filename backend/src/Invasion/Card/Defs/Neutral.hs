@@ -706,3 +706,17 @@ magePriestOfItza = unitCard "vessel-of-the-winds-076" "Mage-Priest of Itza" do
     "Order only. Action: When this unit enters play, shuffle the top 5 cards of your discard \
     \pile back into your deck."
   onEnterPlay \_owner self -> recycleDiscard self.controller 5
+
+-- The Capital Cycle ----------------------------------------------------
+
+willpower :: CardDef Tactic
+willpower = tacticCard "the-inevitable-city-019" "Willpower" do
+  cost 1
+  loyalty 0
+  body "Action: Target Hero unit gains {power} equal to its loyalty until the end of the turn."
+  playableWhen $ hasTarget (unitWhere \u -> Hero `elem` u.cardDef.traits)
+  whenResolved \self ->
+    withTarget self.controller (unitWhere \u -> Hero `elem` u.cardDef.traits) \k -> do
+      g <- getGame
+      whenJust (findUnit k g) \u ->
+        until EndOfTurn $ buffPower k u.cardDef.loyalty
