@@ -816,6 +816,9 @@ guildOfEngineers = unitCard "the-iron-rock-041" "Guild of Engineers" do
   -- unit entering under your control; the printed "from your hand"
   -- restriction isn't carried on 'UnitEnteredPlay', so put-into-play
   -- effects also count.
+  -- TODO: tighten to "from your hand" once UnitEnteredPlay carries the
+  -- entry origin (e.g. a PlayUnitOrigin field), so put-into-play /
+  -- relocation entries stop triggering the resource/draw payoff.
   kingdom $ onFriendlyUnitEnterPlay \_owner self uk -> do
     g <- getGame
     whenJust (findUnit uk g) \u ->
