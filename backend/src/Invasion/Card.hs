@@ -9,13 +9,14 @@
 -- (CardBuilder, EffectM, triggers, action builders, etc.) is
 -- re-exported from the submodules listed below.
 module Invasion.Card
-  ( module Invasion.Card.Effects
-  , module Invasion.Card.Builder
-  , module Invasion.Card.Triggers
-  , module Invasion.Card.Types
-  , hasRace
-  , allCards
-  ) where
+  ( module Invasion.Card.Effects,
+    module Invasion.Card.Builder,
+    module Invasion.Card.Triggers,
+    module Invasion.Card.Types,
+    hasRace,
+    allCards,
+  )
+where
 
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -49,346 +50,346 @@ allCards :: Map CardCode SomeCardDef
 allCards =
   Map.fromList
     -- Dwarf — core-001..025
-    [ ("core-001", UnitCardDef defenderOfTheHold)
-    , ("core-002", UnitCardDef zhufbarEngineers)
-    , ("core-003", UnitCardDef hammererOfKarakAzul)
-    , ("core-004", UnitCardDef trollSlayers)
-    , ("core-005", UnitCardDef runesmith)
-    , ("core-006", UnitCardDef durgnarTheBold)
-    , ("core-007", UnitCardDef kingKazador)
-    , ("core-008", UnitCardDef dwarfCannonCrew)
-    , ("core-009", UnitCardDef dwarfMasons)
-    , ("core-010", UnitCardDef dwarfRanger)
-    , ("core-011", UnitCardDef mountainBrigade)
-    , ("core-012", UnitCardDef ironbreakersOfAnkhor)
-    , ("core-013", SupportCardDef runeOfFortitude)
-    , ("core-014", SupportCardDef keystoneForge)
-    , ("core-015", SupportCardDef organGun)
-    , ("core-016", SupportCardDef masterRuneOfDismay)
-    , ("core-017", QuestCardDef aGloriousDeath)
-    , ("core-018", SupportCardDef grudgeThrower)
-    , ("core-019", TacticCardDef buryingTheGrudge)
-    , ("core-020", TacticCardDef stubbornRefusal)
-    , ("core-021", TacticCardDef strikingTheGrudge)
-    , ("core-022", TacticCardDef grudgeThrowerAssault)
-    , ("core-023", TacticCardDef demolition)
-    , ("core-024", TacticCardDef wakeTheMountain)
-    , ("core-025", TacticCardDef masterRuneOfValaya)
-    -- Empire — core-026..050
-    , ("core-026", UnitCardDef peasantMilitia)
-    , ("core-027", UnitCardDef reiksguardKnights)
-    , ("core-028", UnitCardDef brightWizardApprentice)
-    , ("core-029", UnitCardDef nulnTinkerers)
-    , ("core-030", UnitCardDef theGreatswords)
-    , ("core-031", UnitCardDef sigmarsBlessed)
-    , ("core-032", UnitCardDef thyrusGorman)
-    , ("core-033", UnitCardDef huntsmen)
-    , ("core-034", UnitCardDef warriorPriests)
-    , ("core-035", UnitCardDef freeCompany)
-    , ("core-036", UnitCardDef pistoliers)
-    , ("core-037", UnitCardDef johannesBroheim)
-    , ("core-038", SupportCardDef knightTraining)
-    , ("core-039", SupportCardDef churchOfSigmar)
-    , ("core-040", SupportCardDef cityGates)
-    , ("core-041", SupportCardDef shrineToTaal)
-    , ("core-042", SupportCardDef templeOfShallya)
-    , ("core-043", QuestCardDef defendTheBorder)
-    , ("core-044", TacticCardDef willOfTheElectors)
-    , ("core-045", TacticCardDef twinTailedComet)
-    , ("core-046", TacticCardDef demoralise)
-    , ("core-047", TacticCardDef franzsDecree)
-    , ("core-048", TacticCardDef forcedMarch)
-    , ("core-049", TacticCardDef judgementOfVerena)
-    , ("core-050", TacticCardDef sigmarsIntervention)
-    -- High Elf — core-051..055 (only 5 in core)
-    , ("core-051", UnitCardDef silverHelmBrigade)
-    , ("core-052", UnitCardDef archmageOfSaphery)
-    , ("core-053", SupportCardDef blessingOfIsha)
-    , ("core-054", TacticCardDef radiantGaze)
-    , ("core-055", TacticCardDef greaterHeal)
-    -- Orc — core-056..080
-    , ("core-056", UnitCardDef crookedTeefGoblins)
-    , ("core-057", UnitCardDef squigHerders)
-    , ("core-058", UnitCardDef ironclawsHorde)
-    , ("core-059", UnitCardDef followersOfMork)
-    , ("core-060", UnitCardDef blackOrcSquad)
-    , ("core-061", UnitCardDef boarBoyz)
-    , ("core-062", UnitCardDef urguck)
-    , ("core-063", UnitCardDef grimgorIronhide)
-    , ("core-064", UnitCardDef nightGoblins)
-    , ("core-065", UnitCardDef doomDivers)
-    , ("core-066", UnitCardDef lobberCrew)
-    , ("core-067", UnitCardDef bigUns)
-    , ("core-068", SupportCardDef rockLobber)
-    , ("core-069", SupportCardDef choppa)
-    , ("core-070", SupportCardDef totemOfGork)
-    , ("core-071", SupportCardDef bannaOfDaRedSunz)
-    , ("core-072", QuestCardDef smashEmAll)
-    , ("core-073", SupportCardDef grimgorsCamp)
-    , ("core-074", TacticCardDef smashGoBoom)
-    , ("core-075", TacticCardDef ripDereEadsOff)
-    , ("core-076", TacticCardDef wezBigga)
-    , ("core-077", TacticCardDef favourOfMork)
-    , ("core-078", TacticCardDef pillage)
-    , ("core-079", TacticCardDef waaagh)
-    , ("core-080", TacticCardDef trollVomit)
-    -- Chaos — core-081..105
-    , ("core-081", UnitCardDef servantsOfKhorne)
-    , ("core-082", UnitCardDef savageMarauders)
-    , ("core-083", UnitCardDef festeringNurglings)
-    , ("core-084", UnitCardDef nurgleSorcerer)
-    , ("core-085", UnitCardDef chaosKnights)
-    , ("core-086", UnitCardDef cultistOfSlaanesh)
-    , ("core-087", UnitCardDef valkiaTheBloody)
-    , ("core-088", UnitCardDef melekhTheChanger)
-    , ("core-089", UnitCardDef fledglingChaosSpawn)
-    , ("core-090", UnitCardDef savageGors)
-    , ("core-091", UnitCardDef darkZealot)
-    , ("core-092", UnitCardDef bloodthirster)
-    , ("core-093", SupportCardDef cloudOfFlies)
-    , ("core-094", SupportCardDef horrificMutation)
-    , ("core-095", SupportCardDef sadisticMutation)
-    , ("core-096", SupportCardDef warpstoneMeteor)
-    , ("core-097", QuestCardDef journeyToTheGate)
-    , ("core-098", SupportCardDef shrineToNurgle)
-    , ("core-099", TacticCardDef seducedByDarkness)
-    , ("core-100", TacticCardDef willOfTzeentch)
-    , ("core-101", TacticCardDef nurglesPestilence)
-    , ("core-102", TacticCardDef flamesOfTzeentch)
-    , ("core-103", TacticCardDef bloodForTheBloodGod)
-    , ("core-104", TacticCardDef cullingTheWeak)
-    , ("core-105", TacticCardDef slaaneshsDomination)
-    -- Bloodquest cycle — Rising Dawn (pack 1)
-    , ("rising-dawn-005", UnitCardDef orcBully)
-    , ("rising-dawn-008", TacticCardDef rageOfTheBear)
-    , ("rising-dawn-009", UnitCardDef lothernSeaMaster)
-    , ("rising-dawn-013", TacticCardDef boonOfTzeentch)
-    , ("rising-dawn-015", SupportCardDef towerOfOblivion)
-    -- Bloodquest cycle — Fragments of Power (pack 2)
-    , ("fragments-of-power-027", UnitCardDef averheimSoldiers)
-    , ("fragments-of-power-032", SupportCardDef stolenSkin)
-    -- Bloodquest cycle — The Accursed Dead (pack 3)
-    , ("the-accursed-dead-045", UnitCardDef lionStandard)
-    , ("the-accursed-dead-051", UnitCardDef strickenWarrior)
-    , ("the-accursed-dead-053", UnitCardDef treasureThieves)
-    -- Bloodquest cycle — Vessel of the Winds (pack 4)
-    , ("vessel-of-the-winds-075", SupportCardDef templeOfSpite)
-    , ("vessel-of-the-winds-076", UnitCardDef magePriestOfItza)
-    -- Bloodquest cycle — Portent of Doom (pack 5)
-    , ("portent-of-doom-089", UnitCardDef princeAlthran)
-    , ("portent-of-doom-093", TacticCardDef murderlust)
-    -- Bloodquest cycle — Shield of the Gods (pack 6)
-    , ("shield-of-the-gods-103", UnitCardDef dwarfAdventurer)
-    , ("shield-of-the-gods-104", SupportCardDef hospitableCave)
-    , ("shield-of-the-gods-105", UnitCardDef manglerSquigs)
-    , ("shield-of-the-gods-107", UnitCardDef steelStandard)
-    , ("shield-of-the-gods-109", UnitCardDef ellyrianElite)
-    -- Chaos — Cataclysm cycle
-    , ("cataclysm-033", UnitCardDef lordOfKhorne)
-    , ("faith-and-steel-113", UnitCardDef skulltaker)
-    , ("cataclysm-034", UnitCardDef bloodcrusher)
-    , ("cataclysm-037", SupportCardDef riftOfChaos)
-    -- Days of Blood (Eternal War cycle, pack 1)
-    , ("days-of-blood-004", SupportCardDef chillSeaWatchtower)
-    , ("days-of-blood-005", UnitCardDef veteranThunderers)
-    , ("days-of-blood-007", UnitCardDef ludwigSchwarzheim)
-    , ("days-of-blood-010", UnitCardDef greatFireDragon)
-    , ("days-of-blood-016", UnitCardDef norseMarauders)
-    , ("days-of-blood-017", UnitCardDef ghorgon)
-    , ("days-of-blood-018", TacticCardDef recklessAttack)
-    , ("days-of-blood-019", SupportCardDef bordertown)
-    -- Oaths of Vengeance (Eternal War cycle, pack 2)
-    , ("oaths-of-vengeance-023", SupportCardDef outlyingTower)
-    , ("oaths-of-vengeance-027", SupportCardDef wealthOfTheHold)
-    , ("oaths-of-vengeance-028", UnitCardDef maidOfSigmar)
-    , ("oaths-of-vengeance-030", UnitCardDef wolfChariot)
-    , ("oaths-of-vengeance-031", UnitCardDef goblinRaiders)
-    , ("oaths-of-vengeance-035", UnitCardDef vaedraBloodsworn)
-    , ("oaths-of-vengeance-036", UnitCardDef hagGraefKnights)
-    -- Battle for the Old World (Eternal War cycle, pack 3)
-    , ("battle-for-the-old-world-043", SupportCardDef mobOHutz)
-    , ("battle-for-the-old-world-047", UnitCardDef reiksguardElite)
-    , ("battle-for-the-old-world-049", SupportCardDef chapterhouseStables)
-    , ("battle-for-the-old-world-050", UnitCardDef lilea)
-    , ("battle-for-the-old-world-053", UnitCardDef norseClansman)
-    -- Glory of Days Past (Eternal War cycle, pack 4)
-    , ("glory-of-days-past-064", SupportCardDef karakHirnMine)
-    , ("glory-of-days-past-065", UnitCardDef ostlandGreatswords)
-    , ("glory-of-days-past-067", UnitCardDef masterOfQhaysh)
-    , ("glory-of-days-past-073", UnitCardDef chaosDragon)
-    , ("glory-of-days-past-075", SupportCardDef painfulMutation)
-    , ("glory-of-days-past-078", SupportCardDef markedForDeath)
-    -- The Ruinous Hordes (Eternal War cycle, pack 5)
-    , ("the-ruinous-hordes-085", UnitCardDef steelBehemoth)
-    , ("the-ruinous-hordes-088", UnitCardDef kingAlrik)
-    , ("the-ruinous-hordes-089", UnitCardDef hornHoldDefender)
-    , ("the-ruinous-hordes-091", UnitCardDef avelornSojourner)
-    , ("the-ruinous-hordes-094", UnitCardDef wolfGobbos)
-    , ("the-ruinous-hordes-096", UnitCardDef coldOneChampion)
-    -- Faith and Steel (Eternal War cycle, pack 6)
-    , ("faith-and-steel-103", SupportCardDef theEmperorsStatue)
-    , ("faith-and-steel-106", UnitCardDef doomSeeker)
-    , ("faith-and-steel-107", TacticCardDef fearlessInBattle)
-    , ("faith-and-steel-111", UnitCardDef gobboBigBoss)
-    , ("fragments-of-power-031", UnitCardDef swornOfKhorne)
-    , ("legends-031", UnitCardDef bloodletter)
-    , ("legends-032", UnitCardDef warhounds)
-    , ("path-of-the-zealot-031", UnitCardDef bloodsworn)
-    , ("path-of-the-zealot-032", QuestCardDef wolvesOfTheNorth)
-    , ("the-fourth-waystone-091", UnitCardDef viciousMarauder)
-    , ("the-chaos-moon-032", UnitCardDef doombull)
-    , ("the-warpstone-chronicles-094", TacticCardDef berserkFury)
-    , ("the-warpstone-chronicles-095", SupportCardDef daemonsword)
-    , ("the-eclipse-of-hope-093", SupportCardDef brandedByKhorne)
-    , ("omens-of-ruin-013", SupportCardDef markOfChaos)
-    , ("the-ruinous-hordes-083", SupportCardDef northernWastes)
-    , ("the-ruinous-hordes-082", QuestCardDef dominionOfChaos)
-    , ("the-inevitable-city-013", SupportCardDef ironThroneroom)
-    , ("the-inevitable-city-020", QuestCardDef raidingCamps)
-    , ("the-accursed-dead-052", SupportCardDef riftOfBattle)
-    -- Dark Elf — core-106..110 (only 5 in core)
-    , ("core-106", UnitCardDef discipleOfKhaine)
-    , ("core-107", UnitCardDef vileSorceress)
-    , ("core-108", UnitCardDef coldOneRiders)
-    , ("core-109", SupportCardDef cauldronOfBlood)
-    , ("core-110", TacticCardDef hate)
-    -- Neutral — core-111..127 (no core-119)
-    , ("core-111", SupportCardDef contestedVillage)
-    , ("core-112", SupportCardDef contestedFortress)
-    , ("core-113", SupportCardDef contestedStronghold)
-    , ("core-114", SupportCardDef armoury)
-    , ("core-115", SupportCardDef forgottenCemetery)
-    , ("core-116", SupportCardDef warpstoneExcavation)
-    , ("core-117", TacticCardDef pilgrimage)
-    , ("core-118", TacticCardDef burnItDown)
-    , ("core-120", QuestCardDef infiltrate)
-    , ("core-121", QuestCardDef prepareForWar)
-    , ("core-122", SupportCardDef allianceDwarfEmpire)
-    , ("core-123", SupportCardDef allianceEmpireHighElf)
-    , ("core-124", SupportCardDef allianceDwarfHighElf)
-    , ("core-125", SupportCardDef allianceChaosOrc)
-    , ("core-126", SupportCardDef allianceChaosDarkElf)
-    , ("core-127", SupportCardDef allianceOrcDarkElf)
-    -- The Corruption cycle — The Skavenblight Threat (001-020)
-    , ("the-skavenblight-threat-001", UnitCardDef gurnisElite)
-    , ("the-skavenblight-threat-002", TacticCardDef standYourGround)
-    , ("the-skavenblight-threat-003", UnitCardDef nordlandHalberdiers)
-    , ("the-skavenblight-threat-004", TacticCardDef infiltrateTactic)
-    , ("the-skavenblight-threat-005", UnitCardDef tyriel)
-    , ("the-skavenblight-threat-006", TacticCardDef steelsBane)
-    , ("the-skavenblight-threat-007", QuestCardDef repairTheWaystones)
-    , ("the-skavenblight-threat-008", UnitCardDef spiderRiders)
-    , ("the-skavenblight-threat-009", SupportCardDef warPaint)
-    , ("the-skavenblight-threat-010", UnitCardDef chosenOfTzeentch)
-    , ("the-skavenblight-threat-011", TacticCardDef boltOfChange)
-    , ("the-skavenblight-threat-012", UnitCardDef malusDarkblade)
-    , ("the-skavenblight-threat-013", UnitCardDef morathisPegasus)
-    , ("the-skavenblight-threat-014", TacticCardDef weNeedYourBlood)
-    , ("the-skavenblight-threat-015", UnitCardDef greyseerThanquol)
-    , ("the-skavenblight-threat-016", UnitCardDef clanRats)
-    , ("the-skavenblight-threat-017", SupportCardDef warpLightningCannon)
-    , ("the-skavenblight-threat-018", UnitCardDef mariusTheRighteous)
-    , ("the-skavenblight-threat-019", SupportCardDef abandonedMine)
-    , ("the-skavenblight-threat-020", SupportCardDef forge)
-    -- The Corruption cycle — Path of the Zealot (021-040)
-    , ("path-of-the-zealot-021", UnitCardDef dwarfMiner)
-    , ("path-of-the-zealot-022", SupportCardDef gromrilArmour)
-    , ("path-of-the-zealot-023", UnitCardDef gustavTheBear)
-    , ("path-of-the-zealot-024", UnitCardDef talabheimDetachment)
-    , ("path-of-the-zealot-025", SupportCardDef gateOfSigmar)
-    , ("path-of-the-zealot-026", TacticCardDef vaulsUnmaking)
-    , ("path-of-the-zealot-027", SupportCardDef repeaterBoltThrower)
-    , ("path-of-the-zealot-028", UnitCardDef arrerBoyz)
-    , ("path-of-the-zealot-029", TacticCardDef wolfRiderAssault)
-    , ("path-of-the-zealot-030", UnitCardDef buleLordOfPus)
-    , ("path-of-the-zealot-033", UnitCardDef darkRiders)
-    , ("path-of-the-zealot-034", TacticCardDef callTheBlood)
-    , ("path-of-the-zealot-035", UnitCardDef poisonWindGlobadiers)
-    , ("path-of-the-zealot-036", TacticCardDef chitteringHorde)
-    , ("path-of-the-zealot-037", UnitCardDef zealotHunter)
-    , ("path-of-the-zealot-038", UnitCardDef veteranSellswords)
-    , ("path-of-the-zealot-039", TacticCardDef surpriseAssault)
-    , ("path-of-the-zealot-040", TacticCardDef animosity)
-    -- The Corruption cycle — Tooth and Claw (041-060)
-    , ("tooth-and-claw-041", UnitCardDef gurniThorgrimson)
-    , ("tooth-and-claw-042", SupportCardDef anvilOfDoom)
-    , ("tooth-and-claw-043", TacticCardDef blessingOfValaya)
-    , ("tooth-and-claw-044", UnitCardDef reiksguardSwordsmen)
-    , ("tooth-and-claw-045", TacticCardDef ironDiscipline)
-    , ("tooth-and-claw-046", UnitCardDef dragonmage)
-    , ("tooth-and-claw-047", TacticCardDef giftsOfAenarion)
-    , ("tooth-and-claw-048", UnitCardDef ugrokBeardburna)
-    , ("tooth-and-claw-049", TacticCardDef mobUp)
-    , ("tooth-and-claw-050", QuestCardDef datsMine)
-    , ("tooth-and-claw-051", UnitCardDef blueHorrors)
-    , ("tooth-and-claw-052", TacticCardDef brutalOffering)
-    , ("tooth-and-claw-053", UnitCardDef coldOneChariot)
-    , ("tooth-and-claw-054", TacticCardDef graspingDarkness)
-    , ("tooth-and-claw-055", UnitCardDef ratOgres)
-    , ("tooth-and-claw-056", UnitCardDef gutterRunners)
-    , ("tooth-and-claw-057", UnitCardDef clanMouldersElite)
-    , ("tooth-and-claw-058", UnitCardDef errantWolf)
-    , ("tooth-and-claw-059", TacticCardDef reapWhatsSown)
-    , ("tooth-and-claw-060", SupportCardDef scoutCamp)
-    -- The Corruption cycle — The Deathmaster's Dance (061-080)
-    , ("the-deathmaster-s-dance-061", UnitCardDef mountainLegion)
-    , ("the-deathmaster-s-dance-062", TacticCardDef emptyTheHold)
-    , ("the-deathmaster-s-dance-063", QuestCardDef reclaimTheHold)
-    , ("the-deathmaster-s-dance-064", UnitCardDef vigilantElector)
-    , ("the-deathmaster-s-dance-065", UnitCardDef flagellants)
-    , ("the-deathmaster-s-dance-066", TacticCardDef ulricsFury)
-    , ("the-deathmaster-s-dance-067", UnitCardDef silverHelmDetachment)
-    , ("the-deathmaster-s-dance-068", SupportCardDef ishasGaze)
-    , ("the-deathmaster-s-dance-069", TacticCardDef banish)
-    , ("the-deathmaster-s-dance-070", UnitCardDef ironBoyz)
-    , ("the-deathmaster-s-dance-071", SupportCardDef grimgorsSpike)
-    , ("the-deathmaster-s-dance-072", TacticCardDef swarmEm)
-    , ("the-deathmaster-s-dance-073", UnitCardDef greatUncleanOne)
-    , ("the-deathmaster-s-dance-074", SupportCardDef hellcannonReserves)
-    , ("the-deathmaster-s-dance-075", TacticCardDef offeringOfBlood)
-    , ("the-deathmaster-s-dance-076", UnitCardDef warHydra)
-    , ("the-deathmaster-s-dance-077", SupportCardDef reaperBoltThrower)
-    , ("the-deathmaster-s-dance-078", TacticCardDef caughtTheScent)
-    , ("the-deathmaster-s-dance-079", UnitCardDef deathmasterSniktch)
-    , ("the-deathmaster-s-dance-080", UnitCardDef juvenileWyvern)
-    -- The Corruption cycle — The Warpstone Chronicles (081-100)
-    , ("the-warpstone-chronicles-081", UnitCardDef dragonslayer)
-    , ("the-warpstone-chronicles-082", SupportCardDef greatBookOfGrudges)
-    , ("the-warpstone-chronicles-083", SupportCardDef flameCannon)
-    , ("the-warpstone-chronicles-084", UnitCardDef vigilantPistoliers)
-    , ("the-warpstone-chronicles-085", SupportCardDef runefangOfSolland)
-    , ("the-warpstone-chronicles-086", SupportCardDef helblasterVolleyGun)
-    , ("the-warpstone-chronicles-087", UnitCardDef finreirsGuard)
-    , ("the-warpstone-chronicles-088", SupportCardDef warCrownOfSaphery)
-    , ("the-warpstone-chronicles-089", TacticCardDef secondSight)
-    , ("the-warpstone-chronicles-090", UnitCardDef snotlingPumpWagon)
-    , ("the-warpstone-chronicles-091", SupportCardDef bashasBloodaxe)
-    , ("the-warpstone-chronicles-092", SupportCardDef thickSkinned)
-    , ("the-warpstone-chronicles-093", UnitCardDef alluringDaemonettes)
-    , ("the-warpstone-chronicles-096", UnitCardDef naggarothSpearmen)
-    , ("the-warpstone-chronicles-097", SupportCardDef hydraBlade)
-    , ("the-warpstone-chronicles-098", QuestCardDef slaverRaid)
-    , ("the-warpstone-chronicles-099", SupportCardDef ancientWaystone)
-    , ("the-warpstone-chronicles-100", SupportCardDef fellblade)
-    -- The Corruption cycle — Arcane Fire (101-120)
-    , ("arcane-fire-101", UnitCardDef longbeards)
-    , ("arcane-fire-102", TacticCardDef runeOfHearthAndHome)
-    , ("arcane-fire-103", TacticCardDef hewnFromTheMountain)
-    , ("arcane-fire-104", UnitCardDef helblasterCrew)
-    , ("arcane-fire-105", TacticCardDef sigmarsBrilliance)
-    , ("arcane-fire-106", QuestCardDef protectTheEmpire)
-    , ("arcane-fire-107", UnitCardDef ellyrianReavers)
-    , ("arcane-fire-108", TacticCardDef morvaelsLegacy)
-    , ("arcane-fire-109", TacticCardDef chargeOfTheSilverHelms)
-    , ("arcane-fire-110", UnitCardDef snotlingSaboteurs)
-    , ("arcane-fire-111", TacticCardDef daBrainbusta)
-    , ("arcane-fire-112", TacticCardDef easyPickins)
-    , ("arcane-fire-113", UnitCardDef beastOfChaos)
-    , ("arcane-fire-114", TacticCardDef cacophonicScream)
-    , ("arcane-fire-115", TacticCardDef blessingsOfTzeentch)
-    , ("arcane-fire-116", UnitCardDef slaveDriver)
-    , ("arcane-fire-117", TacticCardDef yourWillIsMine)
-    , ("arcane-fire-118", SupportCardDef witchHagsCurse)
-    , ("arcane-fire-119", SupportCardDef greyseersLair)
-    , ("arcane-fire-120", UnitCardDef plagueMonk)
+    [ ("core-001", UnitCardDef defenderOfTheHold),
+      ("core-002", UnitCardDef zhufbarEngineers),
+      ("core-003", UnitCardDef hammererOfKarakAzul),
+      ("core-004", UnitCardDef trollSlayers),
+      ("core-005", UnitCardDef runesmith),
+      ("core-006", UnitCardDef durgnarTheBold),
+      ("core-007", UnitCardDef kingKazador),
+      ("core-008", UnitCardDef dwarfCannonCrew),
+      ("core-009", UnitCardDef dwarfMasons),
+      ("core-010", UnitCardDef dwarfRanger),
+      ("core-011", UnitCardDef mountainBrigade),
+      ("core-012", UnitCardDef ironbreakersOfAnkhor),
+      ("core-013", SupportCardDef runeOfFortitude),
+      ("core-014", SupportCardDef keystoneForge),
+      ("core-015", SupportCardDef organGun),
+      ("core-016", SupportCardDef masterRuneOfDismay),
+      ("core-017", QuestCardDef aGloriousDeath),
+      ("core-018", SupportCardDef grudgeThrower),
+      ("core-019", TacticCardDef buryingTheGrudge),
+      ("core-020", TacticCardDef stubbornRefusal),
+      ("core-021", TacticCardDef strikingTheGrudge),
+      ("core-022", TacticCardDef grudgeThrowerAssault),
+      ("core-023", TacticCardDef demolition),
+      ("core-024", TacticCardDef wakeTheMountain),
+      ("core-025", TacticCardDef masterRuneOfValaya),
+      -- Empire — core-026..050
+      ("core-026", UnitCardDef peasantMilitia),
+      ("core-027", UnitCardDef reiksguardKnights),
+      ("core-028", UnitCardDef brightWizardApprentice),
+      ("core-029", UnitCardDef nulnTinkerers),
+      ("core-030", UnitCardDef theGreatswords),
+      ("core-031", UnitCardDef sigmarsBlessed),
+      ("core-032", UnitCardDef thyrusGorman),
+      ("core-033", UnitCardDef huntsmen),
+      ("core-034", UnitCardDef warriorPriests),
+      ("core-035", UnitCardDef freeCompany),
+      ("core-036", UnitCardDef pistoliers),
+      ("core-037", UnitCardDef johannesBroheim),
+      ("core-038", SupportCardDef knightTraining),
+      ("core-039", SupportCardDef churchOfSigmar),
+      ("core-040", SupportCardDef cityGates),
+      ("core-041", SupportCardDef shrineToTaal),
+      ("core-042", SupportCardDef templeOfShallya),
+      ("core-043", QuestCardDef defendTheBorder),
+      ("core-044", TacticCardDef willOfTheElectors),
+      ("core-045", TacticCardDef twinTailedComet),
+      ("core-046", TacticCardDef demoralise),
+      ("core-047", TacticCardDef franzsDecree),
+      ("core-048", TacticCardDef forcedMarch),
+      ("core-049", TacticCardDef judgementOfVerena),
+      ("core-050", TacticCardDef sigmarsIntervention),
+      -- High Elf — core-051..055 (only 5 in core)
+      ("core-051", UnitCardDef silverHelmBrigade),
+      ("core-052", UnitCardDef archmageOfSaphery),
+      ("core-053", SupportCardDef blessingOfIsha),
+      ("core-054", TacticCardDef radiantGaze),
+      ("core-055", TacticCardDef greaterHeal),
+      -- Orc — core-056..080
+      ("core-056", UnitCardDef crookedTeefGoblins),
+      ("core-057", UnitCardDef squigHerders),
+      ("core-058", UnitCardDef ironclawsHorde),
+      ("core-059", UnitCardDef followersOfMork),
+      ("core-060", UnitCardDef blackOrcSquad),
+      ("core-061", UnitCardDef boarBoyz),
+      ("core-062", UnitCardDef urguck),
+      ("core-063", UnitCardDef grimgorIronhide),
+      ("core-064", UnitCardDef nightGoblins),
+      ("core-065", UnitCardDef doomDivers),
+      ("core-066", UnitCardDef lobberCrew),
+      ("core-067", UnitCardDef bigUns),
+      ("core-068", SupportCardDef rockLobber),
+      ("core-069", SupportCardDef choppa),
+      ("core-070", SupportCardDef totemOfGork),
+      ("core-071", SupportCardDef bannaOfDaRedSunz),
+      ("core-072", QuestCardDef smashEmAll),
+      ("core-073", SupportCardDef grimgorsCamp),
+      ("core-074", TacticCardDef smashGoBoom),
+      ("core-075", TacticCardDef ripDereEadsOff),
+      ("core-076", TacticCardDef wezBigga),
+      ("core-077", TacticCardDef favourOfMork),
+      ("core-078", TacticCardDef pillage),
+      ("core-079", TacticCardDef waaagh),
+      ("core-080", TacticCardDef trollVomit),
+      -- Chaos — core-081..105
+      ("core-081", UnitCardDef servantsOfKhorne),
+      ("core-082", UnitCardDef savageMarauders),
+      ("core-083", UnitCardDef festeringNurglings),
+      ("core-084", UnitCardDef nurgleSorcerer),
+      ("core-085", UnitCardDef chaosKnights),
+      ("core-086", UnitCardDef cultistOfSlaanesh),
+      ("core-087", UnitCardDef valkiaTheBloody),
+      ("core-088", UnitCardDef melekhTheChanger),
+      ("core-089", UnitCardDef fledglingChaosSpawn),
+      ("core-090", UnitCardDef savageGors),
+      ("core-091", UnitCardDef darkZealot),
+      ("core-092", UnitCardDef bloodthirster),
+      ("core-093", SupportCardDef cloudOfFlies),
+      ("core-094", SupportCardDef horrificMutation),
+      ("core-095", SupportCardDef sadisticMutation),
+      ("core-096", SupportCardDef warpstoneMeteor),
+      ("core-097", QuestCardDef journeyToTheGate),
+      ("core-098", SupportCardDef shrineToNurgle),
+      ("core-099", TacticCardDef seducedByDarkness),
+      ("core-100", TacticCardDef willOfTzeentch),
+      ("core-101", TacticCardDef nurglesPestilence),
+      ("core-102", TacticCardDef flamesOfTzeentch),
+      ("core-103", TacticCardDef bloodForTheBloodGod),
+      ("core-104", TacticCardDef cullingTheWeak),
+      ("core-105", TacticCardDef slaaneshsDomination),
+      -- Dark Elf — core-106..110 (only 5 in core)
+      ("core-106", UnitCardDef discipleOfKhaine),
+      ("core-107", UnitCardDef vileSorceress),
+      ("core-108", UnitCardDef coldOneRiders),
+      ("core-109", SupportCardDef cauldronOfBlood),
+      ("core-110", TacticCardDef hate),
+      -- Neutral — core-111..127 (no core-119)
+      ("core-111", SupportCardDef contestedVillage),
+      ("core-112", SupportCardDef contestedFortress),
+      ("core-113", SupportCardDef contestedStronghold),
+      ("core-114", SupportCardDef armoury),
+      ("core-115", SupportCardDef forgottenCemetery),
+      ("core-116", SupportCardDef warpstoneExcavation),
+      ("core-117", TacticCardDef pilgrimage),
+      ("core-118", TacticCardDef burnItDown),
+      ("core-120", QuestCardDef infiltrate),
+      ("core-121", QuestCardDef prepareForWar),
+      ("core-122", SupportCardDef allianceDwarfEmpire),
+      ("core-123", SupportCardDef allianceEmpireHighElf),
+      ("core-124", SupportCardDef allianceDwarfHighElf),
+      ("core-125", SupportCardDef allianceChaosOrc),
+      ("core-126", SupportCardDef allianceChaosDarkElf),
+      ("core-127", SupportCardDef allianceOrcDarkElf),
+      -- The Corruption cycle — The Skavenblight Threat (001-020)
+      ("the-skavenblight-threat-001", UnitCardDef gurnisElite),
+      ("the-skavenblight-threat-002", TacticCardDef standYourGround),
+      ("the-skavenblight-threat-003", UnitCardDef nordlandHalberdiers),
+      ("the-skavenblight-threat-004", TacticCardDef infiltrateTactic),
+      ("the-skavenblight-threat-005", UnitCardDef tyriel),
+      ("the-skavenblight-threat-006", TacticCardDef steelsBane),
+      ("the-skavenblight-threat-007", QuestCardDef repairTheWaystones),
+      ("the-skavenblight-threat-008", UnitCardDef spiderRiders),
+      ("the-skavenblight-threat-009", SupportCardDef warPaint),
+      ("the-skavenblight-threat-010", UnitCardDef chosenOfTzeentch),
+      ("the-skavenblight-threat-011", TacticCardDef boltOfChange),
+      ("the-skavenblight-threat-012", UnitCardDef malusDarkblade),
+      ("the-skavenblight-threat-013", UnitCardDef morathisPegasus),
+      ("the-skavenblight-threat-014", TacticCardDef weNeedYourBlood),
+      ("the-skavenblight-threat-015", UnitCardDef greyseerThanquol),
+      ("the-skavenblight-threat-016", UnitCardDef clanRats),
+      ("the-skavenblight-threat-017", SupportCardDef warpLightningCannon),
+      ("the-skavenblight-threat-018", UnitCardDef mariusTheRighteous),
+      ("the-skavenblight-threat-019", SupportCardDef abandonedMine),
+      ("the-skavenblight-threat-020", SupportCardDef forge),
+      -- The Corruption cycle — Path of the Zealot (021-040)
+      ("path-of-the-zealot-021", UnitCardDef dwarfMiner),
+      ("path-of-the-zealot-022", SupportCardDef gromrilArmour),
+      ("path-of-the-zealot-023", UnitCardDef gustavTheBear),
+      ("path-of-the-zealot-024", UnitCardDef talabheimDetachment),
+      ("path-of-the-zealot-025", SupportCardDef gateOfSigmar),
+      ("path-of-the-zealot-026", TacticCardDef vaulsUnmaking),
+      ("path-of-the-zealot-027", SupportCardDef repeaterBoltThrower),
+      ("path-of-the-zealot-028", UnitCardDef arrerBoyz),
+      ("path-of-the-zealot-029", TacticCardDef wolfRiderAssault),
+      ("path-of-the-zealot-030", UnitCardDef buleLordOfPus),
+      ("path-of-the-zealot-031", UnitCardDef bloodsworn),
+      ("path-of-the-zealot-032", QuestCardDef wolvesOfTheNorth),
+      ("path-of-the-zealot-033", UnitCardDef darkRiders),
+      ("path-of-the-zealot-034", TacticCardDef callTheBlood),
+      ("path-of-the-zealot-035", UnitCardDef poisonWindGlobadiers),
+      ("path-of-the-zealot-036", TacticCardDef chitteringHorde),
+      ("path-of-the-zealot-037", UnitCardDef zealotHunter),
+      ("path-of-the-zealot-038", UnitCardDef veteranSellswords),
+      ("path-of-the-zealot-039", TacticCardDef surpriseAssault),
+      ("path-of-the-zealot-040", TacticCardDef animosity),
+      -- The Corruption cycle — Tooth and Claw (041-060)
+      ("tooth-and-claw-041", UnitCardDef gurniThorgrimson),
+      ("tooth-and-claw-042", SupportCardDef anvilOfDoom),
+      ("tooth-and-claw-043", TacticCardDef blessingOfValaya),
+      ("tooth-and-claw-044", UnitCardDef reiksguardSwordsmen),
+      ("tooth-and-claw-045", TacticCardDef ironDiscipline),
+      ("tooth-and-claw-046", UnitCardDef dragonmage),
+      ("tooth-and-claw-047", TacticCardDef giftsOfAenarion),
+      ("tooth-and-claw-048", UnitCardDef ugrokBeardburna),
+      ("tooth-and-claw-049", TacticCardDef mobUp),
+      ("tooth-and-claw-050", QuestCardDef datsMine),
+      ("tooth-and-claw-051", UnitCardDef blueHorrors),
+      ("tooth-and-claw-052", TacticCardDef brutalOffering),
+      ("tooth-and-claw-053", UnitCardDef coldOneChariot),
+      ("tooth-and-claw-054", TacticCardDef graspingDarkness),
+      ("tooth-and-claw-055", UnitCardDef ratOgres),
+      ("tooth-and-claw-056", UnitCardDef gutterRunners),
+      ("tooth-and-claw-057", UnitCardDef clanMouldersElite),
+      ("tooth-and-claw-058", UnitCardDef errantWolf),
+      ("tooth-and-claw-059", TacticCardDef reapWhatsSown),
+      ("tooth-and-claw-060", SupportCardDef scoutCamp),
+      -- The Corruption cycle — The Deathmaster's Dance (061-080)
+      ("the-deathmaster-s-dance-061", UnitCardDef mountainLegion),
+      ("the-deathmaster-s-dance-062", TacticCardDef emptyTheHold),
+      ("the-deathmaster-s-dance-063", QuestCardDef reclaimTheHold),
+      ("the-deathmaster-s-dance-064", UnitCardDef vigilantElector),
+      ("the-deathmaster-s-dance-065", UnitCardDef flagellants),
+      ("the-deathmaster-s-dance-066", TacticCardDef ulricsFury),
+      ("the-deathmaster-s-dance-067", UnitCardDef silverHelmDetachment),
+      ("the-deathmaster-s-dance-068", SupportCardDef ishasGaze),
+      ("the-deathmaster-s-dance-069", TacticCardDef banish),
+      ("the-deathmaster-s-dance-070", UnitCardDef ironBoyz),
+      ("the-deathmaster-s-dance-071", SupportCardDef grimgorsSpike),
+      ("the-deathmaster-s-dance-072", TacticCardDef swarmEm),
+      ("the-deathmaster-s-dance-073", UnitCardDef greatUncleanOne),
+      ("the-deathmaster-s-dance-074", SupportCardDef hellcannonReserves),
+      ("the-deathmaster-s-dance-075", TacticCardDef offeringOfBlood),
+      ("the-deathmaster-s-dance-076", UnitCardDef warHydra),
+      ("the-deathmaster-s-dance-077", SupportCardDef reaperBoltThrower),
+      ("the-deathmaster-s-dance-078", TacticCardDef caughtTheScent),
+      ("the-deathmaster-s-dance-079", UnitCardDef deathmasterSniktch),
+      ("the-deathmaster-s-dance-080", UnitCardDef juvenileWyvern),
+      -- The Corruption cycle — The Warpstone Chronicles (081-100)
+      ("the-warpstone-chronicles-081", UnitCardDef dragonslayer),
+      ("the-warpstone-chronicles-082", SupportCardDef greatBookOfGrudges),
+      ("the-warpstone-chronicles-083", SupportCardDef flameCannon),
+      ("the-warpstone-chronicles-084", UnitCardDef vigilantPistoliers),
+      ("the-warpstone-chronicles-085", SupportCardDef runefangOfSolland),
+      ("the-warpstone-chronicles-086", SupportCardDef helblasterVolleyGun),
+      ("the-warpstone-chronicles-087", UnitCardDef finreirsGuard),
+      ("the-warpstone-chronicles-088", SupportCardDef warCrownOfSaphery),
+      ("the-warpstone-chronicles-089", TacticCardDef secondSight),
+      ("the-warpstone-chronicles-090", UnitCardDef snotlingPumpWagon),
+      ("the-warpstone-chronicles-091", SupportCardDef bashasBloodaxe),
+      ("the-warpstone-chronicles-092", SupportCardDef thickSkinned),
+      ("the-warpstone-chronicles-093", UnitCardDef alluringDaemonettes),
+      ("the-warpstone-chronicles-094", TacticCardDef berserkFury),
+      ("the-warpstone-chronicles-095", SupportCardDef daemonsword),
+      ("the-warpstone-chronicles-096", UnitCardDef naggarothSpearmen),
+      ("the-warpstone-chronicles-097", SupportCardDef hydraBlade),
+      ("the-warpstone-chronicles-098", QuestCardDef slaverRaid),
+      ("the-warpstone-chronicles-099", SupportCardDef ancientWaystone),
+      ("the-warpstone-chronicles-100", SupportCardDef fellblade),
+      -- The Corruption cycle — Arcane Fire (101-120)
+      ("arcane-fire-101", UnitCardDef longbeards),
+      ("arcane-fire-102", TacticCardDef runeOfHearthAndHome),
+      ("arcane-fire-103", TacticCardDef hewnFromTheMountain),
+      ("arcane-fire-104", UnitCardDef helblasterCrew),
+      ("arcane-fire-105", TacticCardDef sigmarsBrilliance),
+      ("arcane-fire-106", QuestCardDef protectTheEmpire),
+      ("arcane-fire-107", UnitCardDef ellyrianReavers),
+      ("arcane-fire-108", TacticCardDef morvaelsLegacy),
+      ("arcane-fire-109", TacticCardDef chargeOfTheSilverHelms),
+      ("arcane-fire-110", UnitCardDef snotlingSaboteurs),
+      ("arcane-fire-111", TacticCardDef daBrainbusta),
+      ("arcane-fire-112", TacticCardDef easyPickins),
+      ("arcane-fire-113", UnitCardDef beastOfChaos),
+      ("arcane-fire-114", TacticCardDef cacophonicScream),
+      ("arcane-fire-115", TacticCardDef blessingsOfTzeentch),
+      ("arcane-fire-116", UnitCardDef slaveDriver),
+      ("arcane-fire-117", TacticCardDef yourWillIsMine),
+      ("arcane-fire-118", SupportCardDef witchHagsCurse),
+      ("arcane-fire-119", SupportCardDef greyseersLair),
+      ("arcane-fire-120", UnitCardDef plagueMonk),
+      -- Chaos — Cataclysm cycle
+      ("cataclysm-033", UnitCardDef lordOfKhorne),
+      ("cataclysm-034", UnitCardDef bloodcrusher),
+      ("cataclysm-037", SupportCardDef riftOfChaos),
+      ("legends-031", UnitCardDef bloodletter),
+      ("legends-032", UnitCardDef warhounds),
+      ("the-fourth-waystone-091", UnitCardDef viciousMarauder),
+      ("the-chaos-moon-032", UnitCardDef doombull),
+      ("the-eclipse-of-hope-093", SupportCardDef brandedByKhorne),
+      ("omens-of-ruin-013", SupportCardDef markOfChaos),
+      ("the-inevitable-city-013", SupportCardDef ironThroneroom),
+      ("the-inevitable-city-020", QuestCardDef raidingCamps),
+      -- Bloodquest cycle — Rising Dawn (pack 1)
+      ("rising-dawn-005", UnitCardDef orcBully),
+      ("rising-dawn-008", TacticCardDef rageOfTheBear),
+      ("rising-dawn-009", UnitCardDef lothernSeaMaster),
+      ("rising-dawn-013", TacticCardDef boonOfTzeentch),
+      ("rising-dawn-015", SupportCardDef towerOfOblivion),
+      -- Bloodquest cycle — Fragments of Power (pack 2)
+      ("fragments-of-power-027", UnitCardDef averheimSoldiers),
+      ("fragments-of-power-031", UnitCardDef swornOfKhorne),
+      ("fragments-of-power-032", SupportCardDef stolenSkin),
+      -- Bloodquest cycle — The Accursed Dead (pack 3)
+      ("the-accursed-dead-045", UnitCardDef lionStandard),
+      ("the-accursed-dead-051", UnitCardDef strickenWarrior),
+      ("the-accursed-dead-052", SupportCardDef riftOfBattle),
+      ("the-accursed-dead-053", UnitCardDef treasureThieves),
+      -- Bloodquest cycle — Vessel of the Winds (pack 4)
+      ("vessel-of-the-winds-075", SupportCardDef templeOfSpite),
+      ("vessel-of-the-winds-076", UnitCardDef magePriestOfItza),
+      -- Bloodquest cycle — Portent of Doom (pack 5)
+      ("portent-of-doom-089", UnitCardDef princeAlthran),
+      ("portent-of-doom-093", TacticCardDef murderlust),
+      -- Bloodquest cycle — Shield of the Gods (pack 6)
+      ("shield-of-the-gods-103", UnitCardDef dwarfAdventurer),
+      ("shield-of-the-gods-104", SupportCardDef hospitableCave),
+      ("shield-of-the-gods-105", UnitCardDef manglerSquigs),
+      ("shield-of-the-gods-107", UnitCardDef steelStandard),
+      ("shield-of-the-gods-109", UnitCardDef ellyrianElite),
+      -- Days of Blood (Eternal War cycle, pack 1)
+      ("days-of-blood-004", SupportCardDef chillSeaWatchtower),
+      ("days-of-blood-005", UnitCardDef veteranThunderers),
+      ("days-of-blood-007", UnitCardDef ludwigSchwarzheim),
+      ("days-of-blood-010", UnitCardDef greatFireDragon),
+      ("days-of-blood-016", UnitCardDef norseMarauders),
+      ("days-of-blood-017", UnitCardDef ghorgon),
+      ("days-of-blood-018", TacticCardDef recklessAttack),
+      ("days-of-blood-019", SupportCardDef bordertown),
+      -- Oaths of Vengeance (Eternal War cycle, pack 2)
+      ("oaths-of-vengeance-023", SupportCardDef outlyingTower),
+      ("oaths-of-vengeance-027", SupportCardDef wealthOfTheHold),
+      ("oaths-of-vengeance-028", UnitCardDef maidOfSigmar),
+      ("oaths-of-vengeance-030", UnitCardDef wolfChariot),
+      ("oaths-of-vengeance-031", UnitCardDef goblinRaiders),
+      ("oaths-of-vengeance-035", UnitCardDef vaedraBloodsworn),
+      ("oaths-of-vengeance-036", UnitCardDef hagGraefKnights),
+      -- Battle for the Old World (Eternal War cycle, pack 3)
+      ("battle-for-the-old-world-043", SupportCardDef mobOHutz),
+      ("battle-for-the-old-world-047", UnitCardDef reiksguardElite),
+      ("battle-for-the-old-world-049", SupportCardDef chapterhouseStables),
+      ("battle-for-the-old-world-050", UnitCardDef lilea),
+      ("battle-for-the-old-world-053", UnitCardDef norseClansman),
+      -- Glory of Days Past (Eternal War cycle, pack 4)
+      ("glory-of-days-past-064", SupportCardDef karakHirnMine),
+      ("glory-of-days-past-065", UnitCardDef ostlandGreatswords),
+      ("glory-of-days-past-067", UnitCardDef masterOfQhaysh),
+      ("glory-of-days-past-073", UnitCardDef chaosDragon),
+      ("glory-of-days-past-075", SupportCardDef painfulMutation),
+      ("glory-of-days-past-078", SupportCardDef markedForDeath),
+      -- The Ruinous Hordes (Eternal War cycle, pack 5)
+      ("the-ruinous-hordes-082", QuestCardDef dominionOfChaos),
+      ("the-ruinous-hordes-083", SupportCardDef northernWastes),
+      ("the-ruinous-hordes-085", UnitCardDef steelBehemoth),
+      ("the-ruinous-hordes-088", UnitCardDef kingAlrik),
+      ("the-ruinous-hordes-089", UnitCardDef hornHoldDefender),
+      ("the-ruinous-hordes-091", UnitCardDef avelornSojourner),
+      ("the-ruinous-hordes-094", UnitCardDef wolfGobbos),
+      ("the-ruinous-hordes-096", UnitCardDef coldOneChampion),
+      -- Faith and Steel (Eternal War cycle, pack 6)
+      ("faith-and-steel-113", UnitCardDef skulltaker),
+      ("faith-and-steel-103", SupportCardDef theEmperorsStatue),
+      ("faith-and-steel-106", UnitCardDef doomSeeker),
+      ("faith-and-steel-107", TacticCardDef fearlessInBattle),
+      ("faith-and-steel-111", UnitCardDef gobboBigBoss)
     ]
