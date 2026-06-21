@@ -477,6 +477,23 @@ chooseFromCards pk minN maxN cards desc k = do
         _ -> []
   k chosen
 
+-- | "Discard a card from your hand with X loyalty to …" Prompts the
+-- player to discard exactly one card from hand, then runs the body
+-- with that card's printed loyalty as X. The whole-line idiom shared
+-- by Storm of Change, Inflame, Snotling Ambush, Leave No Trace, Call
+-- of the Kraken, and Doubling of the Guard. Pair with a
+-- 'playableWhen' that requires a non-empty hand.
+discardForLoyalty
+  :: (HasGame m, HasQueue Message m, HasPromptIO m)
+  => PlayerKey -> (Int -> m ()) -> m ()
+discardForLoyalty pk body = do
+  me <- playerOf pk <$> getGame
+  chooseFromCards pk 1 1 me.hand "Discard a card from your hand for its loyalty (X)." \case
+    [c] -> do
+      push (DiscardCardsFromHand pk [c.key])
+      body (someCardLoyalty c.def)
+    _ -> pure ()
+
 -- ---------------------------------------------------------------------
 -- "Then" chains
 --

@@ -109,6 +109,9 @@ data Trait
     -- ^ War Machine trait (Steel Behemoth, Dead-Eye Cannon Crew).
   | Musician
     -- ^ Musician trait (Imperial Drummer, Dragon Caller).
+  | StandardBearer
+    -- ^ Standard Bearer trait (Doom Bearer, Banna Thief, Bannerman of
+    -- the Crag). Distinct from the support-side 'Banner' trait.
   | Location
     -- ^ Location support trait (Straits of Lothern, Capital-cycle locations).
   | Fortification

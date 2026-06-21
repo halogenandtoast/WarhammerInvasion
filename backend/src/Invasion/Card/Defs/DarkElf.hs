@@ -588,3 +588,51 @@ raidingShips = questCard "city-of-winter-100" "Raiding Ships" do
     \an opponent's hand if a unit is questing here."
   onEnterPlay \_owner self -> drawCard self.controller
   onQuestSupportPayoff DarkElf \self -> discardRandom self.controller.next
+
+callOfTheKraken :: CardDef Tactic
+callOfTheKraken = tacticCard "city-of-winter-095" "Call of the Kraken" do
+  race DarkElf
+  cost 0
+  loyalty 3
+  body
+    "Action: Discard a card from your hand with X loyalty to put a {darkelf} unit with \
+    \printed cost X or lower into play from your hand."
+  playableWhen \g pk -> not (null (playerOf pk g).hand)
+  whenResolved \self -> do
+    let pk = self.controller
+    discardForLoyalty pk \x -> do
+      me <- playerOf pk <$> getGame
+      let isCand c = case c.def of
+            UnitCardDef cd -> DarkElf `elem` cd.races && someCardCost c.def <= x
+            _ -> False
+          cands = filter isCand me.hand
+      chooseFromCards pk 0 1 cands
+        "Call of the Kraken: put a Dark Elf unit (cost X or lower) into play." \chosen ->
+        for_ chosen \c -> putUnitIntoPlay pk FromHand c.key BattlefieldZone
+
+bannermanOfTheCrag :: CardDef Unit
+bannermanOfTheCrag = unitCard "city-of-winter-087" "Bannerman of the Crag" do
+  race DarkElf
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  trait StandardBearer
+  body "Action: When a unit enters this zone, discard the top card of target player's deck."
+  -- "target player": the opponent, the only meaningful pick.
+  onUnitEnterMyZone \_owner self _uk -> millFromDeck self.controller.next 1
+
+sacrificialPyre :: CardDef Support
+sacrificialPyre = supportCard "the-imperial-throne-115" "Sacrificial Pyre" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 0
+  trait Location
+  body "Action: When you sacrifice a unit, corrupt target unit."
+  -- Approximation: fires on any friendly unit leaving play, not only
+  -- sacrifices — 'DepartedUnit' carries no reason field yet.
+  -- TODO: gate on a sacrifice reason once UnitLeftPlay distinguishes
+  -- sacrifice from death / return-to-hand.
+  onFriendlyUnitLeavePlay \_owner self _uk _zone _code ->
+    withTarget self.controller AnyUnit (push . CorruptUnit)

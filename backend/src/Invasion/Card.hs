@@ -320,32 +320,42 @@ allCards =
       ("omens-of-ruin-013", SupportCardDef markOfChaos),
       -- The Capital Cycle — The Inevitable City (001-020)
       ("the-inevitable-city-004", UnitCardDef princeOfCaledor),
+      ("the-inevitable-city-005", UnitCardDef doomBearer),
       ("the-inevitable-city-008", UnitCardDef savageForsaken),
       ("the-inevitable-city-011", SupportCardDef theBleedingWall),
       ("the-inevitable-city-013", SupportCardDef ironThroneroom),
+      ("the-inevitable-city-014", TacticCardDef stormOfChange),
       ("the-inevitable-city-019", TacticCardDef willpower),
       ("the-inevitable-city-020", QuestCardDef raidingCamps),
       -- The Capital Cycle — Realm of the Phoenix King (021-040)
       ("realm-of-the-phoenix-king-030", SupportCardDef straitsOfLothern),
+      ("realm-of-the-phoenix-king-033", TacticCardDef inflame),
       -- The Capital Cycle — The Iron Rock (041-060)
       ("the-iron-rock-041", UnitCardDef guildOfEngineers),
+      ("the-iron-rock-042", UnitCardDef bannaThief),
       ("the-iron-rock-044", UnitCardDef squigLobber),
       ("the-iron-rock-045", UnitCardDef rugludsArmouredOrcs),
+      ("the-iron-rock-050", TacticCardDef snotlingAmbush),
       ("the-iron-rock-054", UnitCardDef beastmanShaman),
       ("the-iron-rock-060", QuestCardDef raidingParties),
       -- The Capital Cycle — Karaz-a-Karak (061-080)
       ("karaz-a-karak-061", UnitCardDef mountainSentry),
       ("karaz-a-karak-062", UnitCardDef queenHelga),
       ("karaz-a-karak-064", UnitCardDef runeblades),
+      ("karaz-a-karak-070", TacticCardDef leaveNoTrace),
       ("karaz-a-karak-080", QuestCardDef buildingForWar),
       -- The Capital Cycle — City of Winter (081-100)
+      ("city-of-winter-087", UnitCardDef bannermanOfTheCrag),
       ("city-of-winter-093", SupportCardDef harpyAerie),
+      ("city-of-winter-095", TacticCardDef callOfTheKraken),
       ("city-of-winter-100", QuestCardDef raidingShips),
       -- The Capital Cycle — The Imperial Throne (101-120)
       ("the-imperial-throne-103", UnitCardDef imperialDrummer),
       ("the-imperial-throne-106", UnitCardDef priestsOfSigmar),
       ("the-imperial-throne-107", UnitCardDef stirlandDeathjacks),
       ("the-imperial-throne-108", UnitCardDef wingedRidersOfKislev),
+      ("the-imperial-throne-112", TacticCardDef doublingOfTheGuard),
+      ("the-imperial-throne-115", SupportCardDef sacrificialPyre),
       ("the-imperial-throne-120", QuestCardDef recruitingForWar),
       -- Bloodquest cycle — Rising Dawn (pack 1)
       ("rising-dawn-005", UnitCardDef orcBully),

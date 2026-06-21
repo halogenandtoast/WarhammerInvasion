@@ -888,3 +888,29 @@ raidingParties = questCard "the-iron-rock-060" "Raiding Parties" do
   onQuestSupportPayoff Orc \self ->
     withTarget self.controller AnyDevelopmentZone \(owner, zk) ->
       destroyDevelopment owner zk
+
+snotlingAmbush :: CardDef Tactic
+snotlingAmbush = tacticCard "the-iron-rock-050" "Snotling Ambush" do
+  race Orc
+  cost 2
+  loyalty 3
+  body
+    "Action: Discard a card from your hand with X loyalty to discard X resources from \
+    \target player."
+  -- "target player": the opponent, the only meaningful pick.
+  playableWhen \g pk -> not (null (playerOf pk g).hand)
+  whenResolved \self ->
+    discardForLoyalty self.controller \x ->
+      when (x > 0) $ payResources self.controller.next x
+
+bannaThief :: CardDef Unit
+bannaThief = unitCard "the-iron-rock-042" "Banna Thief" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  traits [Goblin, StandardBearer]
+  body "Action: When a unit enters this zone, target unit gains power until the end of the turn."
+  onUnitEnterMyZone \_owner self _uk ->
+    withTarget self.controller AnyUnit \k -> until EndOfTurn $ buffPower k 1

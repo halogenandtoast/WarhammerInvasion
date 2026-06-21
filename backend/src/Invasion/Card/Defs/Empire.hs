@@ -942,3 +942,13 @@ recruitingForWar = questCard "the-imperial-throne-120" "Recruiting for War" do
     \questing here."
   onEnterPlay \_owner self -> drawCard self.controller
   onQuestSupportPayoff Empire \self -> drawCard self.controller
+
+doublingOfTheGuard :: CardDef Tactic
+doublingOfTheGuard = tacticCard "the-imperial-throne-112" "Doubling of the Guard" do
+  race Empire
+  cost 1
+  loyalty 2
+  body "Action: Discard a card from your hand with X loyalty to draw X cards."
+  playableWhen \g pk -> not (null (playerOf pk g).hand)
+  whenResolved \self ->
+    discardForLoyalty self.controller \x -> when (x > 0) $ drawCards self.controller x

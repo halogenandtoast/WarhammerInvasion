@@ -1217,3 +1217,30 @@ beastmanShaman = unitCard "the-iron-rock-054" "Beastman Shaman" do
     whenJust (findUnit uk g) \u ->
       when (u.controller == self.controller && Chaos `elem` u.cardDef.races) $
         drawCard self.controller
+
+stormOfChange :: CardDef Tactic
+stormOfChange = tacticCard "the-inevitable-city-014" "Storm of Change" do
+  race Chaos
+  cost 3
+  loyalty 2
+  trait Spell
+  body
+    "Action: Discard a card from your hand with X loyalty to deal X damage to each \
+    \corrupted unit."
+  playableWhen \g pk -> not (null (playerOf pk g).hand)
+  whenResolved \self ->
+    discardForLoyalty self.controller \x -> when (x > 0) do
+      g <- getGame
+      for_ [u | u <- g.units, u.corrupted] \u -> dealDamage u.key x
+
+doomBearer :: CardDef Unit
+doomBearer = unitCard "the-inevitable-city-005" "Doom Bearer" do
+  race Chaos
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  trait StandardBearer
+  body "Action: When a unit enters this zone, corrupt target unit you control."
+  onUnitEnterMyZone \_owner self _uk ->
+    withTarget self.controller ownUnit (push . CorruptUnit)

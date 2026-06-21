@@ -839,3 +839,16 @@ buildingForWar = questCard "karaz-a-karak-080" "Building for War" do
     \questing here."
   onEnterPlay \_owner self -> drawCard self.controller
   onQuestSupportPayoff Dwarf \self -> gainResources self.controller 1
+
+leaveNoTrace :: CardDef Tactic
+leaveNoTrace = tacticCard "karaz-a-karak-070" "Leave No Trace" do
+  race Dwarf
+  cost 1
+  loyalty 3
+  body
+    "Action: Discard a card from your hand with X loyalty to deal X damage to target \
+    \defending unit."
+  playableWhen \g pk -> not (null (playerOf pk g).hand) && hasTarget defendingUnit g pk
+  whenResolved \self ->
+    withTarget self.controller defendingUnit \k ->
+      discardForLoyalty self.controller \x -> when (x > 0) $ dealDamage k x

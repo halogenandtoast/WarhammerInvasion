@@ -555,3 +555,18 @@ straitsOfLothern = supportCard "realm-of-the-phoenix-king-030" "Straits of Lothe
     if s.zone == zone
       then length [u | u <- g.units, u.controller == s.controller, u.zone == zone]
       else 0
+
+inflame :: CardDef Tactic
+inflame = tacticCard "realm-of-the-phoenix-king-033" "Inflame" do
+  race HighElf
+  cost 1
+  loyalty 3
+  trait Spell
+  body
+    "Action: Discard a card from your hand with X loyalty to have target unit gain X \
+    \power until the end of the turn."
+  playableWhen \g pk -> not (null (playerOf pk g).hand) && hasTarget AnyUnit g pk
+  whenResolved \self ->
+    withTarget self.controller AnyUnit \k ->
+      discardForLoyalty self.controller \x ->
+        when (x > 0) $ until EndOfTurn $ buffPower k x

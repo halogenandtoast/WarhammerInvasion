@@ -292,6 +292,33 @@ onFriendlyUnitEnterPlay handler = onReceive $ Receive \msg owner self -> case ms
         handler owner self uk
   _ -> pure ()
 
+-- | "When a unit enters this zone." Fires off 'UnitEnteredPlay' when
+-- the entering unit lands in the host's own zone (same controller,
+-- same zone kind), skipping the host's own entry. Body receives the
+-- entering unit's key. Used by Doom Bearer, Banna Thief, and
+-- Bannerman of the Crag.
+--
+-- Approximation: keys off play / put-into-play entries only. A unit
+-- *relocating* into the zone may not re-emit 'UnitEnteredPlay', so
+-- those movements don't trigger — the common "enters play here" case
+-- is covered.
+onUnitEnterMyZone
+  :: forall k
+   . ( HasField "controller" (InPlay k) PlayerKey
+     , HasField "key" (InPlay k) UnitKey
+     , HasField "zone" (InPlay k) ZoneKind
+     )
+  => (forall m. TriggerM m => Player -> InPlay k -> UnitKey -> m ())
+  -> CardBuilder k ()
+onUnitEnterMyZone handler = onReceive $ Receive \msg owner self -> case msg of
+  UnitEnteredPlay pk uk
+    | pk == self.controller && uk /= self.key -> do
+        g <- getGame
+        case findUnit uk g of
+          Just u | u.zone == self.zone -> handler owner self uk
+          _ -> pure ()
+  _ -> pure ()
+
 -- | "When a unit is corrupted." Fires off the 'CorruptUnit' message
 -- and hands the body the corrupted unit's key; the body decides
 -- whether it cares (e.g. "a [Chaos] unit you control"). Used by The
