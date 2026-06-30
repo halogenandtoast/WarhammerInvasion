@@ -25,6 +25,15 @@ import Invasion.Types
 
 import System.Exit (exitFailure)
 
+-- TODO: this suite is flaky. 'runSetup' shuffles the decks with real IO
+-- randomness, so the opening hands differ every run. Checks that depend
+-- on hand contents (the "affordable Unit" PlayUnit probe, the scripted
+-- combat scenario, …) pass or fail at random — observed ~40% failure
+-- across repeated runs, with different cases failing each time. Fix by
+-- making setup deterministic for tests: thread a seeded StdGen (or add a
+-- 'runSetupWith :: StdGen -> ...') so the shuffle is reproducible, then
+-- pin a seed here. Independent of card content — the starter decks are
+-- fixed core cards.
 main :: IO ()
 main = do
   setupResult <- runSetup

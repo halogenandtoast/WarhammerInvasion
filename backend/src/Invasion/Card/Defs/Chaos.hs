@@ -969,3 +969,124 @@ riftOfBattle = supportCard "the-accursed-dead-052" "Rift of Battle" do
   trait Rift
   body "Units in all corresponding zones deal +1 damage in combat."
   supportCombat \_g _s _u -> 1
+
+ghorgon :: CardDef Unit
+ghorgon = unitCard "days-of-blood-017" "Ghorgon" do
+  race Chaos
+  cost 2
+  loyalty 2
+  power 3
+  hitPoints 3
+  trait Creature
+  battlefieldOnly
+  body
+    "Battlefield only. Forced: When this unit attacks, discard the top card of your deck. \
+    \If the discarded card is not a unit, sacrifice this unit."
+  onMyAttackDeclared \owner self _zone _attackers ->
+    case owner.deck of
+      [] -> pure ()
+      (top : _) -> do
+        millFromDeck self.controller 1
+        unless (isUnitCard top) $ destroyUnit self.key
+  where
+    isUnitCard c = case c.def of
+      UnitCardDef _ -> True
+      _ -> False
+
+-- Battle for the Old World ---------------------------------------------
+
+norseClansman :: CardDef Unit
+norseClansman = unitCard "battle-for-the-old-world-053" "Norse Clansman" do
+  race Chaos
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Berserker
+  body
+    "Forced: When this unit is opposed in combat, discard the top card of your deck. \
+    \If the discarded card is a unit, deal 1 uncancellable damage to target attacking \
+    \or defending unit."
+  -- "Opposed in combat" is modelled at the defender-declaration step:
+  -- the unit is opposed once attackers and defenders both exist and it
+  -- is on one side of the combat.
+  onReceive $ Receive \msg owner self -> case msg of
+    DeclareDefenders ks -> do
+      g <- getGame
+      let opposed = case g.combat of
+            Just cs ->
+              (self.key `elem` cs.attackers && not (null ks))
+                || self.key `elem` ks
+            Nothing -> False
+      when opposed case owner.deck of
+        [] -> pure ()
+        (top : _) -> do
+          millFromDeck self.controller 1
+          when (isUnitCard top) $
+            withTarget self.controller inCombatUnit \k ->
+              dealUncancellableDamage k 1
+    _ -> pure ()
+  where
+    isUnitCard c = case c.def of
+      UnitCardDef _ -> True
+      _ -> False
+    inCombatUnit = UnitMatching \_pk g u -> case g.combat of
+      Just cs -> u.key `elem` cs.attackers || u.key `elem` cs.defenders
+      Nothing -> False
+
+-- Glory of Days Past ---------------------------------------------------
+
+chaosDragon :: CardDef Unit
+chaosDragon = unitCard "glory-of-days-past-073" "Chaos Dragon" do
+  race Chaos
+  cost 7
+  loyalty 3
+  power 5
+  hitPoints 5
+  traits [Creature, Dragon]
+  battlefieldOnly
+  body
+    "Battlefield only. Action: When this unit attacks, discard the top card of your deck. \
+    \If the discarded card is a unit, corrupt target unit in the defending zone."
+  onMyAttackDeclared \owner self zone _attackers ->
+    case owner.deck of
+      [] -> pure ()
+      (top : _) -> do
+        millFromDeck self.controller 1
+        when (isChaosDragonUnit top) $
+          withTarget self.controller
+            (UnitMatching \_pk _g u -> u.zone == zone && u.controller /= self.controller)
+            corrupt
+  where
+    isChaosDragonUnit c = case c.def of
+      UnitCardDef _ -> True
+      _ -> False
+
+painfulMutation :: CardDef Support
+painfulMutation = supportCard "glory-of-days-past-075" "Painful Mutation" do
+  race Chaos
+  cost 1
+  loyalty 2
+  traits [Attachment, Mutation]
+  body
+    "Attach to a target unit in any battlefield zone. Attached unit gains {power}{power}. \
+    \Forced: At the beginning of your turn, deal X indirect damage to attached unit's \
+    \controller. X is attached unit's total {power}."
+  attachmentPower 2
+  onMyTurnBegin \_owner self ->
+    for_ self.attachedTo \hostKey -> do
+      g <- getGame
+      whenJust (findUnit hostKey g) \host ->
+        when (host.effectivePower > 0) $
+          indirectDamage host.controller host.effectivePower
+
+norseMarauders :: CardDef Unit
+norseMarauders = unitCard "days-of-blood-016" "Norse Marauders" do
+  race Chaos
+  cost 4
+  loyalty 1
+  power 2
+  hitPoints 3
+  trait Warrior
+  raider 3
+  body "Raider 3."

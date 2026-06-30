@@ -27,6 +27,13 @@ data Keyword
   | Limited
   | DamageCannotBeCancelled
   | Counterstrike Int
+  | Raider Int
+    -- ^ Raider X (Eternal War cycle): after combat damage is applied,
+    -- the attacking player gains resources equal to the combined
+    -- Raider X of all his attacking units that survived combat.
+    -- Multiple instances on one unit (e.g. printed + an attachment)
+    -- add together. Handled centrally by the combat pipeline
+    -- ('FireRaiderResources'), mirroring 'Scout'.
   | PlayInOpponentArea
     -- ^ Quest enters play in the opponent's play area while remaining
     -- under the playing player's control. Used by Dominion of Chaos.
@@ -92,6 +99,14 @@ data Trait
     -- ^ Printed as both "Witchhunter." (Marius the Righteous) and
     -- "Witch Hunter." (Zealot Hunter); one constructor covers both.
   | Hex
+  | Vault
+    -- ^ Resource-generating support trait (Wealth of the Hold).
+  | Berserker
+    -- ^ Aggressive melee unit trait (Norse Clansman, Ded Scary Boy).
+  | Dragon
+    -- ^ Dragon creature trait (Chaos Dragon, Great Fire Dragon).
+  | WarMachine
+    -- ^ War Machine trait (Steel Behemoth, Dead-Eye Cannon Crew).
   | Epic
     -- ^ Half of the printed "Epic Spell." trait line. Epic spells are
     -- excluded from cost-reduction effects like Runefang of Solland.
@@ -281,6 +296,12 @@ data UnitExtras = UnitExtras
     -- the inbound (post-multiplier, post-toughness) amount. Return
     -- 'Just plan' to claim some or all of the damage and route it
     -- elsewhere; 'Nothing' lets the damage land normally.
+  , selfToughnessBonus :: Game -> InPlay Unit -> Int
+    -- ^ Game-state-derived bonus to the unit's own Toughness (Ludwig
+    -- Schwarzheim: X = experiences attached). Folded into
+    -- 'totalToughness' alongside the printed keyword and auras. Distinct
+    -- from 'Toughness Variable', which the engine reads as
+    -- developments-in-zone.
   , selfHPBonus :: Game -> InPlay Unit -> Int
     -- ^ Game-state-derived bonus to the unit's own max HP (Cold One
     -- Chariot: X = developments in this zone). Folded into the cached
@@ -487,6 +508,7 @@ instance HasDefaultExtras Unit where
     , unitCostAdjustment = \_ _ _ _ -> 0
     , unitAuraToughness = \_ _ _ -> 0
     , preDamageRedirect = \_ _ _ -> Nothing
+    , selfToughnessBonus = \_ _ -> 0
     , selfHPBonus = \_ _ -> 0
     , cancelAllDamageWhen = \_ _ -> False
     , perHitDamageCap = Nothing

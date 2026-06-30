@@ -610,3 +610,108 @@ hewnFromTheMountain = tacticCard "arcane-fire-103" "Hewn From the Mountain" do
       when (cs.defendingPlayer == self.controller) $
         for_ cs.defenders \k ->
           until EndOfTurn $ buffPower k 2
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+wealthOfTheHold :: CardDef Support
+wealthOfTheHold = supportCard "oaths-of-vengeance-027" "Wealth of the Hold" do
+  race Dwarf
+  cost 2
+  loyalty 2
+  power 1
+  trait Vault
+  body "Action: At the beginning of each opponent's turn, gain 1 resource."
+  onAnyTurnBegin \_owner self turnOwner ->
+    when (turnOwner /= self.controller) $ gainResources self.controller 1
+
+-- Glory of Days Past ---------------------------------------------------
+
+karakHirnMine :: CardDef Support
+karakHirnMine = supportCard "glory-of-days-past-064" "Karak Hirn Mine" do
+  race Dwarf
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a faceup non-[Dwarf] unit or support card, sacrifice this card."
+  sacrificeWhenBoardChanges \g self ->
+    controlsNonRaceUnitOrSupport g self.controller Dwarf
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+kingAlrik :: CardDef Unit
+kingAlrik = unitCard "the-ruinous-hordes-088" "King Alrik" do
+  unique
+  race Dwarf
+  cost 3
+  loyalty 3
+  power 0
+  hitPoints 3
+  traits [Noble, Warrior]
+  battlefieldOnly
+  body "Battlefield only. This unit gains {power} for each resource you have in your pool."
+  selfPower \g u -> let Resources r = (playerOf u.controller g).resources in r
+
+hornHoldDefender :: CardDef Unit
+hornHoldDefender = unitCard "the-ruinous-hordes-089" "Horn Hold Defender" do
+  race Dwarf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Warrior
+  body
+    "While you have at least 3 resources in your pool, this unit gains Toughness 2. \
+    \Action: When this unit attacks or defends, gain 1 resource."
+  selfToughness \g u ->
+    let Resources r = (playerOf u.controller g).resources in if r >= 3 then 2 else 0
+  onMyAttackOrDefend \_owner self -> gainResources self.controller 1
+
+-- Faith and Steel ------------------------------------------------------
+
+doomSeeker :: CardDef Unit
+doomSeeker = unitCard "faith-and-steel-106" "Doom-Seeker" do
+  race Dwarf
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Slayer
+  body
+    "Action: When this unit survives an attack on an opponent's zone, sacrifice this unit \
+    \to destroy target support card in that zone."
+  onCombatResolveAsAttacker \_owner self cs -> do
+    g <- getGame
+    when (isJust (findUnit self.key g)) $
+      may self.controller "Doom-Seeker: sacrifice to destroy a support in that zone?" do
+        destroyUnit self.key
+        withTarget self.controller
+          (SupportMatching \_pk _g s -> s.zone == cs.targetZone && s.controller /= self.controller)
+          destroySupport
+
+fearlessInBattle :: CardDef Tactic
+fearlessInBattle = tacticCard "faith-and-steel-107" "Fearless in Battle" do
+  race Dwarf
+  cost 1
+  loyalty 3
+  trait Slayer
+  body
+    "Action: Until the end of the phase, each Slayer unit you control deals +1 damage in \
+    \combat and gains Toughness 1."
+  whenResolved \self -> do
+    slayers <- unitsMatching self.controller
+      (UnitMatching \pk _g u -> u.controller == pk && Slayer `elem` u.cardDef.traits)
+    for_ slayers \u -> do
+      until EndOfTurn $ buffCombatDamage u.key 1
+      until EndOfTurn $ buffToughness u.key 1
+
+veteranThunderers :: CardDef Unit
+veteranThunderers = unitCard "days-of-blood-005" "Veteran Thunderers" do
+  race Dwarf
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Warrior
+  raider 2
+  body "Raider 2."

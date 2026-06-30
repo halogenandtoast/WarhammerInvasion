@@ -347,6 +347,40 @@ onMyAttackDeclared handler = onReceive $ Receive \msg owner self -> case msg of
         handler owner self zone attackers
   _ -> pure ()
 
+-- | "When this in-play card attacks or defends." Fires when the card is
+-- declared as an attacker ('BeginCombat') or locked in as a defender
+-- ('DeclareDefenders'). The "Action: When this unit attacks or defends,
+-- …" idiom shared by Ludwig Schwarzheim, Maid of Sigmar, Reiksguard
+-- Elite, Horn Hold Defender, and Vaedra Bloodsworn.
+onMyAttackOrDefend
+  :: forall k
+   . ( HasField "controller" (InPlay k) PlayerKey
+     , HasField "key" (InPlay k) UnitKey
+     )
+  => (forall m. TriggerM m => Player -> InPlay k -> m ())
+  -> CardBuilder k ()
+onMyAttackOrDefend handler = onReceive $ Receive \msg owner self -> case msg of
+  BeginCombat attacker _zone attackers
+    | attacker == self.controller, self.key `elem` attackers ->
+        handler owner self
+  DeclareDefenders ks
+    | self.key `elem` ks -> handler owner self
+  _ -> pure ()
+
+-- | "Action: When this unit attacks or defends, attach 1 experience to
+-- it." The whole-line idiom shared by the experience-scaling units
+-- (Ludwig Schwarzheim, Maid of Sigmar, Reiksguard Elite). The
+-- experience is the host's own code, since facedown experiences only
+-- ever matter as a count.
+gainsExperienceOnAttackOrDefend
+  :: ( HasField "controller" (InPlay k) PlayerKey
+     , HasField "key" (InPlay k) UnitKey
+     , HasField "cardDef" (InPlay k) (CardDef k)
+     )
+  => CardBuilder k ()
+gainsExperienceOnAttackOrDefend =
+  onMyAttackOrDefend \_owner self -> attachExperience self.key self.cardDef.code
+
 -- | "When my zone is attacked by an opponent." Fires off
 -- 'BeginCombat'; the support's zone (its 'zone' field) is checked
 -- against the combat target. Cauldron of Blood uses this.
@@ -438,6 +472,30 @@ onAnyMessage
    . (forall m. TriggerM m => Player -> InPlay k -> m ())
   -> CardBuilder k ()
 onAnyMessage handler = onReceive $ Receive \_msg owner self -> handler owner self
+
+-- | "When you control X, sacrifice this card." Re-checks the predicate
+-- whenever the controller's board could have changed (a card entering
+-- play, or the start of a turn) and sacrifices the support the moment
+-- it holds. Backs the self-sacrificing buildings (the mono-faction
+-- watchtowers, Mob O' Hutz).
+sacrificeWhenBoardChanges
+  :: (Game -> SupportDetails -> Bool) -> CardBuilder Support ()
+sacrificeWhenBoardChanges p = onReceive $ Receive \msg _owner self -> do
+  let boardChanged = case msg of
+        UnitEnteredPlay{} -> True
+        SupportEnteredPlay{} -> True
+        QuestEnteredPlay{} -> True
+        BeginTurn{} -> True
+        _ -> False
+  when boardChanged do
+    g <- getGame
+    when (p g self) $ destroySupport self.key
+
+-- | "If you control a non-[Race] card, sacrifice this card." The
+-- mono-faction watchtower idiom (Chill Sea Watchtower, Outlying Tower).
+sacrificeIfControlsOffFaction :: Race -> CardBuilder Support ()
+sacrificeIfControlsOffFaction r =
+  sacrificeWhenBoardChanges \g self -> controlsNonRaceCard g self.controller r
 
 -- | Append an 'ActionDef' to the card's static action list. Multiple
 -- actions can be declared; the engine surfaces them to the client by

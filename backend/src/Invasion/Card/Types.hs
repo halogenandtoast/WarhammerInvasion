@@ -96,3 +96,19 @@ someCardTraits = \case
   QuestCardDef cd -> cd.traits
   TacticCardDef cd -> cd.traits
   LegendCardDef cd -> cd.traits
+
+-- | The printed resource cost of any card definition, as an 'Int'.
+-- 'Variable' ("X") costs report 0 — the callers that read this (e.g.
+-- Vaedra Bloodsworn, gaining power equal to a discarded card's cost)
+-- treat an unknown X as nothing.
+someCardCost :: SomeCardDef -> Int
+someCardCost d = case asFixed d of
+  Fixed n -> n
+  Variable -> 0
+  where
+    asFixed = \case
+      UnitCardDef cd -> cd.cost
+      SupportCardDef cd -> cd.cost
+      QuestCardDef cd -> cd.cost
+      TacticCardDef cd -> cd.cost
+      LegendCardDef cd -> cd.cost

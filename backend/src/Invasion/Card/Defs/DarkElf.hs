@@ -387,3 +387,86 @@ witchHagsCurse = supportCard "arcane-fire-118" "Witch Hag's Curse" do
   traits [Attachment, Hex]
   body "Attach to a target unit. Treat attached unit as though its printed text box were blank (except for Traits)."
   blanksAttachedUnit
+
+-- Days of Blood --------------------------------------------------------
+
+chillSeaWatchtower :: CardDef Support
+chillSeaWatchtower = supportCard "days-of-blood-004" "Chill Sea Watchtower" do
+  race DarkElf
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a non-[Dark Elf] card, sacrifice this card."
+  sacrificeIfControlsOffFaction DarkElf
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+vaedraBloodsworn :: CardDef Unit
+vaedraBloodsworn = unitCard "oaths-of-vengeance-035" "Vaedra Bloodsworn" do
+  unique
+  race DarkElf
+  cost 3
+  loyalty 2
+  power 0
+  hitPoints 3
+  traits [Warrior]
+  body
+    "Action: When this unit attacks or defends, discard the top card of target opponent's \
+    \deck. This unit gains {power} equal to the cost of the discarded card until the end of \
+    \the phase."
+  onMyAttackOrDefend \_owner self -> drainTopCard self
+  where
+    drainTopCard :: TriggerM m => UnitDetails -> m ()
+    drainTopCard self = do
+      let opp = self.controller.next
+      oppPlayer <- playerOf opp <$> getGame
+      case oppPlayer.deck of
+        [] -> pure ()
+        (top : _) -> do
+          millFromDeck opp 1
+          let c = someCardCost top.def
+          when (c > 0) $ until EndOfTurn $ buffPower self.key c
+
+-- Glory of Days Past ---------------------------------------------------
+
+markedForDeath :: CardDef Support
+markedForDeath = supportCard "glory-of-days-past-078" "Marked for Death" do
+  race DarkElf
+  cost 0
+  loyalty 2
+  trait Attachment
+  body
+    "Attach to a target unit. When attached unit leaves play, attached unit's controller \
+    \must discard X cards from the top of his deck. X is the attached unit's cost."
+  onReceive $ Receive \msg _owner self -> case msg of
+    UnitLeftPlay du
+      | Just du.key == self.attachedTo ->
+          let x = case du.cardDef.cost of
+                Fixed n -> n
+                Variable -> 0
+           in when (x > 0) $ millFromDeck du.controller x
+    _ -> pure ()
+
+hagGraefKnights :: CardDef Unit
+hagGraefKnights = unitCard "oaths-of-vengeance-036" "Hag Graef Knights" do
+  race DarkElf
+  cost 2
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Cavalry
+  raider 2
+  body "Raider 2."
+
+coldOneChampion :: CardDef Unit
+coldOneChampion = unitCard "the-ruinous-hordes-096" "Cold One Champion" do
+  race DarkElf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 3
+  trait Cavalry
+  raider 2
+  scout
+  body "Raider 2. Scout."

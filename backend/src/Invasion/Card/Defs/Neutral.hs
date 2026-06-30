@@ -675,3 +675,19 @@ zoneDevs cap = \case
   KingdomZone -> cap.kingdom.developments
   QuestZone -> cap.quest.developments
   BattlefieldZone -> cap.battlefield.developments
+
+-- Days of Blood --------------------------------------------------------
+
+bordertown :: CardDef Support
+bordertown = supportCard "days-of-blood-019" "Bordertown" do
+  cost 2
+  loyalty 0
+  power 2
+  trait Building
+  body "Forced: When this zone takes combat damage, sacrifice this card."
+  onReceive $ Receive \msg _owner self -> case msg of
+    DealDamageToZone pk zone n
+      | pk == self.controller, zone == self.zone, n > 0 -> do
+          g <- getGame
+          when (isJust g.combat) $ destroySupport self.key
+    _ -> pure ()

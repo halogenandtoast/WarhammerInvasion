@@ -694,3 +694,125 @@ protectTheEmpire = questCard "arcane-fire-106" "Protect the Empire" do
   trait QuestTrait
   body "Quest. Any unit questing on this card can defend any of your zones when they are attacked."
   questerDefendsAnywhere
+
+-- Days of Blood --------------------------------------------------------
+
+ludwigSchwarzheim :: CardDef Unit
+ludwigSchwarzheim = unitCard "days-of-blood-007" "Ludwig Schwarzheim" do
+  unique
+  race Empire
+  cost 4
+  loyalty 3
+  power 3
+  hitPoints 3
+  trait Knight
+  body
+    "Toughness X. X is the number of experiences attached to this unit. \
+    \Action: When this unit attacks or defends, attach 1 experience to it."
+  -- Toughness X here is experience-derived, distinct from the engine's
+  -- development-counting 'Toughness Variable' keyword.
+  selfToughness \_g u -> length u.experiences
+  gainsExperienceOnAttackOrDefend
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+maidOfSigmar :: CardDef Unit
+maidOfSigmar = unitCard "oaths-of-vengeance-028" "Maid of Sigmar" do
+  race Empire
+  cost 2
+  loyalty 2
+  power 0
+  hitPoints 2
+  trait Priest
+  battlefieldOnly
+  body
+    "Battlefield only. This unit gains {power} for each experience attached to it. \
+    \Action: When this unit attacks or defends, attach 1 experience to it."
+  selfPower \_g u -> length u.experiences
+  gainsExperienceOnAttackOrDefend
+
+-- Battle for the Old World ---------------------------------------------
+
+reiksguardElite :: CardDef Unit
+reiksguardElite = unitCard "battle-for-the-old-world-047" "Reiksguard Elite" do
+  race Empire
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 1
+  traits [Elite, Knight]
+  battlefieldOnly
+  body
+    "Battlefield only. This unit gains +1 hit point for every experience attached to it. \
+    \Action: When this unit attacks or defends, attach 1 experience to it."
+  selfHP \_g u -> length u.experiences
+  gainsExperienceOnAttackOrDefend
+
+chapterhouseStables :: CardDef Support
+chapterhouseStables = supportCard "battle-for-the-old-world-049" "Chapterhouse Stables" do
+  race Empire
+  cost 3
+  loyalty 1
+  power 1
+  trait Building
+  body "Lower the cost of the first Knight unit you play each turn by 1."
+  globalCostAdjust \g self pk filt ->
+    let knightsPlayed =
+          length
+            [ cf
+            | cf <- Map.findWithDefault [] pk (historyOfThisTurn g).playedBy
+            , cf.cfKind == Unit
+            , Knight `elem` cf.cfTraits
+            ]
+     in if pk == self.controller
+           && filt.cfKind == Unit
+           && Knight `elem` filt.cfTraits
+           && knightsPlayed == 0
+          then -1
+          else 0
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+steelBehemoth :: CardDef Unit
+steelBehemoth = unitCard "the-ruinous-hordes-085" "Steel Behemoth" do
+  race Empire
+  cost 6
+  loyalty 4
+  power 4
+  hitPoints 4
+  trait WarMachine
+  battlefieldOnly
+  body
+    "Battlefield only. Toughness X. X is the number of all opponent's units \
+    \participating in combat."
+  selfToughness \g u -> case g.combat of
+    Just cs ->
+      length
+        [ k
+        | k <- cs.attackers <> cs.defenders
+        , maybe False (\v -> v.controller == u.controller.next) (findUnit k g)
+        ]
+    Nothing -> 0
+
+-- Faith and Steel ------------------------------------------------------
+
+theEmperorsStatue :: CardDef Support
+theEmperorsStatue = supportCard "faith-and-steel-103" "The Emperor's Statue" do
+  race Empire
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a non-[Empire] card, sacrifice this card."
+  sacrificeIfControlsOffFaction Empire
+
+ostlandGreatswords :: CardDef Unit
+ostlandGreatswords = unitCard "glory-of-days-past-065" "Ostland Greatswords" do
+  race Empire
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Warrior
+  raider 2
+  body "Raider 2."

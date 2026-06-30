@@ -463,6 +463,12 @@ data Message where
     -- defender keys. For each side, every key still in play whose
     -- 'CardDef' carries 'Scout' forces one random discard from the
     -- opposing player's hand.
+  FireRaiderResources :: PlayerKey -> [UnitKey] -> Message
+    -- ^ Post-damage Raider payoff, deferred like 'FireScoutDiscards'
+    -- so "survived combat" is evaluated against post-apply state.
+    -- Args: @attacker@ and the original attacker keys. The attacking
+    -- player gains resources equal to the summed 'Raider' X of every
+    -- attacker key still in play.
   EndCombat :: Message
     -- ^ Combat ends; clear 'Game.combat'.
 

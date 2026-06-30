@@ -1995,6 +1995,14 @@ instance Run Game where
         send $ DiscardRandomFromHand defender
       replicateM_ (length defenderScouts) $
         send $ DiscardRandomFromHand attacker
+    FireRaiderResources attacker attackerKeys -> do
+      -- Sum Raider X across every attacker still in play (survivors).
+      -- Reading 'g.units' here — not at enqueue time — is what makes
+      -- "survived combat" correct, as with the Scout sweep above.
+      g <- get
+      let raiderOf u = sum [n | Raider n <- unitKeywords u]
+          total = sum $ map raiderOf $ mapMaybe (`findUnit` g) attackerKeys
+      when (total > 0) $ send $ GainResources attacker total
     PutUnitIntoPlay pk cardKey zone -> do
       -- Skip cost; same wiring as 'PlayUnit' but no resource debit and
       -- no Variable-cost gate.
@@ -4007,6 +4015,9 @@ commitPendingCombatDamage = do
           cs.defendingPlayer
           cs.attackers
           cs.defenders
+      -- Raider fires on the same boundary: surviving attackers grant
+      -- their controller resources equal to their combined Raider X.
+      send $ FireRaiderResources cs.attackingPlayer cs.attackers
   where
     commitOne pd = case pd.target of
       PDUnit k -> do
@@ -4369,9 +4380,13 @@ markPlayedLimited cd =
 totalToughness :: Game -> UnitDetails -> Int
 totalToughness g u
   | hasModifier g.modifiers u.key LoseAllToughness = 0
-  | otherwise = printed + aura + supportAura
+  | otherwise = printed + selfBonus + modifierBonus + aura + supportAura
   where
     printed = sum (map asInt (unitKeywords u))
+    selfBonus = (unitExtrasOf u).selfToughnessBonus g u
+    modifierBonus =
+      let mods = fromMaybe [] (Map.lookup (UnitRef u.key) g.modifiers)
+       in sum [n | Modifier (GainToughness n) _ <- mods]
     asInt (Toughness (Fixed n)) = n
     asInt (Toughness Variable) = devsInZone g u
     asInt _ = 0

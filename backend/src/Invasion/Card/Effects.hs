@@ -638,6 +638,11 @@ imposeTargetTax target n = PendingBuff target (TargetTaxBonus n)
 buffCombatDamage :: UnitKey -> Int -> PendingBuff
 buffCombatDamage target n = PendingBuff target (GainCombatDamage n)
 
+-- | "Target unit gains Toughness N." Produces a 'PendingBuff' folded
+-- into 'totalToughness' for the buff's scope (Fearless in Battle).
+buffToughness :: UnitKey -> Int -> PendingBuff
+buffToughness target n = PendingBuff target (GainToughness n)
+
 -- | "Target unit must defend this turn, if able." Animosity,
 -- Alluring Daemonettes.
 mustDefend :: UnitKey -> PendingBuff
@@ -773,6 +778,37 @@ hasEnemySupport g pk = any (\s -> s.controller /= pk) g.supports
 -- | Does the player's deck have at least N cards?
 hasDeckSize :: Int -> Game -> PlayerKey -> Bool
 hasDeckSize n g pk = length (playerOf pk g).deck >= n
+
+-- | "Does this player control any in-play card whose printed races
+-- don't include @r@?" Backs the mono-faction watchtowers (Chill Sea
+-- Watchtower, Outlying Tower), which sacrifice themselves the moment
+-- their controller fields an off-faction card. Neutral cards (no race)
+-- count as off-faction, matching the printed "non-[Race] card" wording.
+controlsNonRaceCard :: Game -> PlayerKey -> Race -> Bool
+controlsNonRaceCard g pk r =
+  has g.units || has g.supports || has g.quests || has g.legends
+  where
+    has
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Bool
+    has = any \x -> x.controller == pk && r `notElem` x.cardDef.races
+
+-- | "Does this player control a faceup non-[Race] unit or support
+-- card?" The narrower cousin of 'controlsNonRaceCard' used by Mob O'
+-- Hutz, whose printed condition only counts units and supports (not
+-- quests/legends). In-play units and supports are always faceup, so no
+-- separate facedown check is needed.
+controlsNonRaceUnitOrSupport :: Game -> PlayerKey -> Race -> Bool
+controlsNonRaceUnitOrSupport g pk r = has g.units || has g.supports
+  where
+    has
+      :: ( HasField "controller" a PlayerKey
+         , HasField "cardDef" a (CardDef k)
+         )
+      => [a] -> Bool
+    has = any \x -> x.controller == pk && r `notElem` x.cardDef.races
 
 -- | Does the player have at least one non-burned development zone
 -- (kingdom or battlefield)?

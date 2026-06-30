@@ -711,3 +711,92 @@ hasAnyDevelopment g =
   let withDev :: [Zone] -> Bool
       withDev zs = any (\z -> case z.developments of Developments n -> n > 0) zs
    in withDev g.player1.capital.zones || withDev g.player2.capital.zones
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+wolfChariot :: CardDef Unit
+wolfChariot = unitCard "oaths-of-vengeance-030" "Wolf Chariot" do
+  race Orc
+  cost 5
+  loyalty 2
+  power 3
+  hitPoints 4
+  traits [Cavalry, Goblin]
+  battlefieldOnly
+  body
+    "Battlefield only. Action: When this unit attacks, sacrifice a unit you control. \
+    \This unit gains {power} equal to the sacrificed unit's loyalty until the end of the phase."
+  onMyAttackDeclared \_owner self _zone _attackers ->
+    sacrificeOwnUnit self.controller "Wolf Chariot: sacrifice a unit you control." \k -> do
+      g <- getGame
+      let loy = maybe 0 (\u -> u.cardDef.loyalty) (findUnit k g)
+      when (loy > 0) $ until EndOfTurn $ buffPower self.key loy
+
+-- Battle for the Old World ---------------------------------------------
+
+mobOHutz :: CardDef Support
+mobOHutz = supportCard "battle-for-the-old-world-043" "Mob O' Hutz" do
+  race Orc
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a faceup non-[Orc] unit or support card, sacrifice this card."
+  sacrificeWhenBoardChanges \g self ->
+    controlsNonRaceUnitOrSupport g self.controller Orc
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+wolfGobbos :: CardDef Unit
+wolfGobbos = unitCard "the-ruinous-hordes-094" "Wolf Gobbos" do
+  race Orc
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Goblin
+  body
+    "Action: When this unit survives an attack on an opponent's zone, sacrifice this unit \
+    \to destroy target unit in that zone."
+  onCombatResolveAsAttacker \_owner self cs -> do
+    g <- getGame
+    when (isJust (findUnit self.key g)) $
+      may self.controller "Wolf Gobbos: sacrifice to destroy a unit in that zone?" do
+        destroyUnit self.key
+        withTarget self.controller
+          (UnitMatching \_pk _g u -> u.zone == cs.targetZone && u.controller /= self.controller)
+          destroyUnit
+
+-- Faith and Steel ------------------------------------------------------
+
+gobboBigBoss :: CardDef Unit
+gobboBigBoss = unitCard "faith-and-steel-111" "Gobbo Big Boss" do
+  race Orc
+  cost 3
+  loyalty 1
+  power 0
+  hitPoints 3
+  trait Goblin
+  body "This unit gains {power} for each attacking or defending [Orc] unit you control."
+  selfPower \g u -> case g.combat of
+    Just cs ->
+      length
+        [ k
+        | k <- cs.attackers <> cs.defenders
+        , Just v <- [findUnit k g]
+        , v.controller == u.controller
+        , Orc `elem` v.cardDef.races
+        ]
+    Nothing -> 0
+
+goblinRaiders :: CardDef Unit
+goblinRaiders = unitCard "oaths-of-vengeance-031" "Goblin Raiders" do
+  race Orc
+  cost 1
+  loyalty 2
+  power 1
+  hitPoints 1
+  trait Goblin
+  battlefieldOnly
+  raider 2
+  body "Battlefield only. Raider 2."

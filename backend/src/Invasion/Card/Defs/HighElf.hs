@@ -360,3 +360,98 @@ chargeOfTheSilverHelms = tacticCard "arcane-fire-109" "Charge of the Silver Helm
     withTarget self.controller ownUnit \k -> do
       until EndOfTurn $ debuffHP k 1
       until EndOfTurn $ buffPower k 3
+
+-- Days of Blood --------------------------------------------------------
+
+greatFireDragon :: CardDef Unit
+greatFireDragon = unitCard "days-of-blood-010" "Great Fire Dragon" do
+  race HighElf
+  cost 5
+  loyalty 2
+  power 3
+  hitPoints 4
+  trait Creature
+  battlefieldOnly
+  body
+    "Battlefield only. Action: When this unit attacks, put 1 resource token on it. \
+    \Then, you may remove X resource tokens from this unit to deal X damage to target \
+    \unit in the attacked zone."
+  onMyAttackDeclared \_owner self zone _attackers -> do
+    push (AdjustUnitTokens self.key 1)
+    g <- getGame
+    let avail = maybe 0 (.tokens) (findUnit self.key g) + 1
+        inZone u = u.zone == zone && u.controller /= self.controller
+        targets = [u | u <- g.units, inZone u]
+    when (avail > 0 && not (null targets)) $
+      may self.controller "Great Fire Dragon: remove resource tokens to deal damage?" do
+        x <- chooseAmount self.controller 1 avail "Remove how many resource tokens?"
+        withTarget self.controller (UnitMatching \_ _ u -> inZone u) \k -> do
+          push (AdjustUnitTokens self.key (negate x))
+          dealDamage k x
+
+-- Oaths of Vengeance ---------------------------------------------------
+
+outlyingTower :: CardDef Support
+outlyingTower = supportCard "oaths-of-vengeance-023" "Outlying Tower" do
+  race HighElf
+  cost 1
+  loyalty 1
+  power 1
+  trait Building
+  body "If you control a non-[High Elf] card, sacrifice this card."
+  sacrificeIfControlsOffFaction HighElf
+
+-- Battle for the Old World ---------------------------------------------
+
+lilea :: CardDef Unit
+lilea = unitCard "battle-for-the-old-world-050" "Lilea" do
+  unique
+  race HighElf
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 3
+  traits [Elite, Ranger]
+  body
+    "Action: When this unit attacks, put 1 resource token on it. Then, deal X indirect \
+    \damage to target opponent. X is the number of resource tokens on this unit."
+  onMyAttackDeclared \_owner self _zone _attackers -> do
+    push (AdjustUnitTokens self.key 1)
+    g <- getGame
+    let x = maybe 0 (.tokens) (findUnit self.key g) + 1
+    when (x > 0) $ indirectDamage self.controller.next x
+
+-- Glory of Days Past ---------------------------------------------------
+
+masterOfQhaysh :: CardDef Unit
+masterOfQhaysh = unitCard "glory-of-days-past-067" "Master of Qhaysh" do
+  race HighElf
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Mage
+  body
+    "Action: When this unit survives an attack on an opponent's zone, put 1 resource \
+    \token on a card with at least 1 resource token on it."
+  onCombatResolveAsAttacker \_owner self _cs -> do
+    g <- getGame
+    when (isJust (findUnit self.key g)) $
+      withTarget self.controller (UnitMatching \_pk _g u -> u.tokens >= 1) \k ->
+        push (AdjustUnitTokens k 1)
+
+-- The Ruinous Hordes ---------------------------------------------------
+
+avelornSojourner :: CardDef Unit
+avelornSojourner = unitCard "the-ruinous-hordes-091" "Avelorn Sojourner" do
+  race HighElf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  trait Mage
+  body "While this unit is questing, raise the cost of each tactic played by an opponent by 1."
+  unitCostAdjust \_g self pk filt ->
+    if self.zone == QuestZone && pk /= self.controller && filt.cfKind == Tactic
+      then 1
+      else 0
