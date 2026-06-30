@@ -455,3 +455,118 @@ avelornSojourner = unitCard "the-ruinous-hordes-091" "Avelorn Sojourner" do
     if self.zone == QuestZone && pk /= self.controller && filt.cfKind == Tactic
       then 1
       else 0
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+lothernSeaMaster :: CardDef Unit
+lothernSeaMaster = unitCard "rising-dawn-009" "Lothern Sea Master" do
+  race HighElf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 3
+  traits [Warrior, Elite]
+  body
+    "Battlefield. This unit enters play with 3 resource tokens on it. Action: Deal X indirect \
+    \damage to target opponent. X is the number of resource tokens on this unit. Then, remove \
+    \1 resource token from this card. (Limit once per turn)."
+  onEnterPlay \_owner self -> push (AdjustUnitTokens self.key 3)
+  battlefield $ action "Bombard" 0 \usage -> do
+    g <- getGame
+    whenJust (findUnit usage.self.key g) \u -> do
+      let used =
+            any (\m -> m.details == ActionUsedThisTurn)
+              (Map.findWithDefault [] (UnitRef u.key) g.modifiers)
+      when (u.tokens > 0 && not used) do
+        until EndOfTurn (PendingBuff u.key ActionUsedThisTurn)
+        indirectDamage usage.user.next u.tokens
+        push (AdjustUnitTokens u.key (-1))
+
+-- Bloodquest: The Accursed Dead -----------------------------------------
+
+lionStandard :: CardDef Unit
+lionStandard = unitCard "the-accursed-dead-045" "Lion Standard" do
+  race HighElf
+  cost 0
+  loyalty 2
+  power 0
+  hitPoints 2
+  body "Action: Spend 1 resource to have target unit get +1 hit point until the end of the turn."
+  action "Bolster" 1 \usage ->
+    withTarget usage.user AnyUnit \k -> until EndOfTurn $ buffHP k 1
+
+-- Bloodquest: Portent of Doom -------------------------------------------
+
+princeAlthran :: CardDef Unit
+princeAlthran = unitCard "portent-of-doom-089" "Prince Althran" do
+  hero
+  trait Noble
+  race HighElf
+  cost 3
+  loyalty 3
+  power 2
+  hitPoints 3
+  body
+    "Limit one Hero per zone. This unit enters play with 1 resource token on it. Action: \
+    \Remove 1 resource token from a unit you control to have this unit gain {power} until the \
+    \end of the turn."
+  onEnterPlay \_owner self -> push (AdjustUnitTokens self.key 1)
+  action "Rally" 0 \usage ->
+    withTarget usage.user (UnitMatching \pk _g u -> u.controller == pk && u.tokens > 0) \k -> do
+      push (AdjustUnitTokens k (-1))
+      until EndOfTurn $ buffPower usage.self.key 1
+
+-- Bloodquest: Shield of the Gods ----------------------------------------
+
+ellyrianElite :: CardDef Unit
+ellyrianElite = unitCard "shield-of-the-gods-109" "Ellyrian Elite" do
+  race HighElf
+  cost 4
+  loyalty 3
+  power 2
+  hitPoints 4
+  traits [Cavalry, Elite]
+  scout
+  body "Scout."
+
+-- The Capital Cycle ----------------------------------------------------
+
+princeOfCaledor :: CardDef Unit
+princeOfCaledor = unitCard "the-inevitable-city-004" "Prince of Caledor" do
+  race HighElf
+  cost 8
+  loyalty 3
+  power 4
+  hitPoints 4
+  trait Noble
+  body "Lower the cost to play this unit by 1 for each damaged unit you control."
+  selfCostAdjust \g pk ->
+    negate (length [u | u <- g.units, u.controller == pk, isDamaged u])
+
+straitsOfLothern :: CardDef Support
+straitsOfLothern = supportCard "realm-of-the-phoenix-king-030" "Straits of Lothern" do
+  race HighElf
+  cost 3
+  loyalty 3
+  power 1
+  trait Location
+  body "Kingdom. This card gains {power} equal to the number of units in this zone."
+  zonePowerAura \g s zone ->
+    if s.zone == zone
+      then length [u | u <- g.units, u.controller == s.controller, u.zone == zone]
+      else 0
+
+inflame :: CardDef Tactic
+inflame = tacticCard "realm-of-the-phoenix-king-033" "Inflame" do
+  race HighElf
+  cost 1
+  loyalty 3
+  trait Spell
+  body
+    "Action: Discard a card from your hand with X loyalty to have target unit gain X \
+    \power until the end of the turn."
+  playableWhen \g pk -> not (null (playerOf pk g).hand) && hasTarget AnyUnit g pk
+  whenResolved \self ->
+    withTarget self.controller AnyUnit \k ->
+      discardForLoyalty self.controller \x ->
+        when (x > 0) $ until EndOfTurn $ buffPower k x

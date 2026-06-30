@@ -715,3 +715,140 @@ veteranThunderers = unitCard "days-of-blood-005" "Veteran Thunderers" do
   trait Warrior
   raider 2
   body "Raider 2."
+
+-- Bloodquest: Shield of the Gods ----------------------------------------
+
+dwarfAdventurer :: CardDef Unit
+dwarfAdventurer = unitCard "shield-of-the-gods-103" "Dwarf Adventurer" do
+  race Dwarf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 2
+  body "Quest. While this unit is questing, opponents' units cost 1 additional resource to play."
+  unitCostAdjust \_g self pk filt ->
+    if self.zone == QuestZone && pk /= self.controller && filt.cfKind == Unit
+      then 1
+      else 0
+
+hospitableCave :: CardDef Support
+hospitableCave = supportCard "shield-of-the-gods-104" "Hospitable Cave" do
+  race Dwarf
+  cost 2
+  loyalty 1
+  power 1
+  body "Quest. Each of your questing units gain Toughness 3."
+  supportToughnessAura \_g self u ->
+    if self.zone == QuestZone && u.controller == self.controller && u.zone == QuestZone
+      then 3
+      else 0
+
+-- The Capital Cycle ----------------------------------------------------
+
+runeblades :: CardDef Unit
+runeblades = unitCard "karaz-a-karak-064" "Runeblades" do
+  race Dwarf
+  cost 4
+  loyalty 2
+  power 0
+  hitPoints 3
+  traits [Warrior, Elite]
+  body
+    "This unit deals +X damage in combat while attacking. X is the highest \
+    \loyalty of a {dwarf} card you control."
+  combatPower \g u ->
+    if unitIsAttacking g u then highestLoyaltyControlled Dwarf g u.controller else 0
+
+mountainSentry :: CardDef Unit
+mountainSentry = unitCard "karaz-a-karak-061" "Mountain Sentry" do
+  race Dwarf
+  cost 1
+  loyalty 2
+  power 0
+  hitPoints 1
+  trait Musician
+  body "Ranger units in this zone get +2 hit points."
+  hpAura \_g self u ->
+    if u.zone == self.zone && u.controller == self.controller && Ranger `elem` u.cardDef.traits
+      then 2
+      else 0
+
+queenHelga :: CardDef Unit
+queenHelga = unitCard "karaz-a-karak-062" "Queen Helga" do
+  race Dwarf
+  cost 5
+  loyalty 3
+  power 1
+  hitPoints 3
+  traits [Hero, Noble]
+  limitOneHeroPerZone
+  toughness 2
+  body
+    "Limit one Hero per zone. Toughness 2. Action: When a Hero unit enters play under \
+    \your control, put a {dwarf} unit with printed cost 3 or lower into play in the same \
+    \zone from your hand."
+  onFriendlyUnitEnterPlay \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \entered ->
+      when (Hero `elem` entered.cardDef.traits) do
+        let pk = self.controller
+        me <- playerOf pk <$> getGame
+        let isCand c = case c.def of
+              UnitCardDef cd -> Dwarf `elem` cd.races && someCardCost c.def <= 3
+              _ -> False
+            cands = filter isCand me.hand
+        chooseFromCards pk 0 1 cands
+          "Queen Helga: put a Dwarf unit (cost 3 or lower) into play in that zone." \chosen ->
+          for_ chosen \c -> putUnitIntoPlay pk FromHand c.key entered.zone
+
+guildOfEngineers :: CardDef Unit
+guildOfEngineers = unitCard "the-iron-rock-041" "Guild of Engineers" do
+  race Dwarf
+  cost 2
+  loyalty 3
+  power 1
+  hitPoints 1
+  trait Engineer
+  body
+    "Kingdom. Action: When you play an Engineer unit from your hand, gain 1 resource. \
+    \Quest. Action: When you play an Engineer unit from your hand, draw a card."
+  -- Approximation: 'onFriendlyUnitEnterPlay' fires for any Engineer
+  -- unit entering under your control; the printed "from your hand"
+  -- restriction isn't carried on 'UnitEnteredPlay', so put-into-play
+  -- effects also count.
+  -- TODO: tighten to "from your hand" once UnitEnteredPlay carries the
+  -- entry origin (e.g. a PlayUnitOrigin field), so put-into-play /
+  -- relocation entries stop triggering the resource/draw payoff.
+  kingdom $ onFriendlyUnitEnterPlay \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (Engineer `elem` u.cardDef.traits) $ gainResources self.controller 1
+  quest $ onFriendlyUnitEnterPlay \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (Engineer `elem` u.cardDef.traits) $ drawCard self.controller
+
+buildingForWar :: CardDef Quest
+buildingForWar = questCard "karaz-a-karak-080" "Building for War" do
+  race Dwarf
+  cost 0
+  loyalty 3
+  body
+    "Quest. Action: When this card enters play, draw a card. Quest. Action: When you play \
+    \a {dwarf} non-Attachment support card from your hand, gain 1 resource if a unit is \
+    \questing here."
+  onEnterPlay \_owner self -> drawCard self.controller
+  onQuestSupportPayoff Dwarf \self -> gainResources self.controller 1
+
+leaveNoTrace :: CardDef Tactic
+leaveNoTrace = tacticCard "karaz-a-karak-070" "Leave No Trace" do
+  race Dwarf
+  cost 1
+  loyalty 3
+  body
+    "Action: Discard a card from your hand with X loyalty to deal X damage to target \
+    \defending unit."
+  playableWhen \g pk -> not (null (playerOf pk g).hand) && hasTarget defendingUnit g pk
+  whenResolved \self ->
+    withTarget self.controller defendingUnit \k ->
+      discardForLoyalty self.controller \x -> when (x > 0) $ dealDamage k x

@@ -12,7 +12,7 @@ import Invasion.Card.Effects
 import Invasion.Card.Triggers
 import Invasion.Card.Types
 import Invasion.CardDef
-import Invasion.Entity (SupportDetails (..), TacticContext (..), UnitDetails (..))
+import Invasion.Entity (QuestDetails (..), SupportDetails (..), TacticContext (..), UnitDetails (..))
 import Invasion.Game hiding (battlefield)
 import Invasion.Message
 import Invasion.Modifier
@@ -470,3 +470,169 @@ coldOneChampion = unitCard "the-ruinous-hordes-096" "Cold One Champion" do
   raider 2
   scout
   body "Raider 2. Scout."
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+towerOfOblivion :: CardDef Support
+towerOfOblivion = supportCard "rising-dawn-015" "Tower of Oblivion" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 1
+  body
+    "Quest. Action: Discard the top card of your deck to have target unit lose {power} until \
+    \the end of the turn. Then, put 1 resource token on this card. (Limit once per turn)."
+  quest $ action "Tower of Oblivion" 0 \usage -> do
+    g <- getGame
+    let used =
+          any (\m -> m.details == ActionUsedThisTurn)
+            (Map.findWithDefault [] (UnitRef usage.self.key) g.modifiers)
+    unless used $
+      withTarget usage.user AnyUnit \k -> do
+        until EndOfTurn (PendingBuff usage.self.key ActionUsedThisTurn)
+        millFromDeck usage.user 1
+        until EndOfTurn $ buffPower k (-1)
+        adjustSupportTokens usage.self.key 1
+
+-- Bloodquest: The Accursed Dead -----------------------------------------
+
+treasureThieves :: CardDef Unit
+treasureThieves = unitCard "the-accursed-dead-053" "Treasure Thieves" do
+  race DarkElf
+  cost 3
+  loyalty 1
+  power 1
+  hitPoints 2
+  trait Sorceror
+  body
+    "Action: When this unit enters play, discard the top card of your deck to discard the top \
+    \card of target opponent's deck. Gain resources equal to the difference in printed cost \
+    \between the discarded cards."
+  onEnterPlay \owner self -> do
+    let pk = self.controller
+        opp = pk.next
+    oppP <- playerOf opp <$> getGame
+    case (owner.deck, oppP.deck) of
+      (mine : _, theirs : _) -> do
+        millFromDeck pk 1
+        millFromDeck opp 1
+        let diff = abs (someCardCost mine.def - someCardCost theirs.def)
+        when (diff > 0) $ gainResources pk diff
+      _ -> pure ()
+
+-- Bloodquest: Vessel of the Winds ---------------------------------------
+
+templeOfSpite :: CardDef Support
+templeOfSpite = supportCard "vessel-of-the-winds-075" "Temple of Spite" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 1
+  body
+    "Quest. Action: Discard the top card of your deck to have target unit get -1 hit point \
+    \until the end of the turn. Then, put 1 resource token on this card. (Limit once per turn.)"
+  quest $ action "Temple of Spite" 0 \usage -> do
+    g <- getGame
+    let used =
+          any (\m -> m.details == ActionUsedThisTurn)
+            (Map.findWithDefault [] (UnitRef usage.self.key) g.modifiers)
+    unless used $
+      withTarget usage.user AnyUnit \k -> do
+        until EndOfTurn (PendingBuff usage.self.key ActionUsedThisTurn)
+        millFromDeck usage.user 1
+        until EndOfTurn $ debuffHP k 1
+        adjustSupportTokens usage.self.key 1
+
+-- Bloodquest: Portent of Doom -------------------------------------------
+
+murderlust :: CardDef Tactic
+murderlust = tacticCard "portent-of-doom-093" "Murderlust" do
+  race DarkElf
+  cost 0
+  loyalty 2
+  body "Action: Sacrifice a unit to restore up to 2 target units."
+  playableWhen \g pk -> any (\u -> u.controller == pk) g.units
+  whenResolved \self ->
+    sacrificeOwnUnit self.controller "Murderlust: sacrifice a unit." \_k -> do
+      corrupted <- unitsMatching self.controller (unitWhere (.corrupted))
+      chooseUpTo self.controller 2 (map (.key) corrupted) (traverse_ (push . CleanseUnit))
+
+-- The Capital Cycle ----------------------------------------------------
+
+harpyAerie :: CardDef Support
+harpyAerie = supportCard "city-of-winter-093" "Harpy Aerie" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 0
+  trait Fortification
+  body
+    "Action: When this zone is attacked, target attacking unit gets -2 hit points \
+    \until the end of the turn."
+  onMyZoneAttacked \_owner self cs ->
+    case cs.attackers of
+      [] -> pure ()
+      _ ->
+        withTarget self.controller
+          (UnitMatching \_ _ u -> u.key `elem` cs.attackers)
+          \k -> until EndOfTurn (debuffHP k 2)
+
+raidingShips :: CardDef Quest
+raidingShips = questCard "city-of-winter-100" "Raiding Ships" do
+  race DarkElf
+  cost 0
+  loyalty 3
+  body
+    "Quest. Action: When this card enters play, draw a card. Quest. Action: When you play \
+    \a {darkelf} non-Attachment support card from your hand, discard a card at random from \
+    \an opponent's hand if a unit is questing here."
+  onEnterPlay \_owner self -> drawCard self.controller
+  onQuestSupportPayoff DarkElf \self -> discardRandom self.controller.next
+
+callOfTheKraken :: CardDef Tactic
+callOfTheKraken = tacticCard "city-of-winter-095" "Call of the Kraken" do
+  race DarkElf
+  cost 0
+  loyalty 3
+  body
+    "Action: Discard a card from your hand with X loyalty to put a {darkelf} unit with \
+    \printed cost X or lower into play from your hand."
+  playableWhen \g pk -> not (null (playerOf pk g).hand)
+  whenResolved \self -> do
+    let pk = self.controller
+    discardForLoyalty pk \x -> do
+      me <- playerOf pk <$> getGame
+      let isCand c = case c.def of
+            UnitCardDef cd -> DarkElf `elem` cd.races && someCardCost c.def <= x
+            _ -> False
+          cands = filter isCand me.hand
+      chooseFromCards pk 0 1 cands
+        "Call of the Kraken: put a Dark Elf unit (cost X or lower) into play." \chosen ->
+        for_ chosen \c -> putUnitIntoPlay pk FromHand c.key BattlefieldZone
+
+bannermanOfTheCrag :: CardDef Unit
+bannermanOfTheCrag = unitCard "city-of-winter-087" "Bannerman of the Crag" do
+  race DarkElf
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  trait StandardBearer
+  body "Action: When a unit enters this zone, discard the top card of target player's deck."
+  -- "target player": the opponent, the only meaningful pick.
+  onUnitEnterMyZone \_owner self _uk -> millFromDeck self.controller.next 1
+
+sacrificialPyre :: CardDef Support
+sacrificialPyre = supportCard "the-imperial-throne-115" "Sacrificial Pyre" do
+  race DarkElf
+  cost 2
+  loyalty 2
+  power 0
+  trait Location
+  body "Action: When you sacrifice a unit, corrupt target unit."
+  -- Approximation: fires on any friendly unit leaving play, not only
+  -- sacrifices — 'DepartedUnit' carries no reason field yet.
+  -- TODO: gate on a sacrifice reason once UnitLeftPlay distinguishes
+  -- sacrifice from death / return-to-hand.
+  onFriendlyUnitLeavePlay \_owner self _uk _zone _code ->
+    withTarget self.controller AnyUnit (push . CorruptUnit)

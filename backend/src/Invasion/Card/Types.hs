@@ -112,3 +112,14 @@ someCardCost d = case asFixed d of
       QuestCardDef cd -> cd.cost
       TacticCardDef cd -> cd.cost
       LegendCardDef cd -> cd.cost
+
+-- | The printed loyalty of any card definition. Read by the
+-- "discard a card from your hand with X loyalty …" cards (Storm of
+-- Change, Inflame, Doubling of the Guard) to scale their effect.
+someCardLoyalty :: SomeCardDef -> Int
+someCardLoyalty = \case
+  UnitCardDef cd -> cd.loyalty
+  SupportCardDef cd -> cd.loyalty
+  QuestCardDef cd -> cd.loyalty
+  TacticCardDef cd -> cd.loyalty
+  LegendCardDef cd -> cd.loyalty

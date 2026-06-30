@@ -800,3 +800,117 @@ goblinRaiders = unitCard "oaths-of-vengeance-031" "Goblin Raiders" do
   battlefieldOnly
   raider 2
   body "Battlefield only. Raider 2."
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+orcBully :: CardDef Unit
+orcBully = unitCard "rising-dawn-005" "Orc Bully" do
+  race Orc
+  cost 3
+  loyalty 2
+  power 2
+  hitPoints 2
+  trait Elite
+  body "Forced: When this unit enters play, deal 1 damage to each Goblin unit you control."
+  onEnterPlay \_owner self -> do
+    g <- getGame
+    for_ [u.key | u <- g.units, u.controller == self.controller, Goblin `elem` u.cardDef.traits] \k ->
+      dealDamage k 1
+
+-- Bloodquest: Shield of the Gods ----------------------------------------
+
+manglerSquigs :: CardDef Unit
+manglerSquigs = unitCard "shield-of-the-gods-105" "Mangler Squigs" do
+  race Orc
+  cost 4
+  loyalty 2
+  power 2
+  hitPoints 4
+  trait Creature
+  body
+    "Action: When this unit attacks, reveal the top card of your deck. If the printed cost of \
+    \the revealed card is odd, double this unit's power until the end of the turn. Otherwise, \
+    \this unit takes 2 damage."
+  onMyAttackDeclared \owner self _zone _attackers ->
+    case owner.deck of
+      [] -> pure ()
+      (top : _) -> do
+        g <- getGame
+        if odd (someCardCost top.def)
+          then whenJust (findUnit self.key g) \u ->
+            until EndOfTurn $ buffPower self.key u.effectivePower
+          else dealDamage self.key 2
+
+-- The Capital Cycle ----------------------------------------------------
+
+rugludsArmouredOrcs :: CardDef Unit
+rugludsArmouredOrcs = unitCard "the-iron-rock-045" "Ruglud's Armoured Orcs" do
+  race Orc
+  cost 4
+  loyalty 1
+  power 2
+  hitPoints 2
+  trait Warrior
+  body "Toughness X. X is the highest loyalty of an {orc} card you control."
+  selfToughness \g u -> highestLoyaltyControlled Orc g u.controller
+
+squigLobber :: CardDef Unit
+squigLobber = unitCard "the-iron-rock-044" "Squig Lobber" do
+  race Orc
+  cost 2
+  loyalty 2
+  power 1
+  hitPoints 2
+  trait Siege
+  body
+    "Battlefield. Action: At the beginning of your turn, put a resource token on this \
+    \card. Action: Remove a resource token from this unit to deal 1 indirect damage to \
+    \target opponent."
+  battlefield $ do
+    onMyTurnBegin \_owner self -> push (AdjustUnitTokens self.key 1)
+    action "Lob a squig" 0 \usage -> do
+      g <- getGame
+      whenJust (findUnit usage.self.key g) \u ->
+        when (u.tokens > 0) do
+          push (AdjustUnitTokens u.key (-1))
+          indirectDamage usage.user.next 1
+
+raidingParties :: CardDef Quest
+raidingParties = questCard "the-iron-rock-060" "Raiding Parties" do
+  race Orc
+  cost 0
+  loyalty 3
+  body
+    "Quest. Action: When this card enters play, draw a card. Quest. Action: When you play \
+    \an {orc} non-Attachment support card from your hand, destroy target development if a \
+    \unit is questing here."
+  onEnterPlay \_owner self -> drawCard self.controller
+  onQuestSupportPayoff Orc \self ->
+    withTarget self.controller AnyDevelopmentZone \(owner, zk) ->
+      destroyDevelopment owner zk
+
+snotlingAmbush :: CardDef Tactic
+snotlingAmbush = tacticCard "the-iron-rock-050" "Snotling Ambush" do
+  race Orc
+  cost 2
+  loyalty 3
+  body
+    "Action: Discard a card from your hand with X loyalty to discard X resources from \
+    \target player."
+  -- "target player": the opponent, the only meaningful pick.
+  playableWhen \g pk -> not (null (playerOf pk g).hand)
+  whenResolved \self ->
+    discardForLoyalty self.controller \x ->
+      when (x > 0) $ payResources self.controller.next x
+
+bannaThief :: CardDef Unit
+bannaThief = unitCard "the-iron-rock-042" "Banna Thief" do
+  race Orc
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  traits [Goblin, StandardBearer]
+  body "Action: When a unit enters this zone, target unit gains power until the end of the turn."
+  onUnitEnterMyZone \_owner self _uk ->
+    withTarget self.controller AnyUnit \k -> until EndOfTurn $ buffPower k 1

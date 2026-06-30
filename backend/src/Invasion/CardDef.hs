@@ -107,6 +107,15 @@ data Trait
     -- ^ Dragon creature trait (Chaos Dragon, Great Fire Dragon).
   | WarMachine
     -- ^ War Machine trait (Steel Behemoth, Dead-Eye Cannon Crew).
+  | Musician
+    -- ^ Musician trait (Imperial Drummer, Dragon Caller).
+  | StandardBearer
+    -- ^ Standard Bearer trait (Doom Bearer, Banna Thief, Bannerman of
+    -- the Crag). Distinct from the support-side 'Banner' trait.
+  | Location
+    -- ^ Location support trait (Straits of Lothern, Capital-cycle locations).
+  | Fortification
+    -- ^ Fortification support trait (Harpy Aerie, Wall of Maggots).
   | Epic
     -- ^ Half of the printed "Epic Spell." trait line. Epic spells are
     -- excluded from cost-reduction effects like Runefang of Solland.
@@ -290,6 +299,11 @@ data UnitExtras = UnitExtras
     -- ^ Extra Toughness this in-play unit grants another unit while
     -- both are in play (Big 'Uns: +1 toughness to my damaged units
     -- while it's on the battlefield). Sums across stacked sources.
+  , unitAuraHp :: Game -> InPlay Unit -> InPlay Unit -> Int
+    -- ^ Extra hit points this in-play unit grants another unit while
+    -- both are in play (Mountain Sentry: +2 HP to Rangers in its
+    -- zone). The unit-side mirror of 'supportAuraHP'; folded into the
+    -- target's 'effectiveMaxHP' alongside 'unitAuraToughness'.
   , preDamageRedirect :: Game -> InPlay Unit -> Int -> Maybe PreDamageRedirect
     -- ^ Consulted by the engine's 'DealDamageToUnit' handler BEFORE
     -- the damage lands. Args: game, the unit about to take damage,
@@ -507,6 +521,7 @@ instance HasDefaultExtras Unit where
     , runtimeEffects = \_ _ -> mempty
     , unitCostAdjustment = \_ _ _ _ -> 0
     , unitAuraToughness = \_ _ _ -> 0
+    , unitAuraHp = \_ _ _ -> 0
     , preDamageRedirect = \_ _ _ -> Nothing
     , selfToughnessBonus = \_ _ -> 0
     , selfHPBonus = \_ _ -> 0

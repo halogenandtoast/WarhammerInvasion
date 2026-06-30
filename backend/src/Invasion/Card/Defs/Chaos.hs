@@ -954,10 +954,16 @@ raidingCamps = questCard "the-inevitable-city-020" "Raiding Camps" do
     "Quest. Action: When this card enters play, draw a card. \
     \Quest. Action: When you play a {chaos} non-Attachment support card from your hand, \
     \destroy target support card in a zone with no units if a unit is questing here."
-  -- "When this card enters play, draw a card." The second ability
-  -- needs unit-questing-here tracking and is parked.
   onEnterPlay \_owner self ->
     drawCard self.controller
+  -- "destroy target support card in a zone with no units": pick any
+  -- in-play support whose controller's zone holds no units.
+  onQuestSupportPayoff Chaos \self ->
+    withTarget self.controller
+      ( SupportMatching \_pk g s ->
+          null [u | u <- g.units, u.controller == s.controller, u.zone == s.zone]
+      )
+      destroySupport
 
 -- The Accursed Dead ----------------------------------------------------
 
@@ -1090,3 +1096,151 @@ norseMarauders = unitCard "days-of-blood-016" "Norse Marauders" do
   trait Warrior
   raider 3
   body "Raider 3."
+
+-- Bloodquest: Rising Dawn -----------------------------------------------
+
+boonOfTzeentch :: CardDef Tactic
+boonOfTzeentch = tacticCard "rising-dawn-013" "Boon of Tzeentch" do
+  race Chaos
+  cost 2
+  loyalty 3
+  trait Spell
+  body
+    "Action: Discard the top card of your deck. Gain resources equal to the printed cost of \
+    \the discarded card."
+  whenResolved \self -> do
+    let pk = self.controller
+    me <- playerOf pk <$> getGame
+    case me.deck of
+      [] -> pure ()
+      (top : _) -> do
+        millFromDeck pk 1
+        let c = someCardCost top.def
+        when (c > 0) $ gainResources pk c
+
+-- Bloodquest: Fragments of Power ----------------------------------------
+
+stolenSkin :: CardDef Support
+stolenSkin = supportCard "fragments-of-power-032" "Stolen Skin" do
+  race Chaos
+  cost 0
+  loyalty 2
+  trait Attachment
+  body
+    "Attach to a target [Chaos] unit. Attached unit gains Toughness 1. If attached unit \
+    \survives combat, heal all damage on it."
+  supportToughnessAura \_g self u -> if self.attachedTo == Just u.key then 1 else 0
+  onReceive $ Receive \msg _owner self -> case msg of
+    ResolveCombat ->
+      for_ self.attachedTo \hostKey -> do
+        g <- getGame
+        case g.combat of
+          Just cs
+            | hostKey `elem` (cs.attackers <> cs.defenders) ->
+                whenJust (findUnit hostKey g) \host ->
+                  let Damage d = host.damage in when (d > 0) $ healUnit hostKey d
+          _ -> pure ()
+    _ -> pure ()
+
+-- Bloodquest: The Accursed Dead -----------------------------------------
+
+strickenWarrior :: CardDef Unit
+strickenWarrior = unitCard "the-accursed-dead-051" "Stricken Warrior" do
+  race Chaos
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 4
+  trait Warrior
+  body
+    "Forced: When this unit is opposed in combat, deal 1 damage to each other participating \
+    \unit."
+  onReceive $ Receive \msg _owner self -> case msg of
+    DeclareDefenders ks -> do
+      g <- getGame
+      case g.combat of
+        Just cs
+          | (self.key `elem` cs.attackers && not (null ks)) || self.key `elem` ks ->
+              for_ (filter (/= self.key) (cs.attackers <> ks)) \k -> dealDamage k 1
+        _ -> pure ()
+    _ -> pure ()
+
+-- The Capital Cycle ----------------------------------------------------
+
+savageForsaken :: CardDef Unit
+savageForsaken = unitCard "the-inevitable-city-008" "Savage Forsaken" do
+  race Chaos
+  cost 3
+  loyalty 1
+  power 0
+  hitPoints 2
+  traits [Warrior, Elite]
+  body
+    "This unit deals +X damage in combat while attacking. X is the highest \
+    \loyalty on a {chaos} card you control."
+  combatPower \g u ->
+    if unitIsAttacking g u then highestLoyaltyControlled Chaos g u.controller else 0
+
+theBleedingWall :: CardDef Support
+theBleedingWall = supportCard "the-inevitable-city-011" "The Bleeding Wall" do
+  race Chaos
+  cost 2
+  loyalty 2
+  power 1
+  trait Location
+  body
+    "Action: When a {chaos} unit you control is corrupted, put a resource token on this \
+    \card. Action: Remove 2 resource tokens from this card to destroy target corrupted unit."
+  onUnitCorrupted \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (u.controller == self.controller && Chaos `elem` u.cardDef.races) $
+        adjustSupportTokens self.key 1
+  action "Bleed the corrupted" 0 \usage -> do
+    g <- getGame
+    whenJust (findSupport usage.self.key g) \s ->
+      when (s.tokens >= 2 && any (.corrupted) g.units) do
+        adjustSupportTokens usage.self.key (-2)
+        withTarget usage.user (UnitMatching \_ _ u -> u.corrupted) destroyUnit
+
+beastmanShaman :: CardDef Unit
+beastmanShaman = unitCard "the-iron-rock-054" "Beastman Shaman" do
+  race Chaos
+  cost 3
+  loyalty 3
+  power 2
+  hitPoints 1
+  trait Sorceror
+  body "Action: When a {chaos} unit you control is corrupted, draw a card."
+  onUnitCorrupted \_owner self uk -> do
+    g <- getGame
+    whenJust (findUnit uk g) \u ->
+      when (u.controller == self.controller && Chaos `elem` u.cardDef.races) $
+        drawCard self.controller
+
+stormOfChange :: CardDef Tactic
+stormOfChange = tacticCard "the-inevitable-city-014" "Storm of Change" do
+  race Chaos
+  cost 3
+  loyalty 2
+  trait Spell
+  body
+    "Action: Discard a card from your hand with X loyalty to deal X damage to each \
+    \corrupted unit."
+  playableWhen \g pk -> not (null (playerOf pk g).hand)
+  whenResolved \self ->
+    discardForLoyalty self.controller \x -> when (x > 0) do
+      g <- getGame
+      for_ [u | u <- g.units, u.corrupted] \u -> dealDamage u.key x
+
+doomBearer :: CardDef Unit
+doomBearer = unitCard "the-inevitable-city-005" "Doom Bearer" do
+  race Chaos
+  cost 2
+  loyalty 1
+  power 0
+  hitPoints 2
+  trait StandardBearer
+  body "Action: When a unit enters this zone, corrupt target unit you control."
+  onUnitEnterMyZone \_owner self _uk ->
+    withTarget self.controller ownUnit (push . CorruptUnit)

@@ -477,6 +477,23 @@ chooseFromCards pk minN maxN cards desc k = do
         _ -> []
   k chosen
 
+-- | "Discard a card from your hand with X loyalty to …" Prompts the
+-- player to discard exactly one card from hand, then runs the body
+-- with that card's printed loyalty as X. The whole-line idiom shared
+-- by Storm of Change, Inflame, Snotling Ambush, Leave No Trace, Call
+-- of the Kraken, and Doubling of the Guard. Pair with a
+-- 'playableWhen' that requires a non-empty hand.
+discardForLoyalty
+  :: (HasGame m, HasQueue Message m, HasPromptIO m)
+  => PlayerKey -> (Int -> m ()) -> m ()
+discardForLoyalty pk body = do
+  me <- playerOf pk <$> getGame
+  chooseFromCards pk 1 1 me.hand "Discard a card from your hand for its loyalty (X)." \case
+    [c] -> do
+      push (DiscardCardsFromHand pk [c.key])
+      body (someCardLoyalty c.def)
+    _ -> pure ()
+
 -- ---------------------------------------------------------------------
 -- "Then" chains
 --
@@ -883,6 +900,17 @@ unitIsDefending g u = maybe False (elem u.key . (.defenders)) g.combat
 -- support regardless of attachment status.
 allInPlaySupports :: Game -> [SupportDetails]
 allInPlaySupports g = g.supports ++ concatMap (.attachments) g.units
+
+-- | "the highest loyalty on a [Race] card you control." Scans every
+-- in-play unit and support controlled by @pk@ that carries the race
+-- symbol and returns the greatest printed loyalty (0 if none). Shared
+-- by the Capital-cycle "X is the highest loyalty …" cards (Savage
+-- Forsaken, Ruglud's Armoured Orcs, Runeblades, Priests of Sigmar).
+highestLoyaltyControlled :: Race -> Game -> PlayerKey -> Int
+highestLoyaltyControlled r g pk =
+  maximum $ 0 :
+    [u.cardDef.loyalty | u <- g.units, u.controller == pk, r `elem` u.cardDef.races]
+    ++ [s.cardDef.loyalty | s <- allInPlaySupports g, s.controller == pk, r `elem` s.cardDef.races]
 
 -- ---------------------------------------------------------------------
 -- Static-effect builder monad
